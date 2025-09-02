@@ -70,15 +70,6 @@ pip install langgraph-supervisor langchain-google-genai streamlit
 pip install FinanceDataReader pykrx matplotlib pandas
 ```
 
-#### UV 패키지 관리 (선택)
-```bash
-# UV 설치 (이미 설치된 경우 건너뛰기)
-pip install uv
-
-# 프로젝트 의존성 설치
-uv sync
-```
-
 ### 2. API 키 설정
 
 `.env` 파일을 생성하고 다음 API 키를 설정하세요:
@@ -218,16 +209,3 @@ tusimreport/
 2. Fork 후 feature 브랜치 생성
 3. 변경사항 커밋 및 푸시
 4. Pull Request 생성
-
-## 📄 라이선스
-
-이 프로젝트는 MIT 라이선스 하에 배포됩니다. 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.
-
-## ⚠️ 면책 조항
-
-이 시스템이 제공하는 투자 분석 및 추천은 참고용이며, 실제 투자 결정에 대한 책임은 사용자에게 있습니다. 투자에는 항상 리스크가 따르므로 신중한 판단이 필요합니다.
-
----
-
-**💬 문의 및 지원**: 이슈 탭에서 버그 리포트 및 기능 요청을 해주세요.
-**🌟 도움이 되셨다면**: 스타(⭐)를 눌러주시면 큰 힘이 됩니다!
