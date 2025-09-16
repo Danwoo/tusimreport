@@ -1,5 +1,6 @@
 .env
 __pycache__/
-./claude/*
+.claude/
 CLAUDE.md
 *.png
+.vscode/
