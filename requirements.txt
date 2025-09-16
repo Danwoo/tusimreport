@@ -11,14 +11,9 @@ langgraph-supervisor
 openai
 google-generativeai
 
-# MCP (Model Context Protocol)
-mcp
-httpx
-
 # Data Processing
 pandas
 numpy
-yfinance
 
 # Korean Stock Market APIs
 finance-datareader
@@ -29,21 +24,20 @@ lxml
 # Web Scraping & APIs
 requests
 beautifulsoup4
-selenium
 feedparser
-
-# Notion Integration (fallback)
-notion-client
 
 # Settings management
 pydantic-settings
 
 # Visualization
-plotly
 matplotlib
+mplfinance
+plotly
 
-# Additional Data APIs
-zipfile36
+# Technical Analysis
+TA-Lib
+yfinance
 
 # Utilities
 python-dateutil
+tiktoken  # Token counting for context management

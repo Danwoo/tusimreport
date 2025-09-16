@@ -130,9 +130,10 @@ def get_pykrx_market_data(stock_code: str) -> Dict[str, Any]:
                     }
                     break
 
-            # 시가총액 및 기본 지표
+            # 시가총액 및 기본 지표 (날짜 범위로 조회)
+            week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
             fundamental_data = stock.get_market_fundamental(
-                yesterday, yesterday, stock_code
+                week_ago, yesterday, stock_code
             )
 
             result = {
@@ -276,35 +277,43 @@ def get_dart_company_data(stock_code: str) -> Dict[str, Any]:
         if result.get("error"):
             return {"error": f"DART API error: {result['error']}"}
 
-        # 주요 재무 지표 추출
+        # 주요 재무 지표 추출 (current_year 오류시 previous_year 사용)
         financial_summary = {}
+        financial_statements = result.get("financial_statements", {})
 
-        if (
-            result.get("financial_statements", {})
-            .get("current_year", {})
-            .get("financial_data")
-        ):
-            fin_data = result["financial_statements"]["current_year"]["financial_data"]
+        # current_year부터 시도, 없으면 previous_year 사용
+        fin_data = None
+        data_year = "정보없음"
 
-            # 주요 계정 추출 (계정명은 실제 DART API 응답에 따라 조정 필요)
-            key_accounts = [
-                "매출액",
-                "영업이익",
-                "당기순이익",
-                "자산총계",
-                "부채총계",
-                "자본총계",
-                "Sales",
-                "Operating Income",
-                "Net Income",
-                "Total Assets",
-                "Total Liabilities",
-                "Total Equity",
-            ]
+        if financial_statements.get("current_year", {}).get("financial_data"):
+            fin_data = financial_statements["current_year"]["financial_data"]
+            data_year = "당기"
+        elif financial_statements.get("previous_year", {}).get("financial_data"):
+            fin_data = financial_statements["previous_year"]["financial_data"]
+            data_year = "전기"
 
-            for account in key_accounts:
-                if account in fin_data:
-                    financial_summary[account] = fin_data[account]
+        if fin_data:
+            # 실제 DART API 응답 구조에 맞춘 키워드 (수입, 수익 등 포함)
+            key_accounts_mapping = {
+                # 매출액 관련 (실제 DART에서 '수입'으로 나오는 경우가 많음)
+                "revenue": ["수입", "매출", "매출액", "수익", "Sales", "Revenue"],
+                "operating_income": ["영업이익", "Operating Income"],
+                "net_income": ["당기순이익", "순이익", "Net Income"],
+                "total_assets": ["자산총계", "Total Assets"],
+                "total_liabilities": ["부채총계", "Total Liabilities"],
+                "total_equity": ["자본총계", "자본금", "Total Equity"]
+            }
+
+            # 각 지표별로 실제 존재하는 키를 찾아 매핑
+            for metric, possible_keys in key_accounts_mapping.items():
+                for key in possible_keys:
+                    if key in fin_data and fin_data[key] != 0:
+                        financial_summary[metric] = {
+                            "value": fin_data[key],
+                            "source_key": key,
+                            "data_year": data_year
+                        }
+                        break  # 첫 번째로 찾은 유효한 값 사용
 
         # 공시 요약
         disclosure_summary = []
@@ -394,25 +403,50 @@ else:
 korean_financial_react_agent = create_react_agent(
     model=llm,
     tools=financial_tools,
+    name="financial_expert",
     prompt=(
-        "You are a Korean Financial Analysis Agent specializing in Korean stock market data.\n\n"
-        "CAPABILITIES:\n"
-        "- Korean stock data (FinanceDataReader, PyKRX)\n"
-        "- Technical indicators and market fundamentals\n"
-        "- Korean stock price charts with Korean labels\n"
-        "- DART company disclosure and financial statements\n"
-        "- Bank of Korea macro economic indicators\n"
-        "- Sector analysis and peer comparison\n"
-        "- Comprehensive financial analysis combining multiple data sources\n\n"
-        "WORKFLOW:\n"
-        "1. get_korean_stock_data - Basic stock information\n"
-        "2. get_pykrx_market_data - Market fundamentals\n"
-        "3. get_dart_company_data - Official company data\n"
-        "4. get_macro_economic_data - Economic context\n"
-        "5. get_sector_analysis - Industry comparison\n"
-        "6. save_stock_chart - Visual chart creation\n"
-        "7. Comprehensive analysis and insights\n\n"
-        "Always conclude with 'FINANCIAL_ANALYSIS_COMPLETE' when done."
+        "당신은 기업의 재무 상태를 분석하는 재무 분석 전문가입니다. "
+        "투자자들이 쉽게 이해할 수 있도록 회사의 재무 건전성과 성과를 분석해주세요.\n\n"
+
+        "다음 도구들을 사용해서 종합적인 데이터를 수집한 후, 자연스럽고 이해하기 쉽게 설명해주세요:\n"
+        "1. get_korean_stock_data - 기본 주식 데이터 수집\n"
+        "2. get_pykrx_market_data - 시장 데이터 수집\n"
+        "3. get_dart_company_data - 공식 재무제표 데이터\n"
+        "4. get_macro_economic_data - 경제 환경 파악\n"
+        "5. get_sector_analysis - 동종업계 비교\n"
+        "6. save_stock_chart - 주가 차트 생성\n\n"
+
+        "분석할 때는 다음과 같이 친근하게 설명해주세요:\n\n"
+
+        "1. 이 회사가 어떤 사업을 하는 회사인지 간단히 소개해주세요\n"
+        "   - 주요 사업 영역과 어떻게 돈을 버는지\n"
+        "   - 회사 규모와 시장에서의 위치\n\n"
+
+        "2. 회사의 성장세는 어떤지 알려주세요\n"
+        "   - 매출이나 이익이 늘고 있는지, 줄고 있는지\n"
+        "   - 최근 몇 년간의 추세를 쉽게 설명해주세요\n"
+        "   - 같은 업종 다른 회사들과 비교했을 때는 어떤지\n\n"
+
+        "3. 회사의 재무 건전성은 어떤지 평가해주세요\n"
+        "   - 빚이 너무 많지는 않은지\n"
+        "   - 현금 보유 상황은 어떤지\n"
+        "   - 앞으로도 안정적으로 사업을 이어갈 수 있을지\n\n"
+
+        "4. 투자자 관점에서 이 회사의 매력도를 설명해주세요\n"
+        "   - 주가가 기업 가치 대비 적정한지\n"
+        "   - 배당은 얼마나 주는지\n"
+        "   - 투자할 때 어떤 점들을 고려해야 하는지\n\n"
+
+        "5. 주의해서 봐야 할 위험 요소가 있다면 알려주세요\n"
+        "   - 재무적으로 취약한 부분이 있는지\n"
+        "   - 앞으로 어떤 변화를 주의 깊게 봐야 하는지\n\n"
+
+        "전문 용어를 사용할 때는 간단한 설명을 함께 해주시고, "
+        "숫자를 제시할 때는 그것이 좋은 건지 나쁜 건지, 평균적인 수준인지 함께 설명해주세요. "
+        "마치 친구가 투자 조언을 해주듯이 따뜻하고 이해하기 쉬운 톤으로 작성해주세요.\n\n"
+
+        "참고: 이 분석은 재무 참고자료이며 투자 추천이 아닙니다. 객관적인 정보 제공을 목적으로 합니다.\n\n"
+        "🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 'FINANCIAL_ANALYSIS_COMPLETE'라고 정확히 적어주세요. 이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
     ),
 )
 

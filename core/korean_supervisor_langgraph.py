@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+"""
+Korean Stock Analysis Supervisor - LangGraph 기반
+7개 전문가 에이전트를 통합하는 Supervisor 워크플로우
+"""
+
 import logging
 from datetime import datetime
 from typing import Dict, Any
@@ -5,13 +11,18 @@ from typing import Dict, Any
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph_supervisor import create_supervisor
-from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage
 
 from config.settings import get_llm_model
-from agents.korean_financial_react_agent import financial_tools
-from agents.korean_sentiment_react_agent import sentiment_tools
-from agents.korean_report_react_agent import report_tools
+
+# Import existing agents from agents folder
+from agents.korean_context_agent import create_context_agent
+from agents.korean_sentiment_agent import create_sentiment_agent
+from agents.korean_financial_react_agent import korean_financial_react_agent
+from agents.korean_advanced_technical_agent import create_advanced_technical_agent
+from agents.korean_institutional_trading_agent import create_institutional_trading_agent
+from agents.korean_comparative_agent import create_comparative_agent
+from agents.korean_esg_analysis_agent import create_esg_agent
 
 logger = logging.getLogger(__name__)
 
@@ -22,184 +33,251 @@ logger = logging.getLogger(__name__)
 def get_supervisor_llm():
     """Supervisor용 LLM 설정"""
     provider, model_name, api_key = get_llm_model()
-    
     if provider == "gemini":
-        return ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=0.1,
-            google_api_key=api_key
-        )
+        return ChatGoogleGenerativeAI(model=model_name, temperature=0.1, google_api_key=api_key)
     else:
-        return ChatOpenAI(
-            model=model_name,
-            temperature=0.1,
-            api_key=api_key
-        )
+        return ChatOpenAI(model=model_name, temperature=0.1, api_key=api_key)
 
 # ====================
-# 전문 에이전트 생성 
+# 전문 에이전트 생성 (총 7개)
 # ====================
 
-def create_korean_financial_agent():
-    """한국 재무 분석 ReAct 에이전트 생성"""
-    llm = get_supervisor_llm()
-    
-    return create_react_agent(
-        model=llm,
-        tools=financial_tools,
-        name="financial_expert",
-        prompt=(
-            "You are a Korean Financial Analysis Expert specializing in Korean stock market data.\n\n"
-            "CAPABILITIES:\n"
-            "- Korean stock data (FinanceDataReader, PyKRX)\n"
-            "- Technical indicators and market fundamentals\n" 
-            "- Korean stock price charts with Korean labels\n"
-            "- DART company disclosure and financial statements\n"
-            "- Bank of Korea macro economic indicators\n"
-            "- Sector analysis and peer comparison\n\n"
-            "MANDATORY WORKFLOW (YOU MUST COMPLETE ALL STEPS):\n"
-            "1. get_korean_stock_data - Basic stock information\n"
-            "2. get_pykrx_market_data - Market fundamentals\n"
-            "3. save_stock_chart - REQUIRED: Create visual stock chart (MUST DO THIS)\n"
-            "4. get_dart_company_data - Official company data\n"
-            "5. get_macro_economic_data - Economic context\n"
-            "6. get_sector_analysis - Industry comparison\n"
-            "7. Comprehensive analysis and insights\n\n"
-            "CRITICAL INSTRUCTIONS:\n"
-            "- YOU MUST USE save_stock_chart TOOL to create visual chart - THIS IS MANDATORY\n"
-            "- Perform comprehensive financial analysis using ALL available tools in order\n"
-            "- Chart creation is REQUIRED for every analysis - do not skip this step\n"
-            "- Provide DEEP INSIGHTS and PROFESSIONAL ANALYSIS, not just data listing\n"
-            "- Connect technical indicators to market trends and future prospects\n"
-            "- Include specific price targets and technical resistance/support levels\n"
-            "- Explain what the data means for investors and trading strategies\n"
-            "- Always conclude analysis with 'FINANCIAL_ANALYSIS_COMPLETE' when done\n"
-            "- Focus on actionable insights and investment implications\n"
-        )
-    )
+def create_all_agents():
+    """모든 7개의 전문 분석 에이전트를 생성합니다."""
+    try:
+        agents = {
+            "context_expert": create_context_agent(),
+            "sentiment_expert": create_sentiment_agent(),
+            "financial_expert": korean_financial_react_agent,  # 이미 생성된 인스턴스
+            "advanced_technical_expert": create_advanced_technical_agent(),
+            "institutional_trading_expert": create_institutional_trading_agent(),
+            "comparative_expert": create_comparative_agent(),
+            "esg_expert": create_esg_agent(),
+        }
 
-def create_korean_sentiment_agent():
-    """한국 뉴스 감정 분석 ReAct 에이전트 생성"""
-    llm = get_supervisor_llm()
-    
-    return create_react_agent(
-        model=llm,
-        tools=sentiment_tools,
-        name="sentiment_expert", 
-        prompt=(
-            "You are a Korean News Sentiment Analysis Expert.\n\n"
-            "CAPABILITIES:\n"
-            "- Korean news collection from official APIs (Naver, HashScraper)\n"
-            "- Korean language sentiment analysis\n"
-            "- Market sentiment evaluation and keyword extraction\n"
-            "- News impact assessment on stock prices\n\n"
-            "WORKFLOW:\n"
-            "1. collect_korean_news_official_sources - Gather latest news\n"
-            "2. analyze_korean_sentiment - Sentiment analysis with LLM\n"
-            "3. extract_market_keywords - Key themes and topics\n"
-            "4. evaluate_news_impact - Market impact assessment\n\n"
-            "INSTRUCTIONS:\n"
-            "- Use ONLY official news APIs, NO web scraping or dummy data\n"
-            "- Provide COMPREHENSIVE SENTIMENT INSIGHTS with market implications\n"
-            "- Analyze how news sentiment affects stock price movements and investor behavior\n"
-            "- Identify key themes, catalysts, and market drivers from news analysis\n"
-            "- Connect sentiment trends to potential price impacts and trading volumes\n"
-            "- Include sentiment score with confidence intervals and trend direction\n"
-            "- Always conclude analysis with 'SENTIMENT_ANALYSIS_COMPLETE' when done\n"
-            "- Focus on actionable sentiment-based investment insights\n"
-        )
-    )
+        logger.info(f"Successfully created {len(agents)} expert agents: {list(agents.keys())}")
+        return agents
 
-def create_korean_report_agent():
-    """한국 투자 보고서 생성 ReAct 에이전트 생성"""
-    llm = get_supervisor_llm()
-    
-    return create_react_agent(
-        model=llm,
-        tools=report_tools,
-        name="report_expert",
-        prompt=(
-            "You are a Korean Investment Report Generation Expert.\n\n"
-            "CAPABILITIES:\n"
-            "- Comprehensive investment report generation\n"
-            "- Executive summary creation\n"
-            "- Risk assessment and mitigation strategies\n"
-            "- Investment recommendations based on data analysis\n\n"
-            "WORKFLOW:\n"
-            "1. generate_executive_summary - Key findings and recommendations\n"
-            "2. create_detailed_analysis - In-depth analysis report\n"
-            "3. assess_investment_risks - Risk evaluation\n"
-            "4. provide_investment_recommendation - Final investment opinion\n\n"
-            "INSTRUCTIONS:\n"
-            "- Generate comprehensive investment reports in Korean with PROFESSIONAL QUALITY\n"
-            "- Synthesize financial and sentiment data into actionable investment strategies\n"
-            "- Provide specific BUY/HOLD/SELL recommendations with clear rationale\n"
-            "- Include detailed risk-reward analysis and portfolio allocation suggestions\n"
-            "- Set realistic price targets with timeframes (3M, 6M, 12M outlook)\n"
-            "- Address different investor profiles (conservative, moderate, aggressive)\n"
-            "- Always conclude with 'REPORT_GENERATION_COMPLETE' when done\n"
-            "- Focus on creating institutional-quality investment research\n"
-        )
-    )
+    except Exception as e:
+        logger.error(f"Error creating agents: {str(e)}")
+        raise e
+
+# ====================
+# 종합 보고서 생성 함수
+# ====================
+
+def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], stock_code: str, company_name: str) -> str:
+    """Supervisor가 직접 생성하는 종합 투자 참고자료"""
+    try:
+        # 모든 전문가 분석 내용을 하나의 문자열로 결합
+        expert_analyses_text = ""
+        for expert_key, analysis in all_analyses.items():
+            expert_name = {
+                "context_expert": "시장·경제 전문가",
+                "sentiment_expert": "뉴스·여론 전문가",
+                "financial_expert": "재무·공시 전문가",
+                "advanced_technical_expert": "기술적 분석 전문가",
+                "institutional_trading_expert": "수급 분석 전문가",
+                "comparative_expert": "상대 가치 전문가",
+                "esg_expert": "ESG 분석 전문가"
+            }.get(expert_key, expert_key)
+
+            expert_analyses_text += f"\n\n=== {expert_name} 분석 ===\n{analysis}\n"
+
+        # 🔍 전문가 분석 데이터 품질 확인
+        total_analysis_length = sum(len(str(analysis)) for analysis in all_analyses.values())
+        logger.info(f"🔍 전문가 분석 총 길이: {total_analysis_length:,}자")
+        logger.info(f"🔍 참여 전문가 수: {len(all_analyses)}/7")
+
+        # 🚨 데이터 부족 시 조기 반환
+        if len(all_analyses) < 4:
+            logger.warning(f"⚠️ 전문가 분석 부족: {len(all_analyses)}/7")
+            return f"## 분석 데이터 부족\n\n{len(all_analyses)}/7개 전문가 분석만 완료되어 종합 보고서 생성이 제한됩니다."
+
+        if total_analysis_length < 1000:
+            logger.warning(f"⚠️ 분석 내용 부족: {total_analysis_length}자")
+            return f"## 분석 내용 부족\n\n전문가 분석 내용이 {total_analysis_length}자로 부족하여 종합 보고서 생성이 어렵습니다."
+
+        report_prompt = f"""
+🎯 당신은 **대한민국 최고 증권사의 Chief Investment Research Director**로서, {len(all_analyses)}개 전문가의 심층 분석을 바탕으로 기관투자자급 투자 리서치 보고서를 작성해야 합니다.
+
+📊 **분석 대상**: {stock_code} ({company_name})
+📈 **전문가 분석 총량**: {total_analysis_length:,}자
+
+🔍 **전문가 팀 분석 결과:**
+{expert_analyses_text}
+
+🏆 **증권사 Chief Analyst 급 보고서 작성 가이드:**
+
+**📚 스타일 가이드:**
+- **투자 스토리텔링**: 단순 나열이 아닌 설득력 있는 투자 내러티브 구성
+- **차별화된 관점**: 시장 컨센서스를 뛰어넘는 독창적 인사이트 제시
+- **실용적 가치**: 실제 투자 결정에 도움되는 구체적이고 실행 가능한 가이드
+- **자연스러운 흐름**: 딱딱한 보고서가 아닌 읽기 편한 대화체로 작성
+- **핵심 메시지 우선**: 가장 중요한 투자 포인트를 명확히 부각
+
+**🎯 필수 작성 요구사항:**
+- **길이**: 최소 5,000자 이상의 심층 분석
+- **구조**: 투자 스토리 중심의 자연스러운 흐름
+- **통찰력**: 7개 전문가 의견을 종합한 독창적 관점
+- **실용성**: 구체적 수치와 실행 가능한 투자 가이드
+- **가독성**: 핵심 메시지가 명확히 전달되는 구성
+
+# 📈 투자 리서치 보고서 - 증권사 Chief Analyst 스타일
+
+## 🎯 Executive Summary (투자 의견 요약)
+**[핵심 투자 논리를 3-4줄로 명확하게 제시]**
+
+## 📊 Investment Thesis (투자 스토리)
+
+### 🔥 핵심 투자 포인트 TOP 3
+**1. [첫 번째 핵심 강점]**: [구체적 근거와 임팩트]
+**2. [두 번째 핵심 강점]**: [구체적 근거와 임팩트]
+**3. [세 번째 핵심 강점]**: [구체적 근거와 임팩트]
+
+### 💡 숨겨진 투자 기회 (Hidden Gems)
+**[시장이 놓치고 있는 독특한 관점이나 기회]**
+
+## 🏢 기업 심층 분석
+
+### 재무 건전성 & 성장성
+**[재무 전문가 분석을 바탕으로 한 핵심 인사이트]**
+
+### 경쟁력 & 시장 포지션
+**[상대가치 및 업계 분석 기반 차별화 요소]**
+
+## 📈 시장 환경 & 타이밍
+
+### 거시경제 환경 영향
+**[거시경제 요인이 해당 기업에 미치는 구체적 영향]**
+
+### 기술적 분석 & 진입 타이밍
+**[차트 분석 기반 최적 진입 시점 가이드]**
+
+### 수급 동향 & 시장 심리
+**[기관 수급 및 시장 센티멘트 종합 평가]**
+
+## ⚖️ 리스크 & 기회 분석
+
+### 🚨 주요 리스크 요인
+**[구체적 리스크와 대응 방안]**
+
+### 🎯 업사이드 시나리오
+**[긍정적 시나리오와 확률]**
+
+## 🎪 ESG & 지속가능성 관점
+**[ESG 요소가 기업 가치에 미치는 영향]**
+
+## 🔮 향후 전망 & 모니터링 포인트
+
+### 단기 전망 (3-6개월)
+**[단기 주가 변동 요인과 전망]**
+
+### 중장기 전망 (1-2년)
+**[중장기 성장 드라이버와 목표가]**
+
+### 📊 핵심 모니터링 지표
+**[추적해야 할 핵심 지표들]**
+
+## 💰 밸류에이션 & 투자 가이드
+
+### 적정 주가 밴드
+**[현재 주가 대비 적정 가치 평가]**
+
+### 포트폴리오 관점
+**[포트폴리오 내 적정 비중과 투자 전략]**
+
+---
+
+## ⚠️ Investment Disclaimer
+
+본 리서치 보고서는 공개된 정보와 7개 전문가 분석을 바탕으로 작성된 투자 참고자료입니다.
+
+**주요 유의사항:**
+- 투자 권유나 특정 매매 추천이 아님
+- 투자 결정은 본인의 판단과 책임 하에 수행
+- 시장 상황 변화에 따른 전망 수정 가능
+- 과거 성과가 미래 수익을 보장하지 않음
+
+**Report Completion Signal**: SUPERVISOR_REPORT_GENERATION_COMPLETE
+"""
+
+        # 🤖 Supervisor LLM으로 종합 보고서 생성
+        response = supervisor_llm.invoke(report_prompt)
+        report_content = response.content if hasattr(response, 'content') else str(response)
+
+        # 🔍 생성된 보고서 품질 검증
+        logger.info("🎯 Supervisor가 종합 보고서 생성 완료")
+        logger.info(f"📊 보고서 길이: {len(report_content):,}자")
+
+        # 🚨 품질 검증 - 증권사 급 보고서 기준
+        if len(report_content) < 3000:
+            logger.warning(f"⚠️ 생성된 보고서가 너무 짧습니다: {len(report_content)}자 (목표: 5,000자+)")
+            logger.warning(f"⚠️ 프롬프트 길이: {len(report_prompt):,}자")
+            logger.warning(f"⚠️ 전문가 분석 데이터: {total_analysis_length:,}자")
+        elif len(report_content) < 5000:
+            logger.info(f"📊 중급 보고서 생성: {len(report_content):,}자 (목표: 5,000자+)")
+        else:
+            logger.info(f"🏆 증권사 급 고품질 보고서 생성 완료: {len(report_content):,}자")
+
+        return report_content
+
+    except Exception as e:
+        logger.error(f"종합 보고서 생성 오류: {str(e)}")
+        return f"## 종합 보고서 생성 오류\n\n보고서 생성 중 오류가 발생했습니다: {str(e)}"
 
 # ====================
 # SUPERVISOR 생성
 # ====================
 
 def create_korean_supervisor():
-    """한국 주식 분석 Supervisor 워크플로우 생성 (공식 create_supervisor 사용)"""
+    """7개 전문가 에이전트 + Supervisor 종합 보고서 생성 워크플로우"""
     try:
-        logger.info("Creating Korean Stock Analysis Supervisor with official create_supervisor()")
-        
-        # Supervisor LLM
+        logger.info("Creating Korean Stock Analysis Supervisor with 7 expert agents.")
         supervisor_llm = get_supervisor_llm()
-        
-        # 전문 에이전트들 생성
-        financial_agent = create_korean_financial_agent()
-        sentiment_agent = create_korean_sentiment_agent()
-        report_agent = create_korean_report_agent()
-        
-        # Supervisor 생성 (공식 create_supervisor 사용)
-        workflow = create_supervisor(
-            agents=[financial_agent, sentiment_agent, report_agent],
-            model=supervisor_llm,
-            prompt=(
-                "You are a Korean Stock Analysis Supervisor managing three specialized experts.\n\n"
-                "WORKFLOW SEQUENCE:\n"
-                "1. FINANCIAL EXPERT (financial_expert): Collects Korean stock data, technical analysis, charts\n"
-                "2. SENTIMENT EXPERT (sentiment_expert): Analyzes Korean news sentiment from official APIs\n"
-                "3. REPORT EXPERT (report_expert): Generates comprehensive investment reports\n\n"
-                "ROUTING RULES:\n"
-                "- Start with financial_expert for basic stock data collection\n"
-                "- Move to sentiment_expert after financial analysis is complete\n"
-                "- Move to report_expert after both financial and sentiment analyses are complete\n"
-                "- Each agent will conclude with 'ANALYSIS_COMPLETE' when finished\n\n"
-                "FINAL SYNTHESIS INSTRUCTIONS:\n"
-                "After all three agents complete their analysis, you MUST provide a comprehensive synthesis that:\n"
-                "1. **INTEGRATES** all findings from financial, sentiment, and report analyses\n"
-                "2. **IDENTIFIES KEY INSIGHTS** by connecting financial metrics with market sentiment\n"
-                "3. **PROVIDES SPECIFIC INVESTMENT RECOMMENDATION** with clear reasoning\n"
-                "4. **HIGHLIGHTS RISKS AND OPPORTUNITIES** based on combined analysis\n"
-                "5. **GIVES CONCRETE PRICE TARGETS** and timeline expectations\n"
-                "\n"
-                "Your final response should be a cohesive investment thesis that demonstrates:\n"
-                "- How technical indicators align with sentiment trends\n"
-                "- What the news sentiment reveals about future performance\n"
-                "- Specific actionable insights beyond simple data listing\n"
-                "- Professional investment recommendation with confidence level\n"
-                "\n"
-                "Format your final synthesis in Korean with clear sections:\n"
-                "🎯 **핵심 투자 포인트**\n"
-                "📊 **재무-감정 분석 종합**\n"
-                "⚠️ **주요 리스크 요인**\n"
-                "🚀 **투자 기회 및 전략**\n"
-                "💰 **목표 주가 및 투자 의견**\n"
-            )
+        all_agents = create_all_agents()
+
+        supervisor_prompt = (
+            """🎯 MISSION: You are the Chief Investment Research Director.
+
+## 📋 EXECUTION SEQUENCE (7 EXPERT AGENTS):
+1️⃣ context_expert → "MARKET_CONTEXT_ANALYSIS_COMPLETE"
+2️⃣ sentiment_expert → "SENTIMENT_ANALYSIS_COMPLETE"
+3️⃣ financial_expert → "FINANCIAL_ANALYSIS_COMPLETE"
+4️⃣ advanced_technical_expert → "ADVANCED_TECHNICAL_ANALYSIS_COMPLETE"
+5️⃣ institutional_trading_expert → "INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE"
+6️⃣ comparative_expert → "COMPARATIVE_ANALYSIS_COMPLETE"
+7️⃣ esg_expert → "ESG_ANALYSIS_COMPLETE"
+
+## 🎯 NEW ARCHITECTURE:
+- Execute 7 specialized expert agents sequentially
+- Collect all expert analyses
+- Supervisor will generate final comprehensive report
+- NO separate report_expert agent needed
+
+## ✅ SUCCESS CRITERIA:
+- All 7 expert completion signals received
+- Expert analyses collected and ready for final report
+- System ready for supervisor report generation
+
+Execute all 7 expert agents and signal completion."""
         )
-        
-        logger.info("Korean Stock Analysis Supervisor created successfully")
+
+        # 7개 전문가 에이전트만 확인 및 로깅
+        logger.info(f"Available agents: {list(all_agents.keys())}")
+        if len(all_agents) != 7:
+            logger.error(f"Expected 7 agents, but got {len(all_agents)}: {list(all_agents.keys())}")
+            raise ValueError("All 7 expert agents must be created")
+
+        workflow = create_supervisor(
+            agents=list(all_agents.values()),
+            model=supervisor_llm,
+            prompt=supervisor_prompt,
+        )
+
+        logger.info("Korean Stock Analysis Supervisor with 7 expert agents created successfully.")
         return workflow.compile()
-        
+
     except Exception as e:
         logger.error(f"Error creating Korean supervisor: {str(e)}")
         raise e
@@ -208,110 +286,201 @@ def create_korean_supervisor():
 korean_supervisor_graph = create_korean_supervisor()
 
 # ====================
+# 진행 상황 추적
+# ====================
+
+AGENT_STAGES = {
+    "context_expert": ("시장/경제 분석", 0.14),
+    "sentiment_expert": ("뉴스/여론 분석", 0.28),
+    "financial_expert": ("재무 분석", 0.42),
+    "advanced_technical_expert": ("기술적 분석", 0.57),
+    "institutional_trading_expert": ("수급 분석", 0.71),
+    "comparative_expert": ("상대 가치 분석", 0.85),
+    "esg_expert": ("ESG 분석", 0.99),
+    "supervisor": ("종합 보고서 생성", 1.0),
+}
+
+# ====================
 # MAIN INTERFACE
 # ====================
 
-def analyze_korean_stock_with_supervisor(stock_code: str, company_name: str = None) -> dict:
-    """공식 LangGraph Supervisor Pattern으로 한국 주식 분석 실행
-    
+def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_progressive: bool = True):
+    """개선된 LangGraph Supervisor - 7개 전문가 + Supervisor 종합 보고서
+
     Args:
-        stock_code: 한국 종목코드 (005930 등)
-        company_name: 회사명 (선택적)
-    
-    Returns:
-        완전한 분석 결과
+        stock_code: 종목 코드
+        company_name: 회사명 (선택)
+        use_progressive: Progressive Analysis 사용 여부 (기본 True - 컨텍스트 최적화)
     """
     try:
-        logger.info(f"Starting official supervised analysis for {stock_code}")
-        
-        # 분석 요청 메시지
+        logger.info(f"Starting streaming supervised analysis for {stock_code} with 7 expert agents (Progressive: {use_progressive}).")
+
+        # Progressive Analysis 사용시 새로운 엔진 사용
+        if use_progressive:
+            logger.info("✅ Progressive Analysis Engine 사용 - 컨텍스트 최적화 활성")
+            from core.progressive_supervisor import get_progressive_engine
+
+            progressive_engine = get_progressive_engine()
+
+            # Progressive streaming 분석 실행
+            for result in progressive_engine.stream_progressive_analysis(stock_code, company_name):
+                # Progressive 결과를 기존 supervisor 형식으로 변환
+                if result["type"] == "agent_complete":
+                    stage_name, progress = AGENT_STAGES.get(result["agent_name"], (result["agent_name"], 0.5))
+                    yield {
+                        "supervisor": {
+                            "stock_code": stock_code,
+                            "company_name": company_name,
+                            "current_stage": stage_name,
+                            "progress": result["progress"],
+                            "messages": [{"content": result["content"]}],
+                            "executed_agents": result["completed_agents"],
+                            "total_agents": result["total_agents"],
+                            "progressive_mode": True
+                        }
+                    }
+                elif result["type"] == "final_report":
+                    # 최종 보고서 yield
+                    yield {
+                        "supervisor": {
+                            "stock_code": stock_code,
+                            "company_name": company_name,
+                            "current_stage": "종합 보고서 생성",
+                            "progress": 1.0,
+                            "messages": [{"content": result["report"]}],
+                            "executed_agents": result["completed_agents"],
+                            "total_agents": result["total_agents"],
+                            "final_report_generated": True,
+                            "progressive_mode": True,
+                            "context_stats": result.get("context_stats", {})
+                        }
+                    }
+                elif result["type"] in ["agent_error", "system_error", "report_error"]:
+                    yield {"error": {"error": result.get("error", "알 수 없는 오류"), "progressive_mode": True}}
+                else:
+                    # 진행 상황 업데이트
+                    yield {
+                        "supervisor": {
+                            "stock_code": stock_code,
+                            "company_name": company_name,
+                            "current_stage": result.get("message", "분석 진행 중"),
+                            "progress": result.get("progress", 0.0),
+                            "messages": [],
+                            "executed_agents": result.get("completed_agents", 0),
+                            "total_agents": result.get("total_agents", 7),
+                            "progressive_mode": True
+                        }
+                    }
+            return
+
+        # 기존 LangGraph 방식 (레거시 지원)
+        logger.info("⚠️  레거시 LangGraph 방식 사용 - 컨텍스트 제한 위험")
+
+        # 새로운 분석 요청 - 7개 전문가 에이전트 실행
         analysis_request = (
-            f"Perform comprehensive Korean stock analysis for {stock_code} "
-            f"({company_name or 'Company Name Unknown'}). "
-            f"Execute the complete workflow: Financial Analysis → Sentiment Analysis → Investment Report. "
-            f"Use all available tools and provide detailed insights in Korean."
+            f"COMPREHENSIVE STOCK ANALYSIS for {stock_code} ({company_name or 'Unknown'}): "
+            f"Execute all 7 expert agents in sequence: "
+            f"context_expert→sentiment_expert→financial_expert→advanced_technical_expert→"
+            f"institutional_trading_expert→comparative_expert→esg_expert. "
+            f"Collect all expert analyses for comprehensive final report generation."
         )
-        
-        # Supervisor 실행
-        result = korean_supervisor_graph.invoke({
-            "messages": [{
-                "role": "user",
-                "content": analysis_request
-            }]
-        })
-        
-        logger.info(f"Official supervised analysis completed for {stock_code}")
-        return {
-            "stock_code": stock_code,
-            "company_name": company_name,
-            "analysis_result": result,
-            "analysis_timestamp": datetime.now().isoformat(),
-            "supervisor_type": "official_langgraph_supervisor",
-            "data_sources": ["FinanceDataReader", "PyKRX", "DART", "BOK", "Naver API", get_llm_model()[1]]
-        }
-        
-    except Exception as e:
-        logger.error(f"Error in official supervised analysis: {str(e)}")
-        return {
-            "stock_code": stock_code,
-            "company_name": company_name,
-            "error": str(e),
-            "analysis_timestamp": datetime.now().isoformat(),
-            "supervisor_type": "official_langgraph_supervisor_error"
+
+        executed_agents = set()
+        all_analyses = {}  # 전문가 분석 결과 저장
+        expected_agents = {
+            "context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert",
+            "institutional_trading_expert", "comparative_expert", "esg_expert"
         }
 
-def stream_korean_stock_analysis(stock_code: str, company_name: str = None):
-    """공식 LangGraph Supervisor Pattern 스트리밍 실행"""
-    try:
-        logger.info(f"Starting official streaming supervised analysis for {stock_code}")
-        
-        # 분석 요청 메시지
-        analysis_request = (
-            f"Perform comprehensive Korean stock analysis for {stock_code} "
-            f"({company_name or 'Company Name Unknown'}). "
-            f"Execute the complete workflow: Financial Analysis → Sentiment Analysis → Investment Report. "
-            f"Use all available tools and provide detailed insights in Korean."
-        )
-        
-        # 스트리밍 실행
-        for chunk in korean_supervisor_graph.stream({
-            "messages": [{
-                "role": "user",
-                "content": analysis_request
-            }]
-        }):
-            # Streamlit UI를 위한 호환성 래퍼
+        chunk_count = 0
+        max_chunks = 100  # 안전장치
+        supervisor_llm = get_supervisor_llm()  # Supervisor LLM 인스턴스
+
+        for chunk in korean_supervisor_graph.stream(
+            {"messages": [{"role": "user", "content": analysis_request}]}
+        ):
+            chunk_count += 1
+            logger.debug(f"Processing chunk {chunk_count}: {chunk}")
+
+            agent_name = next(iter(chunk)) if chunk else "supervisor"
+            stage_name, progress = AGENT_STAGES.get(agent_name, ("처리 중", 0.0))
+
+            messages = []
+            if agent_name in chunk and chunk[agent_name]:
+                content = chunk[agent_name]
+                if isinstance(content, dict):
+                    messages = content.get("messages", [])
+
+                    # 에이전트 완료 추적 및 분석 결과 저장
+                    for msg in messages:
+                        msg_content = msg.content if hasattr(msg, 'content') else str(msg)
+                        for expected_agent in expected_agents:
+                            completion_signal = {
+                                "context_expert": "MARKET_CONTEXT_ANALYSIS_COMPLETE",
+                                "sentiment_expert": "SENTIMENT_ANALYSIS_COMPLETE",
+                                "financial_expert": "FINANCIAL_ANALYSIS_COMPLETE",
+                                "advanced_technical_expert": "ADVANCED_TECHNICAL_ANALYSIS_COMPLETE",
+                                "institutional_trading_expert": "INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE",
+                                "comparative_expert": "COMPARATIVE_ANALYSIS_COMPLETE",
+                                "esg_expert": "ESG_ANALYSIS_COMPLETE"
+                            }.get(expected_agent, "")
+
+                            if completion_signal and completion_signal in msg_content:
+                                executed_agents.add(expected_agent)
+                                # 분석 내용 저장 (시그널 제거)
+                                analysis_content = msg_content.replace(completion_signal, "").strip()
+                                if len(analysis_content) > 100:  # 의미 있는 내용만
+                                    all_analyses[expected_agent] = analysis_content
+                                logger.info(f"✅ Agent {expected_agent} completed. Total: {len(executed_agents)}/7")
+
             yield {
                 "supervisor": {
                     "stock_code": stock_code,
                     "company_name": company_name,
                     "chunk": chunk,
-                    "current_stage": "supervisor_streaming",
-                    "progress": 0.5,  # 스트리밍 중간 진행률
-                    "messages": chunk.get("messages", []),
-                    "supervisor_type": "official_langgraph_supervisor"
+                    "current_stage": stage_name,
+                    "progress": progress,
+                    "messages": messages,
+                    "executed_agents": len(executed_agents),
+                    "total_agents": len(expected_agents)
                 }
             }
-            
+
+            # 모든 7개 전문가 완료 시 Supervisor가 종합 보고서 생성
+            if len(executed_agents) == len(expected_agents):
+                logger.info("🎉 All 7 expert agents completed! Generating comprehensive report...")
+
+                # Supervisor가 종합 보고서 생성
+                try:
+                    final_report = generate_comprehensive_report(
+                        supervisor_llm, all_analyses, stock_code, company_name
+                    )
+
+                    # 최종 보고서 yield
+                    yield {
+                        "supervisor": {
+                            "stock_code": stock_code,
+                            "company_name": company_name,
+                            "current_stage": "종합 보고서 생성",
+                            "progress": 1.0,
+                            "messages": [{"content": final_report}],
+                            "executed_agents": len(executed_agents),
+                            "total_agents": len(expected_agents),
+                            "final_report_generated": True
+                        }
+                    }
+                    logger.info("🎯 Supervisor comprehensive report generation completed!")
+                except Exception as report_error:
+                    logger.error(f"종합 보고서 생성 오류: {str(report_error)}")
+                    yield {"error": {"error": f"Final report generation failed: {str(report_error)}"}}
+
+                break
+
+            if chunk_count >= max_chunks:
+                logger.error(f"❌ Reached maximum chunks ({max_chunks}). Executed agents: {executed_agents}")
+                yield {"error": {"error": f"Workflow incomplete. Only {len(executed_agents)}/7 agents completed: {executed_agents}"}}
+                break
+
     except Exception as e:
-        logger.error(f"Error in official streaming analysis: {str(e)}")
-        yield {
-            "error": {
-                "stock_code": stock_code,
-                "company_name": company_name,
-                "error": str(e),
-                "current_stage": "supervisor_streaming_error",
-                "analysis_timestamp": datetime.now().isoformat(),
-                "supervisor_type": "official_langgraph_supervisor_error"
-            }
-        }
-
-# ====================
-# 이전 버전 호환성 함수들
-# ====================
-
-# 기존 함수들을 새로운 supervisor로 리다이렉트
-def create_korean_supervisor_graph():
-    """이전 버전 호환성을 위한 래퍼 함수"""
-    logger.warning("create_korean_supervisor_graph() is deprecated. Use create_korean_supervisor() instead.")
-    return korean_supervisor_graph
+        logger.error(f"Error in streaming analysis: {str(e)}")
+        yield {"error": {"error": str(e)}}

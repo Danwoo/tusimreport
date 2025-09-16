@@ -2,626 +2,434 @@ import streamlit as st
 import logging
 from datetime import datetime
 from PIL import Image
+import time
+import requests
 
 from core.korean_supervisor_langgraph import stream_korean_stock_analysis
 from config.settings import settings
 from utils.helpers import setup_logging
+from data.chart_generator import create_stock_chart
 
-# 로깅 설정
-logger = setup_logging(settings.log_level)
+# 로깅 설정 - 파일 로깅 활성화
+logger = setup_logging(settings.log_level, enable_file_logging=True)
 
 # Streamlit 페이지 설정
 st.set_page_config(
-    page_title="🇰🇷 한국 주식 분석 AI 에이전트",
-    page_icon="📈",
+    page_title="📊 AI Stock Analyzer",
+    page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
-# 스타일 설정
-st.markdown(
-    """
+# 간소화된 스타일
+st.markdown("""
 <style>
-    .main-header {
-        text-align: center;
-        color: #1f77b4;
-        margin-bottom: 2rem;
-    }
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border-left: 4px solid #1f77b4;
-        margin-bottom: 1rem;
-    }
-    .status-success { color: #28a745; font-weight: bold; }
-    .status-warning { color: #ffc107; font-weight: bold; }
-    .status-danger { color: #dc3545; font-weight: bold; }
-    .buy { background-color: #d4edda; color: #155724; }
-    .hold { background-color: #fff3cd; color: #856404; }
-    .sell { background-color: #f8d7da; color: #721c24; }
+    .main > div { padding-top: 0.5rem; max-width: 1200px; margin: 0 auto; }
+    .main-header { text-align: center; padding: 1rem 0 0.5rem 0; border-bottom: 1px solid #f1f5f9; margin-bottom: 1rem; }
+    .main-title { font-size: 2rem; font-weight: 700; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .main-subtitle { font-size: 1rem; color: #64748b; margin: 0.3rem 0 0 0; }
+    .input-section { background: white; padding: 1rem; border-radius: 8px; border: 1px solid #e2e8f0;
+                     margin-bottom: 1rem; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+    .input-header { font-size: 1.1rem; font-weight: 600; color: #334155; margin: 0 0 1rem 0; }
+    .popular-stocks { background: #f8fafc; padding: 0.8rem; border-radius: 6px; border: 1px solid #e2e8f0; }
+    .popular-title { font-size: 0.85rem; font-weight: 600; color: #475569; margin: 0 0 0.5rem 0; text-align: center; }
+    .stock-btn { display: block; width: 100%; padding: 0.4rem; margin: 0.2rem 0; background: white;
+                 border: 1px solid #e2e8f0; border-radius: 4px; color: #334155; font-size: 0.75rem;
+                 text-align: center; transition: all 0.15s ease; cursor: pointer; }
+    .stock-btn:hover { background: #f1f5f9; border-color: #cbd5e1; }
+    .progress-section { background: white; padding: 1rem; border-radius: 8px; border: 1px solid #e2e8f0;
+                        margin: 0.8rem 0; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+    .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem; }
+    .progress-title { font-size: 1rem; font-weight: 600; color: #334155; margin: 0; }
+    .progress-percentage { font-size: 1rem; font-weight: 600; color: #667eea; }
+    .progress-bar { width: 100%; height: 6px; background: #f1f5f9; border-radius: 3px; overflow: hidden; margin: 0.3rem 0; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); border-radius: 3px; transition: width 0.3s ease; }
+    .progress-status { font-size: 0.85rem; color: #64748b; margin: 0.3rem 0 0 0; }
+    .results-section { margin-top: 1rem; }
+    .result-card { background: white; border-radius: 8px; padding: 1rem; margin: 0.8rem 0; border: 1px solid #e2e8f0;
+                   box-shadow: 0 1px 4px rgba(0,0,0,0.04); border-left: 3px solid var(--accent-color); }
+    .result-header { display: flex; align-items: center; margin-bottom: 0.8rem; padding-bottom: 0.8rem; border-bottom: 1px solid #f1f5f9; }
+    .result-icon { font-size: 1.2rem; margin-right: 0.8rem; width: 32px; height: 32px; border-radius: 6px;
+                   display: flex; align-items: center; justify-content: center; background: var(--bg-color); }
+    .result-title { flex: 1; }
+    .result-name { font-size: 1rem; font-weight: 600; color: var(--accent-color); margin: 0; }
+    .result-desc { font-size: 0.8rem; color: #64748b; margin: 0.2rem 0 0 0; }
+    .result-status { padding: 0.25rem 0.6rem; border-radius: 8px; font-size: 0.7rem; font-weight: 500; text-transform: uppercase; }
+    .status-waiting { background: #f1f5f9; color: #64748b; }
+    .status-running { background: #fef3c7; color: #92400e; animation: pulse 2s infinite; }
+    .status-completed { background: #dcfce7; color: #166534; }
+    .result-content { line-height: 1.5; color: #374151; font-size: 0.9rem; white-space: pre-wrap; }
+    .final-report { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;
+                    padding: 1.5rem; border-radius: 8px; margin: 1.5rem 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .report-title { font-size: 1.3rem; font-weight: 700; margin: 0 0 0.8rem 0; }
+    .report-content { background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 6px;
+                      backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.2); line-height: 1.5;
+                      white-space: pre-wrap; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+    @media (max-width: 768px) { .main-title { font-size: 1.8rem; } .input-section { padding: 0.8rem; } }
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
+# 종목 데이터베이스
+STOCK_DATABASE = {
+    "대형주": {
+        "005930": "삼성전자",
+        "000660": "SK하이닉스",
+        "035420": "NAVER",
+        "005380": "현대차",
+        "068270": "셀트리온",
+        "207940": "삼성바이오로직스",
+        "005490": "POSCO홀딩스",
+        "035720": "카카오"
+    },
+    "중견주": {
+        "028260": "삼성물산",
+        "000270": "기아",
+        "066570": "LG전자",
+        "003550": "LG",
+        "017670": "SK텔레콤",
+        "030200": "KT",
+        "032830": "삼성생명"
+    },
+    "성장주": {
+        "251270": "넷마블",
+        "036570": "엔씨소프트",
+        "259960": "크래프톤",
+        "352820": "하이브"
+    }
+}
 
-def validate_korean_stock_symbol(symbol: str) -> bool:
-    """한국 주식 코드 검증 (6자리 숫자)"""
-    if not symbol:
-        return False
-    return len(symbol) == 6 and symbol.isdigit()
-
-
-def display_korean_financial_results(financial_data: dict):
-    """재무 분석 결과 표시"""
-    st.subheader("📊 재무 분석 결과")
-
-    if "error" in financial_data:
-        st.error(f"재무 데이터 수집 실패: {financial_data['error']}")
-        return
-
+def fetch_news_for_display(company_name):
+    """UI 표시용 뉴스 데이터 가져오기"""
     try:
-        # 메시지에서 정보 추출
-        if "messages" in financial_data:
-            latest_message = financial_data["messages"][-1]
-            st.info(latest_message.content)
+        client_id = settings.naver_client_id
+        client_secret = settings.naver_client_secret
 
-        # 차트 표시 (있다면)
-        col1, col2 = st.columns([2, 1])
+        if not client_id or not client_secret:
+            return []
 
-        with col1:
-            try:
-                img = Image.open("korean_stock_chart.png")
-                st.image(img, caption="주가 차트", use_container_width=True)
-            except FileNotFoundError:
-                st.info("차트 이미지를 생성하지 못했습니다.")
-
-        with col2:
-            st.write("**분석 요약**")
-            st.write("- FinanceDataReader 데이터 수집 완료")
-            st.write("- PyKRX 시장 데이터 연동")
-            st.write("- 기술적 분석 수행")
-
-    except Exception as e:
-        st.error(f"재무 결과 표시 중 오류: {str(e)}")
-
-
-def display_korean_sentiment_results(sentiment_data: dict):
-    """감정 분석 결과 표시"""
-    st.subheader("📰 뉴스 감정 분석")
-
-    if "error" in sentiment_data:
-        st.error(f"감정 분석 실패: {sentiment_data['error']}")
-        return
-
-    try:
-        if "messages" in sentiment_data:
-            latest_message = sentiment_data["messages"][-1]
-            st.info(latest_message.content)
-
-        col1, col2 = st.columns([1, 1])
-
-        with col1:
-            st.write("**뉴스 소스**")
-            st.write("- 네이버 뉴스 API")
-            st.write("- 구글 뉴스 RSS")
-            st.write("- 다음 뉴스")
-
-        with col2:
-            st.write("**분석 방식**")
-            st.write("- GPT-4 한국어 감정 분석")
-            st.write("- 뉴스 키워드 추출")
-            st.write("- 시장 센티먼트 평가")
-
-    except Exception as e:
-        st.error(f"감정 결과 표시 중 오류: {str(e)}")
-
-
-def display_korean_report_results(report_data: dict):
-    """투자 보고서 결과 표시"""
-    st.subheader("📋 종합 투자 보고서")
-
-    if "error" in report_data:
-        st.error(f"보고서 생성 실패: {report_data['error']}")
-        return
-
-    try:
-        if "messages" in report_data:
-            latest_message = report_data["messages"][-1]
-            st.success(latest_message.content)
-
-        st.write("**보고서 구성**")
-        st.write("- 경영진 요약 (Executive Summary)")
-        st.write("- 상세 분석 보고서 (GPT-4 기반)")
-        st.write("- 리스크 평가 (Risk Assessment)")
-        st.write("- 투자 의견 및 추천")
-
-    except Exception as e:
-        st.error(f"보고서 표시 중 오류: {str(e)}")
-
-
-def extract_news_data_from_messages(messages: list) -> list:
-    """메시지에서 뉴스 데이터 추출"""
-    news_data = []
-    
-    for msg in messages:
-        if hasattr(msg, "tool_calls") and msg.tool_calls:
-            for tool_call in msg.tool_calls:
-                if tool_call.get("name") == "collect_korean_news_official_sources":
-                    # 도구 결과에서 뉴스 데이터 추출 시도
-                    pass
-        
-        # 메시지 내용에서 뉴스 정보 파싱 (간단한 방법)
-        if hasattr(msg, "content") and msg.content:
-            content = msg.content
-            # 여기서 뉴스 링크와 제목을 파싱할 수 있지만
-            # 더 나은 방법은 분석 결과에서 직접 가져오는 것
-    
-    return news_data
-
-
-def display_news_links_section(analysis_result: dict, stock_symbol: str = None, company_name: str = None):
-    """뉴스 링크 섹션 표시 - 실시간 뉴스 수집"""
-    try:
-        st.markdown("---")
-        st.subheader("📰 수집된 뉴스 목록")
-        st.caption("클릭하면 원문 기사로 이동합니다")
-        
-        # 실시간으로 뉴스 데이터 수집 (하드코딩 제거)
-        news_data = []
-        
-        if stock_symbol or company_name:
-            try:
-                # 뉴스 수집 도구 직접 호출
-                from agents.korean_sentiment_react_agent import collect_korean_news_official_sources
-                
-                search_keyword = company_name if company_name else stock_symbol
-                
-                with st.spinner(f"'{search_keyword}' 관련 뉴스를 수집하고 있습니다..."):
-                    news_result = collect_korean_news_official_sources.invoke({
-                        'keyword': search_keyword,
-                        'company_name': company_name
-                    })
-                
-                news_data = news_result.get('news_data', [])
-                news_count = news_result.get('news_count', 0)
-                
-                st.success(f"✅ {news_count}개의 최신 뉴스를 수집했습니다!")
-                
-            except Exception as collect_error:
-                st.error(f"뉴스 수집 실패: {str(collect_error)}")
-                news_data = []
-        
-        if news_data:
-            for i, news in enumerate(news_data[:15], 1):  # 상위 15개만 표시
-                title = news.get('title', '제목 없음')
-                url = news.get('link', '#')
-                source = news.get('source', '출처 미상')
-                description = news.get('description') or news.get('content', '')
-                pub_date = news.get('pubDate', '')
-                
-                # HTML 태그 제거
-                import re
-                title = re.sub('<[^<]+?>', '', title)
-                description = re.sub('<[^<]+?>', '', description)
-                
-                with st.expander(f"{i}. {title[:60]}..." if len(title) > 60 else f"{i}. {title}"):
-                    col1, col2 = st.columns([4, 1])
-                    
-                    with col1:
-                        # 클릭 가능한 링크 - target="_blank"로 새 탭에서 열기
-                        if url != '#' and url:
-                            st.markdown(f'<a href="{url}" target="_blank" style="color: #1f77b4; font-weight: bold;">📰 원문 보기</a>', unsafe_allow_html=True)
-                        else:
-                            st.write("**링크 없음**")
-                        
-                        st.write(f"**출처:** {source}")
-                        
-                        if pub_date:
-                            st.write(f"**발행일:** {pub_date}")
-                        
-                        if description:
-                            truncated_desc = description[:250] + "..." if len(description) > 250 else description
-                            st.write(f"**요약:** {truncated_desc}")
-                    
-                    with col2:
-                        if url != '#' and url:
-                            # URL 텍스트 박스로 복사 편의성 제공
-                            st.text_area("URL", url, height=80, key=f"url_{i}", help="URL을 복사할 수 있습니다")
-                        
-            # 통계 정보
-            col_stat1, col_stat2, col_stat3 = st.columns(3)
-            with col_stat1:
-                st.metric("수집된 뉴스", len(news_data))
-            with col_stat2:
-                sources = list(set([news.get('source', '미상') for news in news_data]))
-                st.metric("뉴스 출처", len(sources))
-            with col_stat3:
-                st.metric("표시된 뉴스", min(len(news_data), 15))
-                
+        # 🔧 최적화된 검색어 (감정 분석과 동일한 로직)
+        if company_name == "KT":
+            search_query = f"{company_name} 주식"
+        elif company_name in ["LG", "SK"]:
+            search_query = f"{company_name} 그룹"
+        elif company_name in ["현대차"]:
+            search_query = f"{company_name} 자동차"
         else:
-            st.info("💡 수집된 뉴스가 없습니다. 종목코드나 회사명을 확인해주세요.")
-        
-    except Exception as e:
-        st.error(f"뉴스 링크 표시 중 오류: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
+            search_query = f"{company_name} 주식"
 
-
-def display_supervisor_results(analysis_result: dict):
-    """새로운 supervisor 결과를 Streamlit에 표시"""
-    try:
-        messages = analysis_result.get("messages", [])
-
-        st.subheader("🤖 AI 분석 과정")
-
-        # 에이전트별 결과 분류 (개선된 로직)
-        financial_messages = []
-        sentiment_messages = []
-        report_messages = []
-        supervisor_messages = []
-        debug_info = {"total_messages": len(messages), "agent_breakdown": {}}
-
-        for msg in messages:
-            msg_name = getattr(msg, "name", None)
-            msg_type = getattr(msg, "type", None)
-            msg_content = getattr(msg, "content", "")
-            
-            # 디버깅 정보 수집
-            key = msg_name or msg_type or "unknown"
-            debug_info["agent_breakdown"][key] = debug_info["agent_breakdown"].get(key, 0) + 1
-            
-            # 에이전트별 분류 (더 유연한 방식)
-            if msg_name:
-                if "financial" in msg_name.lower():
-                    financial_messages.append(msg)
-                elif "sentiment" in msg_name.lower():
-                    sentiment_messages.append(msg)
-                elif "report" in msg_name.lower():
-                    report_messages.append(msg)
-                elif "supervisor" in msg_name.lower():
-                    supervisor_messages.append(msg)
-            
-            # 메시지 내용 기반 분류 (백업)
-            elif msg_content:
-                content_lower = msg_content.lower()
-                if "financial_analysis_complete" in content_lower or "차트" in content_lower:
-                    financial_messages.append(msg)
-                elif "sentiment_analysis_complete" in content_lower or "뉴스" in content_lower:
-                    sentiment_messages.append(msg)
-                elif "report_generation_complete" in content_lower or "투자 보고서" in content_lower:
-                    report_messages.append(msg)
-                elif "분석이 완료되었습니다" in content_lower:
-                    supervisor_messages.append(msg)
-        
-        # 디버깅 정보 표시
-        with st.expander("🔧 디버깅 정보 (개발용)", expanded=False):
-            st.json(debug_info)
-            st.write(f"**에이전트별 메시지 수:**")
-            st.write(f"- 📊 재무분석: {len(financial_messages)}개")
-            st.write(f"- 📰 뉴스감정: {len(sentiment_messages)}개") 
-            st.write(f"- 📋 투자보고서: {len(report_messages)}개")
-            st.write(f"- 🎯 종합분석: {len(supervisor_messages)}개")
-
-        # 탭으로 결과 구성
-        tab1, tab2, tab3, tab4 = st.tabs(
-            ["📊 재무분석", "📰 뉴스감정", "📋 투자보고서", "🎯 종합분석"]
-        )
-
-        with tab1:
-            st.subheader("📊 재무 분석 결과")
-            if financial_messages:
-                for msg in financial_messages:
-                    if hasattr(msg, "content") and msg.content:
-                        st.markdown(msg.content)
-            else:
-                st.warning("📊 재무 분석 결과가 없습니다.")
-                st.info("💡 **가능한 원인**: Financial Expert 에이전트가 실행되지 않았거나 API 오류로 중단되었을 수 있습니다.")
-
-            # 차트 표시 시도
-            try:
-                img = Image.open("korean_stock_chart.png")
-                st.image(img, caption="주가 차트", use_container_width=True)
-            except FileNotFoundError:
-                st.info("차트 이미지를 찾을 수 없습니다.")
-
-        with tab2:
-            st.subheader("📰 뉴스 감정 분석")
-            if sentiment_messages:
-                for msg in sentiment_messages:
-                    if hasattr(msg, "content") and msg.content:
-                        if msg.content.strip():  # 빈 내용 제외
-                            st.markdown(msg.content)
-                        else:
-                            st.warning("감정 분석이 완료되지 않았습니다.")
-                            
-                # 뉴스 링크 리스트 표시 (실시간 수집)
-                # 세션 상태에서 현재 분석 중인 종목 정보 가져오기
-                current_symbol = st.session_state.get('current_stock_symbol', None)
-                current_company = st.session_state.get('current_company_name', None)
-                display_news_links_section(analysis_result, current_symbol, current_company)
-            else:
-                st.warning("📰 감정 분석 결과가 없습니다.")
-                st.info("💡 **가능한 원인**: Sentiment Expert 에이전트가 호출되지 않았습니다. 이는 이전 단계(재무분석)에서 오류가 발생했거나 API 할당량이 초과되었을 가능성이 있습니다.")
-                st.markdown("**🔧 해결 방법**: API 할당량을 확인하거나 잠시 후 다시 시도해주세요.")
-
-        with tab3:
-            st.subheader("📋 투자 보고서")
-            if report_messages:
-                for msg in report_messages:
-                    if hasattr(msg, "content") and msg.content:
-                        st.markdown(msg.content)
-            else:
-                st.warning("📋 투자 보고서 결과가 없습니다.")
-                st.info("💡 **가능한 원인**: Report Expert 에이전트가 호출되지 않았습니다. 이는 재무분석 또는 감정분석 단계에서 오류가 발생했을 가능성이 있습니다.")
-                st.markdown("**📋 Report Expert 실행 조건**: 재무분석 + 감정분석이 모두 완료되어야 실행됩니다.")
-
-        with tab4:
-            st.subheader("🎯 AI Supervisor 종합 분석")
-            if supervisor_messages:
-                # 마지막 supervisor 메시지(종합 분석)를 우선 표시
-                for msg in reversed(supervisor_messages):
-                    if hasattr(msg, "content") and msg.content:
-                        if "분석이 완료되었습니다" in msg.content:
-                            st.success("✅ 분석 완료")
-                            st.markdown(msg.content)
-                            break
-            else:
-                st.warning("🎯 종합 분석 결과가 없습니다.")
-                st.info("💡 **가능한 원인**: Supervisor가 최종 종합 분석을 수행하지 못했습니다. 이는 모든 전문 에이전트(재무+감정+보고서)가 완료되지 않았기 때문일 가능성이 높습니다.")
-                st.markdown("**🎯 Supervisor 실행 조건**: 3개 전문 에이전트가 모두 완료되어야 최종 종합 분석을 수행합니다.")
-                
-                # 추가 도움말
-                with st.expander("📚 LangGraph Supervisor 워크플로우 설명"):
-                    st.markdown("""
-                    **순차 실행 구조:**
-                    1. 🎯 Supervisor → 📊 Financial Expert (재무 분석)
-                    2. 📊 Financial Expert → 🎯 Supervisor 
-                    3. 🎯 Supervisor → 📰 Sentiment Expert (감정 분석)
-                    4. 📰 Sentiment Expert → 🎯 Supervisor
-                    5. 🎯 Supervisor → 📋 Report Expert (투자 보고서)
-                    6. 📋 Report Expert → 🎯 Supervisor
-                    7. 🎯 Supervisor → **최종 종합 분석** ✨
-                    
-                    현재는 단계 1-2에서 중단된 상태로 보입니다.
-                    """)
-
-    except Exception as e:
-        st.error(f"결과 표시 중 오류: {str(e)}")
-        logger.error(f"Display error: {e}")
-
-
-def run_korean_analysis(symbol: str, company_name: str = None):
-    """한국 주식 분석을 새로운 LangGraph Supervisor로 실행"""
-
-    # 세션 상태에 현재 분석 종목 저장
-    st.session_state['current_stock_symbol'] = symbol
-    st.session_state['current_company_name'] = company_name
-
-    st.info(f"🔄 {symbol} ({company_name or '회사명 미상'}) 분석을 시작합니다...")
-
-    # 진행 상황 컨테이너
-    progress_container = st.empty()
-    results_container = st.empty()
-
-    try:
-        # LangGraph Supervisor 실행 (스트리밍)
-        all_chunks = []
-        current_progress = 0.0
-
-        for chunk_data in stream_korean_stock_analysis(symbol, company_name):
-            all_chunks.append(chunk_data)
-
-            # 진행 상황 업데이트
-            if isinstance(chunk_data, dict) and "supervisor" in chunk_data:
-                supervisor_data = chunk_data["supervisor"]
-                current_progress = supervisor_data.get("progress", current_progress)
-                current_stage = supervisor_data.get("current_stage", "processing")
-
-                with progress_container.container():
-                    st.progress(min(current_progress, 1.0))
-                    st.write(f"**현재 단계**: {current_stage}")
-
-                    # 실시간 메시지 미리보기
-                    chunk_info = supervisor_data.get("chunk", {})
-                    if isinstance(chunk_info, dict) and "supervisor" in chunk_info:
-                        messages = chunk_info["supervisor"].get("messages", [])
-                        if messages:
-                            latest_msg = messages[-1]
-                            if hasattr(latest_msg, "content") and latest_msg.content:
-                                with st.expander(
-                                    f"최신 업데이트 (길이: {len(latest_msg.content)} 문자)"
-                                ):
-                                    st.text(
-                                        latest_msg.content[:200] + "..."
-                                        if len(latest_msg.content) > 200
-                                        else latest_msg.content
-                                    )
-
-        # 최종 결과 표시
-        if all_chunks:
-            with results_container.container():
-                # 마지막 chunk에서 전체 결과 추출
-                final_chunk = all_chunks[-1]
-                if isinstance(final_chunk, dict) and "supervisor" in final_chunk:
-                    supervisor_data = final_chunk["supervisor"]
-                    chunk_info = supervisor_data.get("chunk", {})
-
-                    if isinstance(chunk_info, dict) and "supervisor" in chunk_info:
-                        analysis_result = chunk_info["supervisor"]
-                        display_supervisor_results(analysis_result)
-                    else:
-                        st.warning("분석 결과 구조를 인식할 수 없습니다.")
-                        st.json(final_chunk)  # 디버깅용
-
-        st.success("✅ 분석이 완료되었습니다!")
-        return all_chunks
-
-    except Exception as e:
-        logger.error(f"분석 중 오류 발생: {str(e)}")
-        st.error(f"분석 중 오류가 발생했습니다: {str(e)}")
-        import traceback
-
-        st.error(traceback.format_exc())
-        return None
-
-
-def main():
-    """메인 애플리케이션"""
-    st.markdown(
-        '<h1 class="main-header">🇰🇷 한국 주식 분석 AI 에이전트</h1>',
-        unsafe_allow_html=True,
-    )
-    st.markdown("**LangGraph Supervisor Pattern** 기반 멀티 에이전트 시스템")
-
-    # 사이드바
-    with st.sidebar:
-        st.header("📈 주식 분석")
-
-        # 인기 종목
-        st.subheader("인기 종목")
-        popular_stocks = {
-            "005930": "삼성전자",
-            "035720": "카카오",
-            "035420": "네이버",
-            "000660": "SK하이닉스",
-            "005380": "현대차",
-            "051910": "LG화학",
-            "006400": "삼성SDI",
-            "207940": "삼성바이오로직스",
+        url = "https://openapi.naver.com/v1/search/news.json"
+        headers = {
+            "X-Naver-Client-Id": client_id,
+            "X-Naver-Client-Secret": client_secret,
+        }
+        params = {
+            "query": search_query,
+            "display": 10,
+            "sort": "sim",
         }
 
-        selected_popular = st.selectbox(
-            "인기 종목에서 선택:",
-            options=list(popular_stocks.keys()),
-            format_func=lambda x: f"{x} ({popular_stocks[x]})",
-            index=0,
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        news_data = response.json()
+
+        # 뉴스 데이터 정제
+        news_sources = []
+        for item in news_data.get("items", []):
+            news_sources.append({
+                "title": item.get("title", "").replace("<b>", "").replace("</b>", ""),
+                "url": item.get("link", ""),
+                "pub_date": item.get("pubDate", "")[:16]  # 날짜만 간단히
+            })
+
+        return news_sources
+
+    except Exception as e:
+        logger.error(f"뉴스 데이터 가져오기 실패: {str(e)}")
+        return []
+
+def get_agent_config(agent_name):
+    """에이전트별 설정"""
+    configs = {
+        "context_expert": ("🌍", "시장 환경 분석", "#3b82f6", "#dbeafe", "거시경제 및 시장 동향"),
+        "sentiment_expert": ("📰", "뉴스 여론 분석", "#8b5cf6", "#ede9fe", "뉴스 감정 및 시장 심리"),
+        "financial_expert": ("💰", "재무 상태 분석", "#f59e0b", "#fef3c7", "재무제표 및 기업 건전성"),
+        "advanced_technical_expert": ("📈", "기술적 분석", "#ef4444", "#fee2e2", "차트 패턴 및 기술 지표"),
+        "institutional_trading_expert": ("🏦", "기관 수급 분석", "#06b6d4", "#cffafe", "기관투자자 매매 동향"),
+        "comparative_expert": ("⚖️", "상대 가치 분석", "#10b981", "#d1fae5", "동종업계 비교 평가"),
+        "esg_expert": ("🌱", "ESG 분석", "#84cc16", "#ecfccb", "지속가능경영 평가")
+    }
+    if agent_name in configs:
+        icon, name, color, bg, desc = configs[agent_name]
+        return {"icon": icon, "name": name, "color": color, "bg": bg, "desc": desc}
+    return {"icon": "🤖", "name": agent_name, "color": "#6b7280", "bg": "#f9fafb", "desc": "AI 분석"}
+
+def create_result_card(agent_name, config, status="waiting", content="", news_sources=None):
+    """결과 카드 생성 (뉴스 소스 정보 포함)"""
+    status_text = {"waiting": "대기 중", "running": "분석 중", "completed": "완료"}
+    if not content and status == "waiting":
+        content = f"<em style='color: #9ca3af;'>{config['name']}을 준비하고 있습니다...</em>"
+
+    # 🔧 뉴스 감정 분석의 경우 뉴스 소스 추가
+    news_section = ""
+    if agent_name == "sentiment_expert" and news_sources and status == "completed":
+        news_section = "<div style='margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #f1f5f9;'>"
+        news_section += "<h4 style='font-size: 0.9rem; color: #64748b; margin: 0 0 0.5rem 0;'>📰 분석된 뉴스 (상위 5개)</h4>"
+        for i, news in enumerate(news_sources[:5], 1):
+            title = news.get('title', '').strip()
+            url = news.get('url', '')
+            if title:
+                news_section += f"<div style='margin: 0.3rem 0; font-size: 0.8rem;'>"
+                news_section += f"<a href='{url}' target='_blank' style='color: #667eea; text-decoration: none;'>{i}. {title}</a>"
+                news_section += "</div>"
+        news_section += "</div>"
+
+    return f"""<div class="result-card" style="--accent-color: {config['color']}; --bg-color: {config['bg']};">
+        <div class="result-header">
+            <div class="result-icon">{config['icon']}</div>
+            <div class="result-title">
+                <h3 class="result-name">{config['name']}</h3>
+                <p class="result-desc">{config['desc']}</p>
+            </div>
+            <span class="result-status status-{status}">{status_text[status]}</span>
+        </div>
+        <div class="result-content">{content}{news_section}</div>
+    </div>"""
+
+def run_analysis(symbol, company_name):
+    """분석 실행"""
+
+    # 뉴스 데이터 및 차트 미리 생성
+    with st.spinner("📰 뉴스 데이터 수집 중..."):
+        news_sources = fetch_news_for_display(company_name)
+        st.session_state[f"news_sources_{symbol}"] = news_sources
+
+    with st.spinner("📈 차트 생성 중..."):
+        chart_base64 = create_stock_chart(symbol, company_name, period=120, chart_type="candle")
+        if chart_base64:
+            st.session_state[f"chart_{symbol}"] = chart_base64
+
+    # 결과 섹션 시작
+    st.markdown(f'<div class="results-section"><h2 style="color: #334155; margin: 0 0 1rem 0; font-size: 1.5rem;">📊 {symbol} {company_name} 분석 결과</h2></div>', unsafe_allow_html=True)
+
+    # 차트 표시
+    if f"chart_{symbol}" in st.session_state:
+        st.markdown("### 📈 기술적 차트 분석")
+        chart_html = f'<img src="data:image/png;base64,{st.session_state[f"chart_{symbol}"]}" style="width: 100%; max-width: 800px; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">'
+        st.markdown(chart_html, unsafe_allow_html=True)
+        st.markdown("---")
+    progress_container = st.empty()
+
+    # 에이전트 설정
+    agent_names = ["context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert", "institutional_trading_expert", "comparative_expert", "esg_expert"]
+    result_containers = {}
+    for agent_name in agent_names:
+        config = get_agent_config(agent_name)
+        result_containers[agent_name] = st.empty()
+        result_containers[agent_name].markdown(create_result_card(agent_name, config, "waiting"), unsafe_allow_html=True)
+
+    # 상태 변수
+    agent_states = {name: {"status": "waiting", "content": ""} for name in agent_names}
+    completed_count, final_report = 0, ""
+
+    def update_progress(completed, total, current_agent=""):
+        progress_pct = (completed / total) * 100
+        status_text = f"{completed}/{total} 분석 완료"
+        if current_agent:
+            config = get_agent_config(current_agent)
+            status_text += f" • 현재: {config['name']}"
+        progress_container.markdown(f'<div class="progress-section"><div class="progress-header"><h3 class="progress-title">분석 진행 상황</h3><span class="progress-percentage">{progress_pct:.0f}%</span></div><div class="progress-bar"><div class="progress-fill" style="width: {progress_pct}%;"></div></div><p class="progress-status">{status_text}</p></div>', unsafe_allow_html=True)
+
+    try:
+        # 로깅
+        logger.info(f"================== 주식 분석 시작 ==================")
+        logger.info(f"종목코드: {symbol}")
+        logger.info(f"회사명: {company_name}")
+        logger.info(f"분석 시작 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"====================================================")
+
+        # 분석 실행
+        for chunk_data in stream_korean_stock_analysis(symbol, company_name):
+            if "error" in chunk_data:
+                st.error(f"분석 중 오류 발생: {chunk_data['error']}")
+                return
+
+            supervisor_data = chunk_data.get("supervisor", {})
+            if supervisor_data:
+                messages = supervisor_data.get("messages", [])
+                current_stage = supervisor_data.get("current_stage", "")
+
+                # 진행 중 상태 업데이트
+                if "분석 시작" in current_stage:
+                    for agent_name in agent_names:
+                        if agent_name in current_stage:
+                            agent_states[agent_name]["status"] = "running"
+                            config = get_agent_config(agent_name)
+                            result_containers[agent_name].markdown(
+                                create_result_card(agent_name, config, "running"),
+                                unsafe_allow_html=True
+                            )
+                            update_progress(completed_count, len(agent_names), agent_name)
+                            break
+
+                # 최종 보고서 처리
+                if supervisor_data.get("final_report_generated"):
+                    for msg in messages:
+                        if isinstance(msg, dict):
+                            msg_content = msg.get("content", "")
+                        else:
+                            msg_content = msg.content if hasattr(msg, "content") else str(msg)
+
+                        if supervisor_data.get("progressive_mode") and len(msg_content) > 100:
+                            final_report = msg_content.strip()
+                            break
+                    continue
+
+                # 에이전트 완료 처리
+                completion_signals = {
+                    "context_expert": "MARKET_CONTEXT_ANALYSIS_COMPLETE",
+                    "sentiment_expert": "SENTIMENT_ANALYSIS_COMPLETE",
+                    "financial_expert": "FINANCIAL_ANALYSIS_COMPLETE",
+                    "advanced_technical_expert": "ADVANCED_TECHNICAL_ANALYSIS_COMPLETE",
+                    "institutional_trading_expert": "INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE",
+                    "comparative_expert": "COMPARATIVE_ANALYSIS_COMPLETE",
+                    "esg_expert": "ESG_ANALYSIS_COMPLETE",
+                }
+
+                for msg in messages:
+                    if isinstance(msg, dict):
+                        msg_content = msg.get("content", "")
+                    else:
+                        msg_content = msg.content if hasattr(msg, "content") else str(msg)
+
+                    for agent_name, signal in completion_signals.items():
+                        if (signal in msg_content and
+                            agent_states[agent_name]["status"] != "completed"):
+
+                            content = msg_content.replace(signal, "").strip()
+                            if len(content) > 100:
+                                agent_states[agent_name]["status"] = "completed"
+                                agent_states[agent_name]["content"] = content
+                                completed_count += 1
+
+                                # 카드 업데이트
+                                config = get_agent_config(agent_name)
+                                # 감정 분석의 경우 뉴스 소스 추가
+                                card_news_sources = None
+                                if agent_name == "sentiment_expert":
+                                    card_news_sources = st.session_state.get(f"news_sources_{symbol}", [])
+
+                                result_containers[agent_name].markdown(
+                                    create_result_card(agent_name, config, "completed", content, card_news_sources),
+                                    unsafe_allow_html=True
+                                )
+
+                                update_progress(completed_count, len(agent_names))
+                                logger.info(f"===== {config['name']} ({agent_name}) 분석 완료 =====")
+
+        # 최종 보고서 표시
+        if final_report and completed_count >= 5:  # 5개 이상 완료시
+            st.markdown(f"""
+            <div class="final-report">
+                <h2 class="report-title">🎯 종합 투자 분석 보고서</h2>
+                <div class="report-content">{final_report}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # 다운로드
+            st.download_button(
+                label="📋 보고서 다운로드",
+                data=final_report,
+                file_name=f"{symbol}_{company_name}_analysis_report.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+        elif completed_count < 7:
+            st.warning(f"⚠️ 일부 분석이 완료되지 않았습니다 ({completed_count}/7)")
+
+        # 최종 진행률
+        update_progress(completed_count, len(agent_names))
+
+        # 로깅
+        logger.info(f"================== 주식 분석 완료 ==================")
+        logger.info(f"완료된 전문가 수: {completed_count}/7")
+        logger.info(f"최종 보고서 생성: {'예' if final_report else '아니오'}")
+        logger.info(f"분석 완료 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"====================================================")
+
+    except Exception as e:
+        logger.error(f"분석 실행 중 치명적 오류 발생: {str(e)}", exc_info=True)
+        st.error(f"분석 프로세스 오류: {e}")
+
+def main():
+    # 메인 헤더
+    st.markdown("""
+    <div class="main-header">
+        <h1 class="main-title">📊 AI Stock Analyzer</h1>
+        <p class="main-subtitle">AI 전문가 7인의 종합 주식 분석</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 입력 섹션
+    st.markdown("""
+    <div class="input-section">
+        <h3 class="input-header">📈 분석할 종목 선택</h3>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 메인 입력 구역
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        # 종목 선택 - 드롭다운 + 직접 입력
+        input_method = st.radio(
+            "입력 방식 선택:",
+            ["드롭다운에서 선택", "직접 입력"],
+            horizontal=True,
+            label_visibility="collapsed"
         )
 
-        # 또는 직접 입력
-        st.subheader("직접 입력")
-        stock_symbol = st.text_input(
-            "한국 종목코드 (6자리):",
-            value=selected_popular,
-            help="예: 005930 (삼성전자)",
-        )
-
-        company_name = st.text_input(
-            "회사명 (선택사항):",
-            value=popular_stocks.get(stock_symbol, ""),
-            help="예: 삼성전자",
-        )
-
-        analyze_button = st.button("🔍 분석 시작", type="primary")
-
-    # 메인 컨테이너
-    if analyze_button:
-        if not validate_korean_stock_symbol(stock_symbol):
-            st.error("❌ 올바른 한국 종목코드를 입력하세요 (6자리 숫자)")
+        if input_method == "드롭다운에서 선택":
+            category = st.selectbox("카테고리 선택", list(STOCK_DATABASE.keys()))
+            stock_options = STOCK_DATABASE[category]
+            selected_stock = st.selectbox(
+                "종목 선택",
+                list(stock_options.keys()),
+                format_func=lambda x: f"{stock_options[x]} ({x})"
+            )
+            symbol = selected_stock
+            company_name = stock_options[selected_stock]
         else:
-            # 분석 실행
-            results = run_korean_analysis(stock_symbol, company_name)
-
-            # 결과가 있으면 다운로드 버튼 제공
-            if results:
-                st.download_button(
-                    label="📊 분석 결과 다운로드 (JSON)",
-                    data=str(results),
-                    file_name=f"korean_stock_analysis_{stock_symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json",
-                )
-
-    else:
-        # 초기 화면 - 시스템 현황 요약
-        st.markdown("### 📈 시스템 현황")
-        
-        col_info1, col_info2, col_info3 = st.columns(3)
-        
-        with col_info1:
-            st.metric(
-                label="지원 데이터 소스", 
-                value="5개", 
-                delta="공식 API 전용"
+            symbol = st.text_input(
+                "종목코드",
+                value="005930",
+                placeholder="예: 005930, 000660, 035420"
             )
-            
-        with col_info2:
-            st.metric(
-                label="AI 에이전트", 
-                value="3개", 
-                delta="전문화된 분석"
-            )
-            
-        with col_info3:
-            st.metric(
-                label="지원 시장", 
-                value="KRX", 
-                delta="KOSPI/KOSDAQ 전체"
+            company_name = st.text_input(
+                "회사명 (선택)",
+                value="삼성전자",
+                placeholder="예: 삼성전자, SK하이닉스"
             )
 
-        st.markdown("### 🎯 시스템 특징")
+        # 분석 시작 버튼
+        if st.button("🚀 AI 분석 시작", type="primary", use_container_width=True):
+            if symbol:
+                run_analysis(symbol.strip(), company_name.strip() if company_name else None)
+            else:
+                st.error("종목코드를 입력해주세요!")
 
-        col1, col2, col3 = st.columns(3)
+    with col2:
+        # 인기 종목 (오른쪽 사이드)
+        st.markdown('<div class="popular-stocks"><p class="popular-title">🔥 인기 종목</p></div>', unsafe_allow_html=True)
+        popular_stocks = [("005930", "삼성전자"), ("000660", "SK하이닉스"), ("035420", "NAVER"), ("005380", "현대차")]
+        for code, name in popular_stocks:
+            if st.button(f"{name}\n{code}", key=f"popular_{code}", use_container_width=True):
+                run_analysis(code, name)
 
-        with col1:
-            st.markdown(
-                """
-            **📊 재무 분석**
-            - 주가 데이터 수집 (FinanceDataReader, PyKRX)
-            - DART 공시 정보 및 재무제표
-            - 업종 및 경제 지표 분석
-            - 한국어 라벨 차트 생성
-            """
-            )
-
-        with col2:
-            st.markdown(
-                """
-            **📰 감정 분석**
-            - 네이버 뉴스 API (공식)
-            - AI 기반 한국어 감정 분석
-            - 시장 센티먼트 평가
-            - 뉴스 임팩트 예측
-            """
-            )
-
-        with col3:
-            st.markdown(
-                """
-            **📋 투자 보고서**
-            - 기관급 투자 보고서 생성
-            - BUY/HOLD/SELL 추천
-            - 목표가 및 리스크 평가
-            - 3M/6M/12M 전망
-            """
-            )
-
-        st.markdown("### 🔧 기술 스택")
-        
-        tech_col1, tech_col2 = st.columns(2)
-        
-        with tech_col1:
-            st.markdown(
-                """
-            **🤖 AI & ML**
-            - LangGraph Supervisor Pattern
-            - Google Gemini 2.5 Flash
-            - ReAct Agent 아키텍처
-            """
-            )
-            
-        with tech_col2:
-            st.markdown(
-                """
-            **📊 데이터 소스**
-            - FinanceDataReader (KRX 주가)
-            - PyKRX (HTS 데이터)
-            - DART (공시정보)
-            - 한은 API (경제지표)
-            - 네이버 뉴스 API
-            """
-            )
-
+    # 시스템 정보
+    with st.expander("ℹ️ 시스템 정보"):
+        st.markdown("**🤖 AI 전문가 구성:**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News")
 
 if __name__ == "__main__":
     main()
