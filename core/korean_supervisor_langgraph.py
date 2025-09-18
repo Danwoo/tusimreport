@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Korean Stock Analysis Supervisor - LangGraph 기반
-7개 전문가 에이전트를 통합하는 Supervisor 워크플로우
+8개 전문가 에이전트를 통합하는 Supervisor 워크플로우
 """
 
 import logging
@@ -23,6 +23,7 @@ from agents.korean_advanced_technical_agent import create_advanced_technical_age
 from agents.korean_institutional_trading_agent import create_institutional_trading_agent
 from agents.korean_comparative_agent import create_comparative_agent
 from agents.korean_esg_analysis_agent import create_esg_agent
+from agents.korean_community_agent import create_community_agent
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,11 @@ def get_supervisor_llm():
         return ChatOpenAI(model=model_name, temperature=0.1, api_key=api_key)
 
 # ====================
-# 전문 에이전트 생성 (총 7개)
+# 전문 에이전트 생성 (총 8개)
 # ====================
 
 def create_all_agents():
-    """모든 7개의 전문 분석 에이전트를 생성합니다."""
+    """모든 8개의 전문 분석 에이전트를 생성합니다."""
     try:
         agents = {
             "context_expert": create_context_agent(),
@@ -53,6 +54,7 @@ def create_all_agents():
             "institutional_trading_expert": create_institutional_trading_agent(),
             "comparative_expert": create_comparative_agent(),
             "esg_expert": create_esg_agent(),
+            "community_expert": create_community_agent(),
         }
 
         logger.info(f"Successfully created {len(agents)} expert agents: {list(agents.keys())}")
@@ -79,7 +81,8 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
                 "advanced_technical_expert": "기술적 분석 전문가",
                 "institutional_trading_expert": "수급 분석 전문가",
                 "comparative_expert": "상대 가치 전문가",
-                "esg_expert": "ESG 분석 전문가"
+                "esg_expert": "ESG 분석 전문가",
+                "community_expert": "커뮤니티 여론 전문가"
             }.get(expert_key, expert_key)
 
             expert_analyses_text += f"\n\n=== {expert_name} 분석 ===\n{analysis}\n"
@@ -87,12 +90,12 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
         # 🔍 전문가 분석 데이터 품질 확인
         total_analysis_length = sum(len(str(analysis)) for analysis in all_analyses.values())
         logger.info(f"🔍 전문가 분석 총 길이: {total_analysis_length:,}자")
-        logger.info(f"🔍 참여 전문가 수: {len(all_analyses)}/7")
+        logger.info(f"🔍 참여 전문가 수: {len(all_analyses)}/8")
 
         # 🚨 데이터 부족 시 조기 반환
         if len(all_analyses) < 4:
-            logger.warning(f"⚠️ 전문가 분석 부족: {len(all_analyses)}/7")
-            return f"## 분석 데이터 부족\n\n{len(all_analyses)}/7개 전문가 분석만 완료되어 종합 보고서 생성이 제한됩니다."
+            logger.warning(f"⚠️ 전문가 분석 부족: {len(all_analyses)}/8")
+            return f"## 분석 데이터 부족\n\n{len(all_analyses)}/8개 전문가 분석만 완료되어 종합 보고서 생성이 제한됩니다."
 
         if total_analysis_length < 1000:
             logger.warning(f"⚠️ 분석 내용 부족: {total_analysis_length}자")
@@ -256,18 +259,18 @@ def create_korean_supervisor():
 - NO separate report_expert agent needed
 
 ## ✅ SUCCESS CRITERIA:
-- All 7 expert completion signals received
+- All 8 expert completion signals received
 - Expert analyses collected and ready for final report
 - System ready for supervisor report generation
 
-Execute all 7 expert agents and signal completion."""
+Execute all 8 expert agents and signal completion."""
         )
 
-        # 7개 전문가 에이전트만 확인 및 로깅
+        # 8개 전문가 에이전트만 확인 및 로깅
         logger.info(f"Available agents: {list(all_agents.keys())}")
-        if len(all_agents) != 7:
-            logger.error(f"Expected 7 agents, but got {len(all_agents)}: {list(all_agents.keys())}")
-            raise ValueError("All 7 expert agents must be created")
+        if len(all_agents) != 8:
+            logger.error(f"Expected 8 agents, but got {len(all_agents)}: {list(all_agents.keys())}")
+            raise ValueError("All 8 expert agents must be created")
 
         workflow = create_supervisor(
             agents=list(all_agents.values()),
@@ -275,7 +278,7 @@ Execute all 7 expert agents and signal completion."""
             prompt=supervisor_prompt,
         )
 
-        logger.info("Korean Stock Analysis Supervisor with 7 expert agents created successfully.")
+        logger.info("Korean Stock Analysis Supervisor with 8 expert agents created successfully.")
         return workflow.compile()
 
     except Exception as e:

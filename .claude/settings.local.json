@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(dir:*)"
+      "Bash(\"C:\\Users\\danny\\miniconda3\\envs\\tusimreport\\python.exe\" -c \"\nfrom core.progressive_supervisor import ProgressiveAnalysisEngine\nimport logging\n\n# 로깅 설정\nlogging.basicConfig(level=logging.INFO)\n\nprint(''=== Progressive Supervisor 8개 에이전트 테스트 ==='')\ntry:\n    engine = ProgressiveAnalysisEngine()\n    print(f''초기화 성공: {len(engine.execution_order)}개 에이전트 실행 순서 설정'')\n    print(''실행 순서:'')\n    for i, agent in enumerate(engine.execution_order, 1):\n        print(f''  {i}. {agent}'')\n    \n    print(''\\n모든 에이전트가 execution_order에 포함되었는지 확인:'')\n    expected_agents = [''context_expert'', ''sentiment_expert'', ''financial_expert'', \n                      ''advanced_technical_expert'', ''institutional_trading_expert'', \n                      ''comparative_expert'', ''esg_expert'', ''community_expert'']\n    \n    missing_agents = set(expected_agents) - set(engine.execution_order)\n    if missing_agents:\n        print(f''누락된 에이전트: {missing_agents}'')\n    else:\n        print(''✓ 모든 8개 에이전트가 실행 순서에 포함됨'')\n        \nexcept Exception as e:\n    print(f''오류: {e}'')\n\")"
     ],
     "deny": [],
     "ask": []
