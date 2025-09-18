@@ -61,15 +61,8 @@ def _fetch_naver_news(company_name: str) -> Dict[str, Any]:
         if not client_id or not client_secret:
             return {"error": "Naver API 자격 증명이 설정되지 않았습니다.", "items": []}
 
-        # 최적화된 검색어 생성
-        if company_name == "KT":
-            search_query = f"{company_name} 주식"
-        elif company_name in ["LG", "SK"]:
-            search_query = f"{company_name} 그룹"
-        elif company_name in ["현대차"]:
-            search_query = f"{company_name} 자동차"
-        else:
-            search_query = f"{company_name} 주식"
+        # 종목명을 그대로 사용
+        search_query = company_name
 
         url = "https://openapi.naver.com/v1/search/news.json"
         headers = {

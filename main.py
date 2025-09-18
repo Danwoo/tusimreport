@@ -158,7 +158,8 @@ def get_agent_config(agent_name):
         "advanced_technical_expert": ("📈", "기술적 분석", "#ef4444", "#fee2e2", "차트 패턴 및 기술 지표"),
         "institutional_trading_expert": ("🏦", "기관 수급 분석", "#06b6d4", "#cffafe", "기관투자자 매매 동향"),
         "comparative_expert": ("⚖️", "상대 가치 분석", "#10b981", "#d1fae5", "동종업계 비교 평가"),
-        "esg_expert": ("🌱", "ESG 분석", "#84cc16", "#ecfccb", "지속가능경영 평가")
+        "esg_expert": ("🌱", "ESG 분석", "#84cc16", "#ecfccb", "지속가능경영 평가"),
+        "community_expert": ("💬", "커뮤니티 여론 분석", "#f97316", "#fed7aa", "실제 투자자 의견 및 심리")
     }
     if agent_name in configs:
         icon, name, color, bg, desc = configs[agent_name]
@@ -171,7 +172,7 @@ def create_result_card(agent_name, config, status="waiting", content="", news_so
     if not content and status == "waiting":
         content = f"<em style='color: #9ca3af;'>{config['name']}을 준비하고 있습니다...</em>"
 
-    # 🔧 뉴스 감정 분석의 경우 뉴스 소스 추가
+    # 🔧 뉴스 감정 분석과 커뮤니티 분석의 경우 데이터 소스 추가
     news_section = ""
     if agent_name == "sentiment_expert" and news_sources and status == "completed":
         news_section = "<div style='margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #f1f5f9;'>"
@@ -182,6 +183,17 @@ def create_result_card(agent_name, config, status="waiting", content="", news_so
             if title:
                 news_section += f"<div style='margin: 0.3rem 0; font-size: 0.8rem;'>"
                 news_section += f"<a href='{url}' target='_blank' style='color: #667eea; text-decoration: none;'>{i}. {title}</a>"
+                news_section += "</div>"
+        news_section += "</div>"
+    elif agent_name == "community_expert" and news_sources and status == "completed":
+        news_section = "<div style='margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #f1f5f9;'>"
+        news_section += "<h4 style='font-size: 0.9rem; color: #64748b; margin: 0 0 0.5rem 0;'>💬 분석된 커뮤니티 게시글 (상위 5개)</h4>"
+        for i, post in enumerate(news_sources[:5], 1):
+            title = post.get('title', '').strip()
+            url = post.get('url', '')
+            if title:
+                news_section += f"<div style='margin: 0.3rem 0; font-size: 0.8rem;'>"
+                news_section += f"<a href='{url}' target='_blank' style='color: #f97316; text-decoration: none;'>{i}. {title}</a>"
                 news_section += "</div>"
         news_section += "</div>"
 
@@ -222,7 +234,7 @@ def run_analysis(symbol, company_name):
     progress_container = st.empty()
 
     # 에이전트 설정
-    agent_names = ["context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert", "institutional_trading_expert", "comparative_expert", "esg_expert"]
+    agent_names = ["context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert", "institutional_trading_expert", "comparative_expert", "esg_expert", "community_expert"]
     result_containers = {}
     for agent_name in agent_names:
         config = get_agent_config(agent_name)
@@ -295,6 +307,7 @@ def run_analysis(symbol, company_name):
                     "institutional_trading_expert": "INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE",
                     "comparative_expert": "COMPARATIVE_ANALYSIS_COMPLETE",
                     "esg_expert": "ESG_ANALYSIS_COMPLETE",
+                    "community_expert": "COMMUNITY_ANALYSIS_COMPLETE",
                 }
 
                 for msg in messages:
@@ -315,10 +328,12 @@ def run_analysis(symbol, company_name):
 
                                 # 카드 업데이트
                                 config = get_agent_config(agent_name)
-                                # 감정 분석의 경우 뉴스 소스 추가
+                                # 감정 분석과 커뮤니티 분석의 경우 데이터 소스 추가
                                 card_news_sources = None
                                 if agent_name == "sentiment_expert":
                                     card_news_sources = st.session_state.get(f"news_sources_{symbol}", [])
+                                elif agent_name == "community_expert":
+                                    card_news_sources = st.session_state.get(f"community_sources_{symbol}", [])
 
                                 result_containers[agent_name].markdown(
                                     create_result_card(agent_name, config, "completed", content, card_news_sources),

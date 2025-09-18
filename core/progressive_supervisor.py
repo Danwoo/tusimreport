@@ -29,7 +29,8 @@ class ProgressiveAnalysisEngine:
             "advanced_technical_expert", # 4단계: 기술분석
             "institutional_trading_expert", # 5단계: 수급분석
             "comparative_expert",       # 6단계: 상대평가
-            "esg_expert"               # 7단계: ESG분석
+            "esg_expert",              # 7단계: ESG분석
+            "community_expert"         # 8단계: 커뮤니티 여론분석
         ]
 
         logger.info("Progressive Analysis Engine 초기화 완료")
