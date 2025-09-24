@@ -51,7 +51,7 @@ class Settings(BaseSettings):
 
     # 애플리케이션 설정
     debug: bool = Field(True, env="DEBUG")
-    log_level: str = Field("INFO", env="LOG_LEVEL")
+    log_level: str = Field("WARNING", env="LOG_LEVEL")
 
     # 경로 설정
     project_root: Path = Path(__file__).parent.parent

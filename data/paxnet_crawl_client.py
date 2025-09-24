@@ -7,10 +7,16 @@ Paxnet 종목토론 크롤링 클라이언트
 import logging
 import time
 import re
+import threading
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# 🔧 전역 드라이버 관리를 위한 락
+_driver_lock = threading.Lock()
+_active_drivers = set()
+_max_concurrent_drivers = 2  # 최대 동시 실행 드라이버 수
 
 try:
     from selenium import webdriver
@@ -37,7 +43,15 @@ class PaxnetCrawlClient:
         self.base_url = "https://www.paxnet.co.kr"
 
     def setup_driver(self, headless: bool = True) -> bool:
-        """Chrome 드라이버 설정"""
+        """Chrome 드라이버 설정 - 동시 실행 제한"""
+        global _driver_lock, _active_drivers, _max_concurrent_drivers
+
+        with _driver_lock:
+            # 이미 최대 드라이버 수에 도달한 경우 대기 또는 실패
+            if len(_active_drivers) >= _max_concurrent_drivers:
+                logger.warning(f"최대 드라이버 수({_max_concurrent_drivers})에 도달. 크롤링 대기 중...")
+                return False
+
         try:
             chrome_options = Options()
             if headless:
@@ -48,12 +62,35 @@ class PaxnetCrawlClient:
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
 
+            # 🚀 극도로 빠른 로딩을 위한 최적화 옵션
+            chrome_options.add_argument("--disable-extensions")
+            chrome_options.add_argument("--disable-plugins")
+            chrome_options.add_argument("--disable-background-timer-throttling")
+            chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+            chrome_options.add_argument("--disable-renderer-backgrounding")
+            chrome_options.add_argument("--disable-features=TranslateUI")
+            chrome_options.add_argument("--disable-ipc-flooding-protection")
+            chrome_options.add_argument("--disable-images")  # 이미지 로딩 비활성화
+            chrome_options.add_argument("--disable-javascript")  # JS 비활성화 (정적 콘텐츠만)
+            chrome_options.add_argument("--disable-css")  # CSS 로딩 최소화
+            chrome_options.add_argument("--aggressive")
+            chrome_options.add_argument("--max_old_space_size=2048")  # 메모리 사용량 감소
+
             try:
                 chromedriver_autoinstaller.install()
                 self.driver = webdriver.Chrome(options=chrome_options)
             except Exception:
                 service = Service(ChromeDriverManager().install())
                 self.driver = webdriver.Chrome(service=service, options=chrome_options)
+
+            # 🚀 빠른 타임아웃 설정 (Paxnet이 느려서 aggressive 설정)
+            self.driver.implicitly_wait(5)  # 5초 implicit wait
+            self.driver.set_page_load_timeout(15)  # 15초 페이지 로드 timeout
+            self.driver.set_script_timeout(10)  # 10초 스크립트 timeout
+
+            # 🔧 활성 드라이버 목록에 추가
+            with _driver_lock:
+                _active_drivers.add(id(self.driver))
 
             logger.info("Chrome 드라이버 설정 완료")
             return True
@@ -177,7 +214,14 @@ class PaxnetCrawlClient:
                         time.sleep(3)
 
                 except Exception as e:
-                    logger.warning(f"게시글 {i+1} 내용 수집 오류: {e}")
+                    logger.warning(f"내용 추출 실패: {e}")
+                    # Timeout 발생시 제목만으로 데이터 생성 (fallback)
+                    post_data = {
+                        "title": post_info["title"],
+                        "content": f"[내용 추출 실패] {post_info['title']}",  # 제목을 내용으로 대체
+                        "url": post_info["detail_url"]
+                    }
+                    posts.append(post_data)
                     continue
 
         except Exception as e:
@@ -188,6 +232,8 @@ class PaxnetCrawlClient:
     def _get_post_content(self, detail_url: str) -> str:
         """개별 게시글 내용 추출"""
         try:
+            # 30초 타임아웃 설정으로 개별 페이지 로드
+            self.driver.set_page_load_timeout(30)
             self.driver.get(detail_url)
             time.sleep(2)
 
@@ -220,17 +266,30 @@ class PaxnetCrawlClient:
             return '\n'.join(lines[:10])[:1000]
 
         except Exception as e:
-            logger.warning(f"내용 추출 실패: {str(e)}")
-            return f"내용 추출 실패: {str(e)}"
+            error_msg = str(e)
+            if "timed out" in error_msg.lower() or "timeout" in error_msg.lower():
+                logger.warning(f"Timeout으로 인한 내용 추출 실패: {error_msg}")
+                return "[Timeout으로 내용 추출 실패 - 제목 기반 분석 진행]"
+            else:
+                logger.warning(f"내용 추출 실패: {error_msg}")
+                return f"[내용 추출 실패: {error_msg}]"
 
     def close(self):
         """드라이버 종료"""
         if self.driver:
             try:
+                driver_id = id(self.driver)
                 self.driver.quit()
+
+                # 🔧 활성 드라이버 목록에서 제거
+                with _driver_lock:
+                    _active_drivers.discard(driver_id)
+
                 logger.info("Chrome 드라이버 종료")
             except Exception as e:
                 logger.warning(f"드라이버 종료 중 오류: {e}")
+            finally:
+                self.driver = None
 
     def __enter__(self):
         """컨텍스트 매니저 진입"""
@@ -255,6 +314,17 @@ def fetch_paxnet_discussions(stock_code: str, max_posts: int = 10) -> Dict[str, 
     """
     try:
         with PaxnetCrawlClient() as client:
+            # 🔧 드라이버 생성 실패시 즉시 fallback 반환
+            if not client.setup_driver():
+                logger.warning("Paxnet 크롤링 드라이버 생성 실패 - 리소스 부족")
+                return {
+                    "error": "시스템 리소스 부족으로 크롤링 대기 중",
+                    "posts": [],
+                    "post_count": 0,
+                    "data_source": "Paxnet (실패)",
+                    "last_updated": datetime.now().isoformat()
+                }
+
             return client.fetch_stock_discussions(stock_code, max_posts)
     except Exception as e:
         logger.error(f"Paxnet 데이터 수집 실패: {e}")

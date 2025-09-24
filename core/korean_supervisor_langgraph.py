@@ -57,7 +57,7 @@ def create_all_agents():
             "community_expert": create_community_agent(),
         }
 
-        logger.info(f"Successfully created {len(agents)} expert agents: {list(agents.keys())}")
+        # 에이전트 생성 완료
         return agents
 
     except Exception as e:
