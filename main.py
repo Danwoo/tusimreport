@@ -6,6 +6,14 @@ import time
 import requests
 
 from core.korean_supervisor_langgraph import stream_korean_stock_analysis
+from core.streamlit_parallel_engine import get_parallel_engine
+from core.streamlit_conversation_manager import get_conversation_manager
+from utils.streamlit_helpers import (
+    render_parallel_progress_dashboard,
+    render_parallel_execution_controls,
+    render_parallel_results_summary,
+    show_parallel_status_indicator
+)
 from config.settings import settings
 from utils.helpers import setup_logging
 from data.chart_generator import create_stock_chart
@@ -212,6 +220,9 @@ def create_result_card(agent_name, config, status="waiting", content="", news_so
 def run_analysis(symbol, company_name):
     """분석 실행"""
 
+    # 분석 유형 설정 (순차 처리)
+    st.session_state.current_analysis_type = "sequential"
+
     # 뉴스 데이터 및 차트 미리 생성
     with st.spinner("📰 뉴스 데이터 수집 중..."):
         news_sources = fetch_news_for_display(company_name)
@@ -341,7 +352,7 @@ def run_analysis(symbol, company_name):
                                 )
 
                                 update_progress(completed_count, len(agent_names))
-                                logger.info(f"===== {config['name']} ({agent_name}) 분석 완료 =====")
+                                # 개별 에이전트 분석 완료
 
         # 최종 보고서 표시
         if final_report and completed_count >= 5:  # 5개 이상 완료시
@@ -352,6 +363,10 @@ def run_analysis(symbol, company_name):
             </div>
             """, unsafe_allow_html=True)
 
+            # Session State에 저장 (대화형 서비스용)
+            st.session_state.final_report = final_report
+            st.session_state.agent_summaries = {name: state["content"] for name, state in agent_states.items() if state["content"]}
+
             # 다운로드
             st.download_button(
                 label="📋 보고서 다운로드",
@@ -360,22 +375,217 @@ def run_analysis(symbol, company_name):
                 mime="text/plain",
                 use_container_width=True
             )
+
+            # 🎉 대화형 Q&A 인터페이스 추가
+            st.markdown("---")
+            conversation_manager = get_conversation_manager()
+            conversation_manager.render_conversation_interface()
         elif completed_count < 7:
             st.warning(f"⚠️ 일부 분석이 완료되지 않았습니다 ({completed_count}/7)")
 
         # 최종 진행률
         update_progress(completed_count, len(agent_names))
 
-        # 로깅
-        logger.info(f"================== 주식 분석 완료 ==================")
-        logger.info(f"완료된 전문가 수: {completed_count}/7")
-        logger.info(f"최종 보고서 생성: {'예' if final_report else '아니오'}")
-        logger.info(f"분석 완료 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"====================================================")
+        # 순차 분석 완료
 
     except Exception as e:
         logger.error(f"분석 실행 중 치명적 오류 발생: {str(e)}", exc_info=True)
         st.error(f"분석 프로세스 오류: {e}")
+
+def run_parallel_analysis(symbol, company_name):
+    """병렬 처리 기반 AI 주식 분석 실행"""
+    try:
+        logger.info(f"=================== 병렬 분석 시작 ===================")
+        logger.info(f"종목: {symbol} ({company_name})")
+        logger.info(f"시작 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"====================================================")
+
+        # 병렬 엔진 인스턴스 가져오기
+        parallel_engine = get_parallel_engine()
+        logger.info(f"🎯 병렬 엔진 초기화 완료: {len(parallel_engine.agent_config)}개 에이전트 설정")
+
+        # 사이드바 상태 표시
+        show_parallel_status_indicator()
+
+        # 🔧 뉴스 데이터 미리 가져오기 (UI 표시용)
+        st.session_state[f"news_sources_{symbol}"] = fetch_news_for_display(company_name or "")
+        st.session_state[f"community_sources_{symbol}"] = []  # 커뮤니티는 빈 리스트로 초기화
+
+        # 분석 시작 안내
+        st.markdown("### 🚀 병렬 AI 분석 진행 중")
+        st.info("8개 전문 에이전트가 동시에 분석을 수행합니다. 약 1-2분 소요됩니다.")
+
+        # 🔥 버튼 클릭 없이 바로 병렬 실행 시작
+        logger.info("🔥🔥🔥 ULTRATHINK 수정: 병렬 분석 즉시 실행 시작 🔥🔥🔥")
+
+        # 세션 상태 초기화
+        st.session_state.parallel_execution_started = True
+        st.session_state.parallel_execution_completed = False
+        st.session_state.parallel_results = {}
+        st.session_state.parallel_progress = {}
+        st.session_state.current_analysis_type = "parallel"
+
+        # 병렬 실행 수행 (폴백: 순차 처리)
+        with st.spinner("분석 실행 중... (병렬 처리 시도, 실패시 순차 처리)"):
+            try:
+                # 병렬 처리 시도
+                logger.info(f"🚀🚀🚀 execute_agents_parallel 메서드 호출 직전 🚀🚀🚀")
+                success = parallel_engine.execute_agents_parallel(symbol, company_name)
+                logger.info(f"🎯🎯🎯 병렬 분석 시도 완료 - 성공: {success} 🎯🎯🎯")
+
+                if not success or len(parallel_engine.get_analysis_results()) < 3:
+                    logger.warning("병렬 처리 실패 - 순차 처리로 폴백")
+                    raise Exception("병렬 처리 실패")
+
+            except Exception as parallel_error:
+                logger.warning(f"병렬 처리 실패, 순차 처리로 폴백: {str(parallel_error)}")
+                st.warning("병렬 처리 실패 - 순차 처리로 전환합니다...")
+
+                # 순차 처리 실행
+                run_analysis(symbol, company_name)
+                return
+
+        # 병렬 처리 성공
+        analysis_results = parallel_engine.get_analysis_results()
+        if len(analysis_results) >= 5:
+            st.success(f"병렬 분석 완료! {len(analysis_results)}/8 에이전트 성공")
+
+            # 최종 보고서 생성 및 표시
+            from core.korean_supervisor_langgraph import generate_comprehensive_report, get_supervisor_llm
+            supervisor_llm = get_supervisor_llm()
+            final_report = generate_comprehensive_report(supervisor_llm, analysis_results, symbol, company_name)
+
+            if final_report:
+                st.markdown("### 📈 병렬 분석 종합 보고서")
+                st.markdown(final_report)
+
+                # Session State에 저장 (대화형 서비스용)
+                st.session_state.final_report = final_report
+                st.session_state.agent_summaries = analysis_results
+
+                # 대화형 Q&A 인터페이스
+                st.markdown("---")
+                conversation_manager = get_conversation_manager()
+                conversation_manager.render_conversation_interface()
+        else:
+            st.error(f"분석 실패: {len(analysis_results)}/8 에이전트만 성공")
+
+        # 진행률 표시 (분석 시작된 경우에만)
+        if st.session_state.get('parallel_execution_started', False):
+
+            # 진행률 대시보드 표시
+            render_parallel_progress_dashboard()
+
+            # 분석이 완료된 경우 결과 표시
+            if st.session_state.get('parallel_execution_completed', False):
+
+                # 분석 결과 가져오기
+                analysis_results = parallel_engine.get_analysis_results()
+
+                if len(analysis_results) >= 5:  # 최소 5개 에이전트 성공
+                    st.success(f"✅ 병렬 분석 완료! {len(analysis_results)}/8 에이전트 성공")
+
+                    # 최종 보고서 생성
+                    st.markdown("### 📝 종합 보고서 생성 중...")
+
+                    with st.spinner("Supervisor가 종합 보고서를 생성하고 있습니다..."):
+                        try:
+                            from core.korean_supervisor_langgraph import generate_comprehensive_report, get_supervisor_llm
+
+                            supervisor_llm = get_supervisor_llm()
+                            final_report = generate_comprehensive_report(
+                                supervisor_llm, analysis_results, symbol, company_name
+                            )
+
+                            # 최종 보고서 표시
+                            if final_report:
+                                st.markdown(f"""
+                                <div class="final-report">
+                                    <h2 class="report-title">🎯 병렬 분석 종합 투자 보고서</h2>
+                                    <div class="report-content">{final_report}</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                                # 다운로드 버튼
+                                st.download_button(
+                                    label="📋 보고서 다운로드",
+                                    data=final_report,
+                                    file_name=f"{symbol}_{company_name}_parallel_analysis_report.txt",
+                                    mime="text/plain",
+                                    use_container_width=True
+                                )
+
+                                # Session State에 보고서 저장 (대화형 서비스용)
+                                st.session_state.final_report = final_report
+                                st.session_state.agent_summaries = analysis_results
+
+                                logger.info("🎯 병렬 분석 최종 보고서 생성 완료")
+
+                                # 🎉 대화형 Q&A 인터페이스 추가
+                                st.markdown("---")
+                                conversation_manager = get_conversation_manager()
+                                conversation_manager.render_conversation_interface()
+                            else:
+                                st.error("최종 보고서 생성에 실패했습니다.")
+
+                        except Exception as report_error:
+                            logger.error(f"최종 보고서 생성 오류: {str(report_error)}")
+                            st.error(f"최종 보고서 생성 오류: {str(report_error)}")
+
+                    # 상세 분석 결과 (접을 수 있는 형태)
+                    with st.expander("📊 상세 분석 결과 보기"):
+                        render_parallel_results_summary()
+
+                else:
+                    st.error(f"⚠️ 분석 실패: {len(analysis_results)}/8 에이전트만 성공했습니다.")
+                    st.info("최소 5개 에이전트가 성공해야 종합 보고서를 생성할 수 있습니다.")
+
+                    # 부분 결과 표시
+                    if analysis_results:
+                        with st.expander("📊 부분 분석 결과 보기"):
+                            render_parallel_results_summary()
+
+        # 병렬 분석 완료
+
+    except Exception as e:
+        logger.error(f"병렬 분석 실행 중 치명적 오류 발생: {str(e)}", exc_info=True)
+        st.error(f"병렬 분석 프로세스 오류: {e}")
+
+def execute_analysis_based_on_method(symbol, company_name, analysis_method):
+    """선택된 분석 방법에 따라 실행"""
+    if analysis_method == "🚀 병렬 처리 (빠름)":
+        run_parallel_analysis(symbol, company_name)
+    else:  # "🔄 순차 처리 (안정)"
+        run_analysis(symbol, company_name)
+
+def render_conversation_sidebar_status():
+    """사이드바에 대화 상태 표시"""
+    conversation_manager = get_conversation_manager()
+
+    with st.sidebar:
+        st.markdown("### 💬 대화형 Q&A")
+
+        if conversation_manager.is_conversation_available():
+            # 대화 통계
+            stats = conversation_manager.get_conversation_stats()
+
+            if stats["conversation_started"]:
+                st.success("✅ 대화 활성")
+                st.metric("총 대화", stats["total_messages"])
+                st.metric("사용자 질문", stats["user_questions"])
+
+                # 대화 초기화 버튼
+                if st.button("🗑️ 대화 초기화", use_container_width=True):
+                    st.session_state.chat_messages = []
+                    st.session_state.conversation_started = False
+                    st.success("대화 내역이 초기화되었습니다.")
+                    st.rerun()
+            else:
+                st.info("💬 대화 준비됨")
+                st.caption("보고서 하단에서 AI와 대화해보세요!")
+        else:
+            st.warning("⏳ 분석 대기")
+            st.caption("분석 완료 후 대화 가능합니다")
 
 def main():
     # 메인 헤더
@@ -427,10 +637,32 @@ def main():
                 placeholder="예: 삼성전자, SK하이닉스"
             )
 
+        # 분석 방법 선택
+        st.markdown("**분석 방법 선택:**")
+        analysis_method = st.radio(
+            "분석 방법:",
+            ["🔄 순차 처리 (안정)", "🚀 병렬 처리 (빠름)"],
+            help="순차 처리: 에이전트 순차 실행 (3-5분)\n병렬 처리: 8개 에이전트 동시 실행 (1-2분, Rate Limit 위험)",
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+
+        # 선택된 방법에 대한 설명
+        if analysis_method == "🔄 순차 처리 (안정)":
+            st.info("💡 순차 처리: 에이전트가 순서대로 분석하며 실시간 진행상황을 확인할 수 있습니다. (권장)")
+        else:
+            st.warning("⚠️ 병렬 처리: 8개 전문 에이전트가 동시에 분석을 수행합니다. OpenAI Rate Limit 위험이 있습니다.")
+
         # 분석 시작 버튼
-        if st.button("🚀 AI 분석 시작", type="primary", use_container_width=True):
+        button_text = "🔄 순차 분석 시작" if analysis_method == "🔄 순차 처리 (안정)" else "🚀 병렬 분석 시작"
+
+        if st.button(button_text, type="primary", use_container_width=True):
             if symbol:
-                run_analysis(symbol.strip(), company_name.strip() if company_name else None)
+                execute_analysis_based_on_method(
+                    symbol.strip(),
+                    company_name.strip() if company_name else None,
+                    analysis_method
+                )
             else:
                 st.error("종목코드를 입력해주세요!")
 
@@ -438,13 +670,29 @@ def main():
         # 인기 종목 (오른쪽 사이드)
         st.markdown('<div class="popular-stocks"><p class="popular-title">🔥 인기 종목</p></div>', unsafe_allow_html=True)
         popular_stocks = [("005930", "삼성전자"), ("000660", "SK하이닉스"), ("035420", "NAVER"), ("005380", "현대차")]
+
+        # 인기 종목 분석 방법 (작은 라디오 버튼)
+        st.markdown('<p style="font-size: 0.8rem; color: #64748b; margin: 0.5rem 0;">분석 방법:</p>', unsafe_allow_html=True)
+        popular_analysis_method = st.radio(
+            "인기종목 분석방법:",
+            ["🔄 순차", "🚀 병렬"],
+            key="popular_analysis_method",
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+
         for code, name in popular_stocks:
             if st.button(f"{name}\n{code}", key=f"popular_{code}", use_container_width=True):
-                run_analysis(code, name)
+                # 선택된 분석 방법에 따라 실행
+                full_method = "🔄 순차 처리 (안정)" if popular_analysis_method == "🔄 순차" else "🚀 병렬 처리 (빠름)"
+                execute_analysis_based_on_method(code, name, full_method)
 
     # 시스템 정보
     with st.expander("ℹ️ 시스템 정보"):
-        st.markdown("**🤖 AI 전문가 구성:**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News")
+        st.markdown("**🤖 AI 전문가 구성:**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News\n\n**💬 대화형 Q&A:** 보고서 생성 후 AI와 대화하며 추가 질문 가능")
+
+    # 사이드바에 대화 상태 표시
+    render_conversation_sidebar_status()
 
 if __name__ == "__main__":
     main()

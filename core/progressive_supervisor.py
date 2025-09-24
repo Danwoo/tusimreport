@@ -33,7 +33,7 @@ class ProgressiveAnalysisEngine:
             "community_expert"         # 8단계: 커뮤니티 여론분석
         ]
 
-        logger.info("Progressive Analysis Engine 초기화 완료")
+        # Progressive Analysis Engine 초기화 완료
 
     def execute_agent_with_context_control(
         self,
@@ -44,11 +44,10 @@ class ProgressiveAnalysisEngine:
     ) -> Dict[str, Any]:
         """컨텍스트 제어하에 단일 에이전트 실행"""
         try:
-            logger.info(f"에이전트 실행 시작: {agent_name}")
+            # 에이전트 실행 시작
 
             # 컨텍스트 사용량 확인
             stats = self.context_manager.get_context_stats()
-            logger.info(f"컨텍스트 상태: {stats['available_tokens']:,} 토큰 사용 가능")
 
             agent = self.agents.get(agent_name)
             if not agent:
@@ -89,7 +88,8 @@ class ProgressiveAnalysisEngine:
                     "advanced_technical_expert": "ADVANCED_TECHNICAL_ANALYSIS_COMPLETE",
                     "institutional_trading_expert": "INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE",
                     "comparative_expert": "COMPARATIVE_ANALYSIS_COMPLETE",
-                    "esg_expert": "ESG_ANALYSIS_COMPLETE"
+                    "esg_expert": "ESG_ANALYSIS_COMPLETE",
+                    "community_expert": "COMMUNITY_ANALYSIS_COMPLETE"
                 }
 
                 expected_signal = completion_signals.get(agent_name)
@@ -106,7 +106,7 @@ class ProgressiveAnalysisEngine:
                     agent_name, content
                 )
 
-                logger.info(f"✅ {agent_name} 실행 완료 (완료 시그널: {is_complete})")
+                # 에이전트 실행 완료
 
                 return {
                     "agent_name": agent_name,

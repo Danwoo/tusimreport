@@ -51,8 +51,39 @@ def _fetch_paxnet_community_data(stock_code: str) -> Dict[str, Any]:
     try:
         logger.info(f"Fetching Paxnet community data for {stock_code}")
 
-        # Paxnet 크롤링 클라이언트 사용
-        result = fetch_paxnet_discussions(stock_code, max_posts=10)
+        # Paxnet 크롤링 클라이언트 사용 (2분 타임아웃)
+        import signal
+
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Paxnet 크롤링 2분 타임아웃")
+
+        # Windows에서는 signal.alarm이 지원되지 않으므로 threading 사용
+        import threading
+        import time
+
+        result_container = {}
+        exception_container = {}
+
+        def fetch_with_timeout():
+            try:
+                result_container['data'] = fetch_paxnet_discussions(stock_code, max_posts=10)
+            except Exception as e:
+                exception_container['error'] = e
+
+        # 🚀 45초 타임아웃으로 크롤링 실행 (빠른 실패로 시스템 효율성 개선)
+        thread = threading.Thread(target=fetch_with_timeout)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=45)  # 45초 타임아웃
+
+        if thread.is_alive():
+            logger.error(f"Paxnet 크롤링 45초 타임아웃 - 크롤링 실패")
+            return {"error": "Paxnet 크롤링 타임아웃", "posts": []}
+
+        if 'error' in exception_container:
+            raise exception_container['error']
+
+        result = result_container.get('data', {})
 
         if "error" in result:
             logger.error(f"Paxnet 데이터 수집 실패: {result['error']}")
@@ -66,9 +97,26 @@ def _fetch_paxnet_community_data(stock_code: str) -> Dict[str, Any]:
         return {"error": str(e), "posts": []}
 
 
+
 def _analyze_community_sentiment(company_name: str, stock_code: str, paxnet_data: Dict) -> Dict[str, Any]:
     """커뮤니티 데이터 감정 분석"""
     try:
+        # 크롤링 실패시 기본 분석 제공
+        if "error" in paxnet_data:
+            logger.warning(f"Paxnet 크롤링 실패 - 기본 커뮤니티 분석 제공: {paxnet_data['error']}")
+            return {
+                "community_sentiment": "중립",
+                "sentiment_score": 0.0,
+                "total_posts": 0,
+                "positive_posts": 0,
+                "negative_posts": 0,
+                "key_themes": ["데이터 수집 제한으로 인한 분석 불가"],
+                "analysis_summary": f"{company_name}의 온라인 커뮤니티 데이터 수집에 제한이 있어 정확한 투자자 심리 분석이 어려운 상황입니다. 다른 지표들을 통해 종합적인 투자 판단을 권장합니다.",
+                "data_source": "Paxnet (제한적)",
+                "last_updated": datetime.now().isoformat(),
+                "status": "fallback_analysis"
+            }
+
         # LLM 초기화
         llm_provider, llm_model_name, llm_api_key = get_llm_model()
         if llm_provider == "gemini":
