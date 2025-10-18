@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 
 
 @tool
-def get_community_sentiment_analysis(company_name: str, stock_code: str) -> Dict[str, Any]:
+def get_community_sentiment_analysis(
+    company_name: str, stock_code: str
+) -> Dict[str, Any]:
     """
     한국 투자 커뮤니티 감정 분석
     Paxnet 종목토론 기반 실제 투자자 의견 분석
@@ -66,9 +68,11 @@ def _fetch_paxnet_community_data(stock_code: str) -> Dict[str, Any]:
 
         def fetch_with_timeout():
             try:
-                result_container['data'] = fetch_paxnet_discussions(stock_code, max_posts=10)
+                result_container["data"] = fetch_paxnet_discussions(
+                    stock_code, max_posts=10
+                )
             except Exception as e:
-                exception_container['error'] = e
+                exception_container["error"] = e
 
         # 🚀 45초 타임아웃으로 크롤링 실행 (빠른 실패로 시스템 효율성 개선)
         thread = threading.Thread(target=fetch_with_timeout)
@@ -80,10 +84,10 @@ def _fetch_paxnet_community_data(stock_code: str) -> Dict[str, Any]:
             logger.error(f"Paxnet 크롤링 45초 타임아웃 - 크롤링 실패")
             return {"error": "Paxnet 크롤링 타임아웃", "posts": []}
 
-        if 'error' in exception_container:
-            raise exception_container['error']
+        if "error" in exception_container:
+            raise exception_container["error"]
 
-        result = result_container.get('data', {})
+        result = result_container.get("data", {})
 
         if "error" in result:
             logger.error(f"Paxnet 데이터 수집 실패: {result['error']}")
@@ -97,13 +101,16 @@ def _fetch_paxnet_community_data(stock_code: str) -> Dict[str, Any]:
         return {"error": str(e), "posts": []}
 
 
-
-def _analyze_community_sentiment(company_name: str, stock_code: str, paxnet_data: Dict) -> Dict[str, Any]:
+def _analyze_community_sentiment(
+    company_name: str, stock_code: str, paxnet_data: Dict
+) -> Dict[str, Any]:
     """커뮤니티 데이터 감정 분석"""
     try:
         # 크롤링 실패시 기본 분석 제공
         if "error" in paxnet_data:
-            logger.warning(f"Paxnet 크롤링 실패 - 기본 커뮤니티 분석 제공: {paxnet_data['error']}")
+            logger.warning(
+                f"Paxnet 크롤링 실패 - 기본 커뮤니티 분석 제공: {paxnet_data['error']}"
+            )
             return {
                 "community_sentiment": "중립",
                 "sentiment_score": 0.0,
@@ -114,19 +121,17 @@ def _analyze_community_sentiment(company_name: str, stock_code: str, paxnet_data
                 "analysis_summary": f"{company_name}의 온라인 커뮤니티 데이터 수집에 제한이 있어 정확한 투자자 심리 분석이 어려운 상황입니다. 다른 지표들을 통해 종합적인 투자 판단을 권장합니다.",
                 "data_source": "Paxnet (제한적)",
                 "last_updated": datetime.now().isoformat(),
-                "status": "fallback_analysis"
+                "status": "fallback_analysis",
             }
 
         # LLM 초기화
         llm_provider, llm_model_name, llm_api_key = get_llm_model()
         if llm_provider == "gemini":
             sentiment_llm = ChatGoogleGenerativeAI(
-                model=llm_model_name, temperature=0.0, google_api_key=llm_api_key
+                model=llm_model_name, google_api_key=llm_api_key
             )
         else:
-            sentiment_llm = ChatOpenAI(
-                model=llm_model_name, temperature=0.0, api_key=llm_api_key
-            )
+            sentiment_llm = ChatOpenAI(model=llm_model_name, api_key=llm_api_key)
 
         # 커뮤니티 게시글 텍스트 준비
         community_texts = []
@@ -181,13 +186,15 @@ def _analyze_community_sentiment(company_name: str, stock_code: str, paxnet_data
         community_sources = []
         if paxnet_data.get("posts"):
             for i, post in enumerate(paxnet_data["posts"]):
-                community_sources.append({
-                    "post_number": i + 1,
-                    "title": post.get("title", ""),
-                    "url": post.get("url", ""),
-                    "source": "Paxnet 종목토론",
-                    "type": "community_post"
-                })
+                community_sources.append(
+                    {
+                        "post_number": i + 1,
+                        "title": post.get("title", ""),
+                        "url": post.get("url", ""),
+                        "source": "Paxnet 종목토론",
+                        "type": "community_post",
+                    }
+                )
 
         return {
             "status": "success",
@@ -215,49 +222,53 @@ def create_community_agent():
     llm_provider, llm_model_name, llm_api_key = get_llm_model()
     if llm_provider == "gemini":
         llm = ChatGoogleGenerativeAI(
-            model=llm_model_name, temperature=0.1, google_api_key=llm_api_key
+            model=llm_model_name, google_api_key=llm_api_key
         )
     else:
-        llm = ChatOpenAI(model=llm_model_name, temperature=0.1, api_key=llm_api_key)
+        llm = ChatOpenAI(model=llm_model_name, api_key=llm_api_key)
 
     prompt = (
-        "당신은 한국 투자 커뮤니티의 여론과 심리를 분석하는 전문가입니다. "
-        "실제 개인 투자자들의 의견과 토론을 통해 시장의 생생한 분위기를 파악하고 분석해주세요.\n\n"
+        "당신은 증권사의 커뮤니티 여론 분석 애널리스트입니다. 중급 투자자를 대상으로 Paxnet 종목토론 등 개인투자자 커뮤니티의 여론과 투자 심리를 전문적이면서도 명료하게 분석해주세요.\n\n"
 
-        "먼저 `get_community_sentiment_analysis` 도구를 사용해서 최신 커뮤니티 감정 분석 데이터를 수집한 후, "
-        "다음과 같이 투자자 친화적으로 설명해주세요:\n\n"
+        "분석 시 다음 사항을 평가하세요: 1) 커뮤니티 여론 종합 평가(전체 투자 심리와 주요 이슈 및 토론 주제), "
+        "2) 개인투자자 투자 심리 분석(매수/매도/관망세, 단기/장기 관점, 기관·언론과 다른 시각), "
+        "3) 투자자 유의사항(커뮤니티 의견의 편향성이나 루머 가능성).\n\n"
 
-        "1. 현재 이 종목에 대한 투자자들의 분위기가 어떤지 요약해주세요\n"
-        "   - 전체적으로 긍정적인지, 부정적인지, 관망세인지\n"
-        "   - 투자 심리 점수를 쉬운 말로 설명해주세요\n\n"
+        "## 출력 형식 (반드시 이 구조를 따르세요):\n\n"
+        "```\n"
+        "## 커뮤니티 여론 분석\n\n"
 
-        "2. 투자자들이 가장 관심 갖는 이슈들을 알려주세요\n"
-        "   - 어떤 종류의 정보나 이슈에 집중하고 있는지\n"
-        "   - 기술적 분석, 기업 실적, 시장 이슈 등 어떤 관점이 많은지\n"
-        "   - 투자자들 사이에서 화제가 되는 특별한 정보나 루머가 있는지\n\n"
+        "### 커뮤니티 여론 종합 평가\n"
+        "[전체 투자 심리(긍정/중립/부정)와 주요 이슈 및 토론 주제를 2-3개 문단으로 서술. 500-600자]\n\n"
 
-        "3. 개인 투자자들의 실제 투자 심리를 분석해주세요\n"
-        "   - 매수세인지 매도세인지, 관망세인지\n"
-        "   - 단기적 관점인지 장기적 관점인지\n"
-        "   - 투자자들이 우려하는 리스크는 무엇인지\n\n"
+        "### 개인투자자 투자 심리 분석\n"
+        "[매수/매도/관망세, 단기/장기 관점, 기관·언론과 다른 개인투자자만의 시각이나 우려 사항을 2개 문단으로 서술. 400-500자]\n\n"
 
-        "4. 기관/언론과 다른 개인 투자자만의 시각이 있는지 분석해주세요\n"
-        "   - 커뮤니티에서만 나오는 독특한 관점이나 정보\n"
-        "   - 일반 뉴스와 다른 해석이나 의견\n"
-        "   - 투자자들 간의 의견 대립이 있는지\n\n"
+        "### 투자자 유의사항\n"
+        "[커뮤니티 의견의 편향성이나 루머 가능성을 1-2개 문단으로 서술. 300-400자]\n\n"
 
-        "5. 📋 분석에 사용된 커뮤니티 게시글 출처를 투명하게 공개해주세요\n"
-        "   - 상위 5-10개 게시글의 제목을 간단히 나열해주세요\n"
-        "   - 어떤 커뮤니티에서 수집된 데이터인지 명시해주세요\n\n"
+        "### 참고 데이터\n"
+        "- Paxnet: [종목토론 게시글 수, 분석 기간]\n"
+        "- 주요 게시글 제목 3-5개 나열\n"
+        "```\n\n"
 
-        "개인 투자자들의 생생한 목소리를 전달하되, 객관적이고 균형잡힌 시각으로 분석해주세요. "
-        "커뮤니티 특유의 감정적 반응이나 편향성도 있을 수 있음을 고려하여 해석해주세요.\n\n"
+        "## 작성 원칙:\n"
+        "- 총 분량: 1500-2000자 (각 섹션당 400-600자 목표)\n"
+        "- 문단 중심 서술 (투자 심리는 괄호 내 표기 예: 긍정 70%, 부정 15%)\n"
+        "- 투자 심리와 주요 토픽을 구체적으로 제시\n"
+        "- 게시글 제목 나열시에만 bullet point 사용\n"
+        "- 증권사 리서치 보고서 톤: 전문적이되 명료하게\n"
+        "- 커뮤니티 특유의 감정적 반응을 투자 관점에서 평가\n\n"
 
-        "참고: 이 분석은 투자자 여론 참고자료이며 투자 추천이 아닙니다. 커뮤니티 의견의 객관적 분석을 목적으로 합니다.\n\n"
-        "🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 'COMMUNITY_ANALYSIS_COMPLETE'라고 정확히 적어주세요. 이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
+        "데이터가 없는 경우 '정보 부족'으로 명시하고 추측 금지.\n\n"
+
+        "이 분석은 투자 참고자료이며, 특정 종목 매수/매도 권유가 아닙니다.\n\n"
+        "🚨 분석 완료 후 마지막 줄에 'COMMUNITY_ANALYSIS_COMPLETE'를 반드시 포함하세요."
     )
 
-    return create_react_agent(model=llm, tools=community_tools, prompt=prompt, name="community_expert")
+    return create_react_agent(
+        model=llm, tools=community_tools, prompt=prompt, name="community_expert"
+    )
 
 
 # 이 파일이 직접 실행될 때 테스트용
@@ -273,4 +284,5 @@ if __name__ == "__main__":
     result = get_community_sentiment_analysis(company_name, stock_code)
 
     import json
+
     print(json.dumps(result, indent=2, ensure_ascii=False))

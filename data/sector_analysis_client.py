@@ -216,25 +216,34 @@ class SectorAnalysisClient:
                 None
             )
             
+            # ✅ 토큰 최적화: 개별 동종업체 상세 데이터 제거, 요약 정보만 반환 (전문가 권장)
+            # LLM에게는 타겟 종목의 상대적 위치 + 섹터 벤치마크만 필요
+
             return {
                 "target_stock": stock_code,
-                "sector_info": sector_info,
-                "target_performance": target_performance,
-                "sector_rank": f"{target_rank}/{len(sorted_companies)}",
-                "percentile_rank": target_performance["percentile_rank"],
-                "sector_benchmark": {
-                    "average_return": sector_performance["sector_statistics"]["average_return"],
-                    "best_performer": sector_performance["sector_statistics"]["best_performer"]["stock_code"],
-                    "worst_performer": sector_performance["sector_statistics"]["worst_performer"]["stock_code"]
+                "sector_info": {
+                    "sector": sector_info["sector"],
+                    "sector_code": sector_info["sector_code"],
+                    "description": sector_info["description"],
+                    "peer_count": len(sector_info["peer_companies"])
                 },
-                "peer_comparison": [
-                    {
-                        "stock_code": company["stock_code"],
-                        "return_percent": company["return_percent"],
-                        "relative_to_target": company["return_percent"] - target_performance["return_percent"]
-                    }
-                    for company in sorted_companies if company["stock_code"] != stock_code
-                ],
+                "target_performance": {
+                    "return_percent": target_performance["return_percent"],
+                    "volatility": target_performance["volatility"],
+                    "relative_performance": target_performance["relative_performance"]
+                },
+                "sector_rank": f"{target_rank}/{len(sorted_companies)}",
+                "percentile_rank": round(target_performance["percentile_rank"], 1),
+                "sector_benchmark": {
+                    "average_return": round(sector_performance["sector_statistics"]["average_return"], 2),
+                    "median_return": round(sector_performance["sector_statistics"]["median_return"], 2),
+                    "best_return": round(sector_performance["sector_statistics"]["best_performer"]["return_percent"], 2),
+                    "worst_return": round(sector_performance["sector_statistics"]["worst_performer"]["return_percent"], 2),
+                    "return_std": round(sector_performance["sector_statistics"]["return_std"], 2)
+                },
+                "relative_to_sector_avg": round(
+                    target_performance["return_percent"] - sector_performance["sector_statistics"]["average_return"], 2
+                ),
                 "analysis_period": period_days,
                 "last_updated": datetime.now().isoformat()
             }

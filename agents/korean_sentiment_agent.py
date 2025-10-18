@@ -35,7 +35,9 @@ def get_enhanced_news_sentiment(company_name: str, stock_code: str) -> Dict[str,
     Naver News API + Tavily Search API 통합 (Dr. Rivera 기술지원)
     """
     try:
-        logger.info(f"Enhanced dual-source news sentiment analysis for {company_name} ({stock_code})")
+        logger.info(
+            f"Enhanced dual-source news sentiment analysis for {company_name} ({stock_code})"
+        )
 
         # 1. Naver News API 데이터 수집
         naver_data = _fetch_naver_news(company_name)
@@ -44,8 +46,9 @@ def get_enhanced_news_sentiment(company_name: str, stock_code: str) -> Dict[str,
         tavily_data = _fetch_tavily_news(company_name)
 
         # 3. 듀얼 소스 통합 및 LLM 분석
-        return _analyze_dual_source_sentiment(company_name, stock_code, naver_data, tavily_data)
-
+        return _analyze_dual_source_sentiment(
+            company_name, stock_code, naver_data, tavily_data
+        )
 
     except Exception as e:
         logger.error(f"Error in enhanced dual-source news sentiment analysis: {str(e)}")
@@ -89,27 +92,26 @@ def _fetch_tavily_news(company_name: str) -> Dict[str, Any]:
     try:
         tavily_client = TavilyNewsClient(settings.tavily_api_key)
         return tavily_client.search_company_news(
-            company_name=company_name,
-            max_results=10  # 3자 전문가 추천: 10개로 통일
+            company_name=company_name, max_results=10  # 3자 전문가 추천: 10개로 통일
         )
     except Exception as e:
         logger.error(f"Tavily Search API 오류: {str(e)}")
         return {"error": str(e), "news_items": []}
 
 
-def _analyze_dual_source_sentiment(company_name: str, stock_code: str, naver_data: Dict, tavily_data: Dict) -> Dict[str, Any]:
+def _analyze_dual_source_sentiment(
+    company_name: str, stock_code: str, naver_data: Dict, tavily_data: Dict
+) -> Dict[str, Any]:
     """듀얼 소스 통합 감정 분석 (Dr. Rivera 최적화)"""
     try:
         # LLM 초기화
         llm_provider, llm_model_name, llm_api_key = get_llm_model()
         if llm_provider == "gemini":
             sentiment_llm = ChatGoogleGenerativeAI(
-                model=llm_model_name, temperature=0.0, google_api_key=llm_api_key
+                model=llm_model_name, google_api_key=llm_api_key
             )
         else:
-            sentiment_llm = ChatOpenAI(
-                model=llm_model_name, temperature=0.0, api_key=llm_api_key
-            )
+            sentiment_llm = ChatOpenAI(model=llm_model_name, api_key=llm_api_key)
 
         # 3자 전문가 추천: 균형잡힌 분석 데이터 (각 10개씩)
         naver_texts = []
@@ -174,26 +176,32 @@ def _analyze_dual_source_sentiment(company_name: str, stock_code: str, naver_dat
         # 네이버 뉴스 소스 (10개 - 완전 공개)
         if naver_data.get("items"):
             for item in naver_data["items"]:
-                news_sources.append({
-                    "title": item.get("title", "").replace("<b>", "").replace("</b>", ""),
-                    "url": item.get("link", ""),
-                    "source": "[Naver] 네이버 뉴스 API",
-                    "pub_date": item.get("pubDate", ""),
-                    "type": "naver"
-                })
+                news_sources.append(
+                    {
+                        "title": item.get("title", "")
+                        .replace("<b>", "")
+                        .replace("</b>", ""),
+                        "url": item.get("link", ""),
+                        "source": "[Naver] 네이버 뉴스 API",
+                        "pub_date": item.get("pubDate", ""),
+                        "type": "naver",
+                    }
+                )
 
         # Tavily 뉴스 소스 (10개 - 완전 공개)
         if tavily_data.get("news_items"):
             for item in tavily_data["news_items"]:
                 # Dr. Rivera 추천: 상세한 출처 정보
-                source_domain = item.get('source', 'Unknown')
-                news_sources.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "source": f"[Tavily] {source_domain}",
-                    "score": item.get("score", 0),
-                    "type": "tavily"
-                })
+                source_domain = item.get("source", "Unknown")
+                news_sources.append(
+                    {
+                        "title": item.get("title", ""),
+                        "url": item.get("url", ""),
+                        "source": f"[Tavily] {source_domain}",
+                        "score": item.get("score", 0),
+                        "type": "tavily",
+                    }
+                )
 
         return {
             "status": "success",
@@ -202,7 +210,7 @@ def _analyze_dual_source_sentiment(company_name: str, stock_code: str, naver_dat
             "data_sources": {
                 "naver_news_count": len(naver_data.get("items", [])),
                 "tavily_news_count": len(tavily_data.get("news_items", [])),
-                "total_analyzed": len(all_news_texts)
+                "total_analyzed": len(all_news_texts),
             },
             "sentiment_analysis": parsed_result,
             "news_sources": news_sources,
@@ -227,50 +235,53 @@ def create_sentiment_agent():
     """Sentiment Analysis Agent 생성 함수"""
     llm_provider, llm_model_name, llm_api_key = get_llm_model()
     if llm_provider == "gemini":
-        llm = ChatGoogleGenerativeAI(
-            model=llm_model_name, temperature=0.1, google_api_key=llm_api_key
-        )
+        llm = ChatGoogleGenerativeAI(model=llm_model_name, google_api_key=llm_api_key)
     else:
-        llm = ChatOpenAI(model=llm_model_name, temperature=0.1, api_key=llm_api_key)
+        llm = ChatOpenAI(model=llm_model_name, api_key=llm_api_key)
 
     prompt = (
-        "당신은 뉴스와 시장 심리를 분석하는 감정 분석 전문가입니다. "
-        "일반 투자자들이 쉽게 이해할 수 있도록 현재 시장의 분위기와 여론을 분석해주세요.\n\n"
+        "당신은 증권사의 뉴스·여론 분석 애널리스트입니다. 중급 투자자를 대상으로 해당 종목의 시장 심리와 뉴스 동향을 전문적이면서도 명료하게 분석해주세요.\n\n"
 
-        "먼저 `get_naver_news_sentiment` 도구를 사용해서 최신 뉴스 감정 분석 데이터를 수집한 후, "
-        "다음과 같이 친근하고 이해하기 쉽게 설명해주세요:\n\n"
+        "분석 시 다음 사항을 평가하세요: 1) 뉴스 감정 분석(Naver + Tavily 듀얼 소스 기반 긍정/중립/부정 비율과 주요 토픽), "
+        "2) 투자 심리 영향(뉴스가 투자 심리와 단기 주가에 미치는 영향), "
+        "3) 주요 이슈 파악(가장 영향력 있는 긍정적/부정적 뉴스의 핵심 내용과 시장 반응).\n\n"
 
-        "1. 현재 이 종목에 대한 뉴스 분위기가 어떤지 간단히 요약해주세요\n"
-        "   - 전체적으로 긍정적인지, 부정적인지, 중립적인지\n"
-        "   - 감정 점수를 쉬운 말로 설명해주세요\n\n"
+        "## 출력 형식 (반드시 이 구조를 따르세요):\n\n"
+        "```\n"
+        "## 뉴스 및 여론 분석\n\n"
 
-        "2. 어떤 종류의 뉴스가 많은지 알려주세요\n"
-        "   - 가장 긍정적인 뉴스는 어떤 내용인지\n"
-        "   - 가장 우려되는 뉴스는 어떤 내용인지\n"
-        "   - 주요 키워드들을 알기 쉽게 설명해주세요\n\n"
+        "### 뉴스 여론 종합 평가\n"
+        "[전체 sentiment(긍정/중립/부정 비율)와 감정 점수를 제시하고, 주요 토픽과 키워드를 2-3개 문단으로 서술. 500-600자]\n\n"
 
-        "3. 투자자 입장에서 이런 뉴스들이 어떤 의미인지 설명해주세요\n"
-        "   - 시장 참여자들이 어떤 마음가짐을 가지고 있을 것 같은지\n"
-        "   - 단기적으로 주가에 어떤 영향을 줄 수 있는지\n"
-        "   - 이런 분위기가 언제까지 이어질 것 같은지\n\n"
+        "### 주요 뉴스 및 시장 심리 분석\n"
+        "[가장 영향력 있는 긍정/부정 뉴스 각 1-2개씩 소개하고, 투자 심리와 단기 주가 영향을 2-3개 문단으로 서술. 500-600자]\n\n"
 
-        "4. 투자자들이 주의해서 봐야 할 점들을 조언해주세요\n"
-        "   - 뉴스의 신뢰성은 어떤지\n"
-        "   - 감정적으로 과도하게 반응하지 않으려면 어떻게 해야 하는지\n\n"
+        "### 투자자 유의사항\n"
+        "[뉴스 과열/과도한 비관론 여부와 감정적 매매 주의사항을 1-2개 문단으로 서술. 300-400자]\n\n"
 
-        "5. 📰 분석에 사용된 뉴스 출처를 투명하게 공개해주세요\n"
-        "   - 상위 5-10개 뉴스의 제목과 발행일을 간단히 나열해주세요\n"
-        "   - 어떤 언론사의 뉴스가 주로 사용되었는지 알려주세요\n\n"
+        "### 참고 데이터\n"
+        "- Naver News: [분석 기간, 뉴스 건수]\n"
+        "- Tavily Search: [글로벌 뉴스 건수]\n"
+        "- 주요 뉴스 제목 3-5개 나열\n"
+        "```\n\n"
 
-        "전문 용어보다는 쉬운 말로 설명해주시고, 숫자나 점수를 제시할 때는 "
-        "그것이 실제로 어떤 의미인지 구체적인 예시와 함께 설명해주세요. "
-        "마치 친구가 투자 조언을 해주듯이 자연스럽고 따뜻한 톤으로 작성해주세요.\n\n"
+        "## 작성 원칙:\n"
+        "- 총 분량: 1500-2000자 (각 섹션당 400-600자 목표)\n"
+        "- 문단 중심 서술 (sentiment 점수는 괄호 내 표기 예: 긍정 65%, 부정 20%)\n"
+        "- 구체적 sentiment 점수와 주요 토픽 필수 포함\n"
+        "- 뉴스 제목이나 출처 나열시에만 bullet point 사용\n"
+        "- 증권사 리서치 보고서 톤: 전문적이되 명료하게\n"
+        "- 뉴스 영향을 투자 관점에서 구체적으로 평가\n\n"
 
-        "참고: 이 분석은 뉴스 여론 참고자료이며 투자 추천이 아닙니다. 객관적인 정보 제공을 목적으로 합니다.\n\n"
-        "🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 'SENTIMENT_ANALYSIS_COMPLETE'라고 정확히 적어주세요. 이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
+        "데이터가 없는 경우 '정보 부족'으로 명시하고 추측 금지.\n\n"
+
+        "이 분석은 투자 참고자료이며, 특정 종목 매수/매도 권유가 아닙니다.\n\n"
+        "🚨 분석 완료 후 마지막 줄에 'SENTIMENT_ANALYSIS_COMPLETE'를 반드시 포함하세요."
     )
 
-    return create_react_agent(model=llm, tools=sentiment_tools, prompt=prompt, name="sentiment_expert")
+    return create_react_agent(
+        model=llm, tools=sentiment_tools, prompt=prompt, name="sentiment_expert"
+    )
 
 
 # 이 파일이 직접 실행될 때 테스트용

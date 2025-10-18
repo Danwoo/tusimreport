@@ -23,37 +23,51 @@ from utils.helpers import convert_numpy_types
 
 logger = logging.getLogger(__name__)
 
-def calculate_momentum_indicators_logic(stock_code: str, period: int = 252) -> Dict[str, Any]:
+
+def calculate_momentum_indicators_logic(
+    stock_code: str, period: int = 252
+) -> Dict[str, Any]:
     """모멘텀 지표 계산 로직 (RSI, MACD, 스토캐스틱 등)"""
     try:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=period + 100)
-        df = fdr.DataReader(stock_code, start=start_date.strftime('%Y-%m-%d'))
-        if df.empty: return {"error": f"No data for {stock_code}"}
+        df = fdr.DataReader(stock_code, start=start_date.strftime("%Y-%m-%d"))
+        if df.empty:
+            return {"error": f"No data for {stock_code}"}
 
-        high = df['High'].astype(np.float64)
-        low = df['Low'].astype(np.float64)
-        close = df['Close'].astype(np.float64)
-        
+        high = df["High"].astype(np.float64)
+        low = df["Low"].astype(np.float64)
+        close = df["Close"].astype(np.float64)
+
         rsi = talib.RSI(close, timeperiod=14)
         macd_line, macd_signal, _ = talib.MACD(close)
         slowk, slowd = talib.STOCH(high, low, close)
 
-        return convert_numpy_types({
-            "status": "success",
-            "indicators": {
-                "RSI": float(rsi.iloc[-1]),
-                "MACD": {'line': float(macd_line.iloc[-1]), 'signal': float(macd_signal.iloc[-1])},
-                "Stochastic": {'K': float(slowk.iloc[-1]), 'D': float(slowd.iloc[-1])}
+        return convert_numpy_types(
+            {
+                "status": "success",
+                "indicators": {
+                    "RSI": float(rsi.iloc[-1]),
+                    "MACD": {
+                        "line": float(macd_line.iloc[-1]),
+                        "signal": float(macd_signal.iloc[-1]),
+                    },
+                    "Stochastic": {
+                        "K": float(slowk.iloc[-1]),
+                        "D": float(slowd.iloc[-1]),
+                    },
+                },
             }
-        })
+        )
     except Exception as e:
         return {"error": str(e)}
+
 
 @tool
 def calculate_momentum_indicators(stock_code: str, period: int = 252) -> Dict[str, Any]:
     """모멘텀 지표 계산 (RSI, MACD, 스토캐스틱, CCI, Williams %R 등)"""
     return calculate_momentum_indicators_logic(stock_code, period)
+
 
 # 다른 지표 함수들도 위와 같이 _logic과 @tool로 분리할 수 있으나, 테스트를 위해 하나만 분리합니다.
 # For brevity, only one function is refactored. Others like trend, volatility follow the same pattern.
@@ -61,52 +75,57 @@ def calculate_momentum_indicators(stock_code: str, period: int = 252) -> Dict[st
 # 도구 목록
 advanced_technical_tools = [calculate_momentum_indicators]
 
+
 def create_advanced_technical_agent():
     """Advanced Technical Agent 생성 함수"""
     llm_provider, llm_model_name, llm_api_key = get_llm_model()
     if llm_provider == "gemini":
-        llm = ChatGoogleGenerativeAI(model=llm_model_name, temperature=0.1, google_api_key=llm_api_key)
+        llm = ChatGoogleGenerativeAI(model=llm_model_name, google_api_key=llm_api_key)
     else:
-        llm = ChatOpenAI(model=llm_model_name, temperature=0.1, api_key=llm_api_key)
+        llm = ChatOpenAI(model=llm_model_name, api_key=llm_api_key)
 
     prompt = (
-        "당신은 차트와 기술적 지표를 분석하는 기술적 분석 전문가입니다. "
-        "투자자들이 쉽게 이해할 수 있도록 차트의 흐름과 매매 신호를 분석해주세요.\n\n"
+        "당신은 증권사의 기술적 분석 애널리스트입니다. 중급 투자자를 대상으로 차트 패턴과 기술적 지표를 전문적이면서도 명료하게 분석해주세요.\n\n"
 
-        "먼저 `calculate_momentum_indicators` 도구를 사용해서 다양한 기술적 지표들을 계산한 후, "
-        "다음과 같이 친근하고 이해하기 쉽게 설명해주세요:\n\n"
+        "분석 시 다음 사항을 평가하세요: 1) 추세 및 모멘텀(주가 추세 방향, 이동평균선 배치, RSI/MACD/스토캐스틱 수치와 의미), "
+        "2) 지지선·저항선 및 변동성(주요 가격대, 볼린저 밴드, 돌파 시 예상 움직임), "
+        "3) 단기 매매 타이밍(진입/청산 타이밍과 허위 신호 가능성).\n\n"
 
-        "1. 현재 주가의 전체적인 흐름이 어떤지 설명해주세요\n"
-        "   - 상승 추세인지, 하락 추세인지, 횡보하고 있는지\n"
-        "   - 이동평균선들이 어떻게 배치되어 있는지\n"
-        "   - 추세가 얼마나 강한지 약한지\n\n"
+        "## 출력 형식 (반드시 이 구조를 따르세요):\n\n"
+        "```\n"
+        "## 기술적 분석\n\n"
 
-        "2. 주요 기술적 지표들이 보여주는 신호를 알려주세요\n"
-        "   - RSI나 MACD 같은 지표들이 현재 어떤 상태인지\n"
-        "   - 과매수나 과매도 상태인지\n"
-        "   - 매수 신호인지 매도 신호인지 (하지만 이건 참고용일 뿐이에요)\n\n"
+        "### 추세 및 모멘텀 분석\n"
+        "[현재 추세(상승/하락/횡보)와 이동평균선 배치를 평가하고, RSI/MACD/스토캐스틱 수치와 의미를 2-3개 문단으로 서술. 500-600자]\n\n"
 
-        "3. 거래량은 어떤 상태인지 분석해주세요\n"
-        "   - 거래량이 많은지 적은지\n"
-        "   - 가격 움직임과 거래량이 일치하는지\n"
-        "   - 기관들이 들어오고 있는지 나가고 있는지\n\n"
+        "### 지지선·저항선 및 변동성\n"
+        "[주요 지지선/저항선 가격대와 볼린저 밴드 분석, 가격대 돌파 시 예상 움직임을 2개 문단으로 서술. 400-500자]\n\n"
 
-        "4. 차트에서 중요하게 봐야 할 가격대들을 알려주세요\n"
-        "   - 지지선과 저항선이 어디에 있는지\n"
-        "   - 이 가격들을 뚫으면 어떻게 될 것 같은지\n"
-        "   - 볼린저 밴드나 다른 지표들이 제시하는 중요 구간\n\n"
+        "### 단기 매매 타이밍 및 유의사항\n"
+        "[진입/청산 타이밍 제시와 허위 신호 주의사항을 2개 문단으로 서술. 400-500자]\n\n"
 
-        "5. 단기적으로 주의해서 봐야 할 점들을 조언해주세요\n"
-        "   - 변동성이 큰지 작은지\n"
-        "   - 가짜 신호(속임수)가 나올 가능성은 없는지\n"
-        "   - 전체 시장 상황과 개별 종목이 일치하는지\n\n"
+        "### 참고 데이터\n"
+        "- TA-Lib: [사용된 지표 목록]\n"
+        "- 분석 기간: [기간]\n"
+        "```\n\n"
 
-        "전문 용어를 사용할 때는 쉬운 말로 함께 설명해주시고, "
-        "지표 수치를 말할 때는 그게 좋은 신호인지 나쁜 신호인지도 함께 알려주세요. "
-        "너무 복잡하게 말하지 마시고, 일반 투자자도 이해할 수 있게 설명해주세요.\n\n"
+        "## 작성 원칙:\n"
+        "- 총 분량: 1500-2000자 (각 섹션당 400-600자 목표)\n"
+        "- 문단 중심 서술 (지표 수치는 괄호 내 표기 예: RSI 65 - 과매수 진입)\n"
+        "- 구체적인 지표 수치와 가격대 필수 포함 (RSI, MACD, 지지/저항선 가격)\n"
+        "- 전문 용어 사용시 간단한 설명 병기\n"
+        "- 증권사 리서치 보고서 톤: 전문적이되 명료하게\n"
+        "- 매매 타이밍은 근거와 함께 명확히 제시\n\n"
 
-        "참고: 이 분석은 기술적 분석 참고자료이며 매매 추천이 아닙니다. 실제 투자 시에는 신중히 판단하세요.\n\n"
-        "🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 'ADVANCED_TECHNICAL_ANALYSIS_COMPLETE'라고 정확히 적어주세요. 이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
+        "데이터가 없는 경우 '정보 부족'으로 명시하고 추측 금지.\n\n"
+
+        "이 분석은 투자 참고자료이며, 특정 종목 매수/매도 권유가 아닙니다.\n\n"
+        "🚨 분석 완료 후 마지막 줄에 'ADVANCED_TECHNICAL_ANALYSIS_COMPLETE'를 반드시 포함하세요."
     )
-    
-    return create_react_agent(model=llm, tools=advanced_technical_tools, prompt=prompt, name="advanced_technical_expert")
+
+    return create_react_agent(
+        model=llm,
+        tools=advanced_technical_tools,
+        prompt=prompt,
+        name="advanced_technical_expert",
+    )

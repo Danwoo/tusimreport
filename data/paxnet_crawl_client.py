@@ -23,6 +23,8 @@ try:
     from selenium.webdriver.common.by import By
     from selenium.webdriver.chrome.options import Options
     from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
     import chromedriver_autoinstaller
     from webdriver_manager.chrome import ChromeDriverManager
     SELENIUM_AVAILABLE = True
@@ -55,14 +57,18 @@ class PaxnetCrawlClient:
         try:
             chrome_options = Options()
             if headless:
-                chrome_options.add_argument("--headless")
+                chrome_options.add_argument("--headless=new")  # New headless mode
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            chrome_options.add_experimental_option("useAutomationExtension", False)
 
-            # 🚀 극도로 빠른 로딩을 위한 최적화 옵션
+            # 실제 브라우저처럼 보이도록 User-Agent 설정
+            chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+            # 🚀 빠른 로딩을 위한 최적화 옵션 (JavaScript는 필수 - AJAX 콘텐츠 로딩)
             chrome_options.add_argument("--disable-extensions")
             chrome_options.add_argument("--disable-plugins")
             chrome_options.add_argument("--disable-background-timer-throttling")
@@ -71,10 +77,8 @@ class PaxnetCrawlClient:
             chrome_options.add_argument("--disable-features=TranslateUI")
             chrome_options.add_argument("--disable-ipc-flooding-protection")
             chrome_options.add_argument("--disable-images")  # 이미지 로딩 비활성화
-            chrome_options.add_argument("--disable-javascript")  # JS 비활성화 (정적 콘텐츠만)
-            chrome_options.add_argument("--disable-css")  # CSS 로딩 최소화
-            chrome_options.add_argument("--aggressive")
-            chrome_options.add_argument("--max_old_space_size=2048")  # 메모리 사용량 감소
+            # JavaScript는 활성화 필요 - Paxnet은 AJAX로 게시글 로딩
+            chrome_options.add_argument("--blink-settings=imagesEnabled=false")  # 이미지 완전 차단
 
             try:
                 chromedriver_autoinstaller.install()
@@ -83,10 +87,10 @@ class PaxnetCrawlClient:
                 service = Service(ChromeDriverManager().install())
                 self.driver = webdriver.Chrome(service=service, options=chrome_options)
 
-            # 🚀 빠른 타임아웃 설정 (Paxnet이 느려서 aggressive 설정)
-            self.driver.implicitly_wait(5)  # 5초 implicit wait
-            self.driver.set_page_load_timeout(15)  # 15초 페이지 로드 timeout
-            self.driver.set_script_timeout(10)  # 10초 스크립트 timeout
+            # 🚀 Paxnet AJAX 콘텐츠 로딩을 위한 타임아웃 설정
+            self.driver.implicitly_wait(10)  # 10초 implicit wait (AJAX 대기)
+            self.driver.set_page_load_timeout(30)  # 30초 페이지 로드 timeout
+            self.driver.set_script_timeout(20)  # 20초 스크립트 timeout (AJAX 실행)
 
             # 🔧 활성 드라이버 목록에 추가
             with _driver_lock:
@@ -99,13 +103,14 @@ class PaxnetCrawlClient:
             logger.error(f"드라이버 설정 실패: {e}")
             return False
 
-    def fetch_stock_discussions(self, stock_code: str, max_posts: int = 10) -> Dict[str, Any]:
+    def fetch_stock_discussions(self, stock_code: str, max_posts: int = 10, fetch_content: bool = False) -> Dict[str, Any]:
         """
         종목 토론 게시글 수집
 
         Args:
             stock_code: 종목 코드 (예: '005930')
             max_posts: 최대 게시글 수
+            fetch_content: 개별 게시글 내용 수집 여부 (False면 제목만, 빠름)
 
         Returns:
             Dict containing posts data or error information
@@ -119,10 +124,22 @@ class PaxnetCrawlClient:
         try:
             logger.info(f"Paxnet 종목토론 페이지 접근: {stock_code}")
             self.driver.get(url)
-            time.sleep(5)
+
+            # AJAX 콘텐츠 로딩 대기 - 명시적 대기 사용
+            try:
+                wait = WebDriverWait(self.driver, 15)
+                # .best-title 또는 .board-col 요소가 로드될 때까지 대기
+                wait.until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, ".best-title, .board-col"))
+                )
+                logger.info("AJAX 콘텐츠 로딩 완료")
+                time.sleep(2)  # 추가 안정화 대기
+            except Exception as e:
+                logger.warning(f"AJAX 대기 중 경고: {e}, 계속 진행...")
+                time.sleep(5)  # Fallback 대기
 
             # 게시글 수집
-            posts = self._extract_posts(stock_code, max_posts)
+            posts = self._extract_posts(stock_code, max_posts, fetch_content)
 
             if posts:
                 logger.info(f"게시글 수집 완료: {len(posts)}개")
@@ -146,29 +163,39 @@ class PaxnetCrawlClient:
             logger.error(f"Paxnet 크롤링 오류: {e}")
             return {"error": f"크롤링 오류: {str(e)}"}
 
-    def _extract_posts(self, stock_code: str, max_posts: int) -> List[Dict[str, Any]]:
+    def _extract_posts(self, stock_code: str, max_posts: int, fetch_content: bool = False) -> List[Dict[str, Any]]:
         """게시글 목록 추출"""
         posts = []
 
         try:
-            # 여러 시도로 안정적 데이터 수집
+            # 여러 CSS 선택자로 안정적 데이터 수집
+            title_elements = []
+            selectors_to_try = [
+                "a.best-title",  # 베스트 게시글
+                "p.tit a",  # 일반 게시글 제목
+                ".board-col a[href*='bbsWrtView']",  # 게시글 링크
+                ".tit a"  # 제목 링크
+            ]
+
             for attempt in range(3):
                 try:
-                    title_elements = self.driver.find_elements(By.CSS_SELECTOR, "a.best-title")
-                    logger.info(f"시도 {attempt + 1}: {len(title_elements)}개 게시글 발견")
+                    for selector in selectors_to_try:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        if elements and len(elements) > len(title_elements):
+                            title_elements = elements
+                            logger.info(f"시도 {attempt + 1}, 선택자 '{selector}': {len(title_elements)}개 게시글 발견")
 
                     if len(title_elements) >= max_posts:
                         break
 
-                    time.sleep(2)
+                    if attempt < 2:
+                        time.sleep(2)
 
                 except Exception as e:
                     logger.warning(f"시도 {attempt + 1} 실패: {e}")
                     if attempt < 2:
                         time.sleep(3)
                         continue
-                    else:
-                        title_elements = []
 
             # 게시글 정보 수집
             post_info_list = []
@@ -197,9 +224,13 @@ class PaxnetCrawlClient:
             # 각 게시글 내용 수집
             for i, post_info in enumerate(post_info_list):
                 try:
-                    logger.debug(f"게시글 {i+1}/{len(post_info_list)} 처리 중...")
-
-                    content = self._get_post_content(post_info["detail_url"])
+                    # fetch_content=True인 경우에만 개별 페이지 접근
+                    if fetch_content:
+                        logger.debug(f"게시글 {i+1}/{len(post_info_list)} 내용 수집 중...")
+                        content = self._get_post_content(post_info["detail_url"])
+                    else:
+                        # 제목만 사용 (빠른 수집)
+                        content = post_info["title"]  # 감정 분석은 제목만으로도 가능
 
                     post_data = {
                         "title": post_info["title"],
@@ -209,16 +240,16 @@ class PaxnetCrawlClient:
 
                     posts.append(post_data)
 
-                    # 서버 부하 방지를 위한 딜레이
-                    if i < len(post_info_list) - 1:
-                        time.sleep(3)
+                    # 서버 부하 방지를 위한 짧은 딜레이 (내용 수집시만)
+                    if fetch_content and i < len(post_info_list) - 1:
+                        time.sleep(1)
 
                 except Exception as e:
                     logger.warning(f"내용 추출 실패: {e}")
                     # Timeout 발생시 제목만으로 데이터 생성 (fallback)
                     post_data = {
                         "title": post_info["title"],
-                        "content": f"[내용 추출 실패] {post_info['title']}",  # 제목을 내용으로 대체
+                        "content": post_info["title"],  # 제목을 내용으로 대체
                         "url": post_info["detail_url"]
                     }
                     posts.append(post_data)
@@ -232,10 +263,18 @@ class PaxnetCrawlClient:
     def _get_post_content(self, detail_url: str) -> str:
         """개별 게시글 내용 추출"""
         try:
-            # 30초 타임아웃 설정으로 개별 페이지 로드
-            self.driver.set_page_load_timeout(30)
+            # 15초 타임아웃으로 빠른 페이지 로드 (AJAX는 이미 로드됨)
+            self.driver.set_page_load_timeout(15)
             self.driver.get(detail_url)
-            time.sleep(2)
+
+            # AJAX 콘텐츠 대기
+            try:
+                wait = WebDriverWait(self.driver, 5)
+                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".view-content, .content, body")))
+            except:
+                pass
+
+            time.sleep(1)  # 안정화 대기 감소
 
             # 다양한 셀렉터로 내용 추출 시도
             content_selectors = [
@@ -301,13 +340,14 @@ class PaxnetCrawlClient:
 
 
 # 편의 함수
-def fetch_paxnet_discussions(stock_code: str, max_posts: int = 10) -> Dict[str, Any]:
+def fetch_paxnet_discussions(stock_code: str, max_posts: int = 10, fetch_content: bool = False) -> Dict[str, Any]:
     """
     Paxnet 종목토론 데이터 수집 편의 함수
 
     Args:
         stock_code: 종목 코드
         max_posts: 최대 게시글 수
+        fetch_content: 개별 게시글 내용 수집 여부 (기본값 False - 제목만, 빠름)
 
     Returns:
         게시글 데이터 또는 오류 정보
@@ -325,7 +365,7 @@ def fetch_paxnet_discussions(stock_code: str, max_posts: int = 10) -> Dict[str, 
                     "last_updated": datetime.now().isoformat()
                 }
 
-            return client.fetch_stock_discussions(stock_code, max_posts)
+            return client.fetch_stock_discussions(stock_code, max_posts, fetch_content)
     except Exception as e:
         logger.error(f"Paxnet 데이터 수집 실패: {e}")
         return {"error": f"데이터 수집 실패: {str(e)}"}

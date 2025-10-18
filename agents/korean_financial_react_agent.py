@@ -2,15 +2,8 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from matplotlib import font_manager
-import tempfile
 
-# matplotlib backend 설정 (GUI 경고 방지)
-import matplotlib
-
-matplotlib.use("Agg")
+# matplotlib import 제거됨 (Plotly 차트로 대체)
 
 # 한국 주식 데이터 라이브러리
 import FinanceDataReader as fdr
@@ -37,8 +30,9 @@ def get_korean_stock_data(stock_code: str) -> Dict[str, Any]:
     try:
         logger.info(f"Fetching Korean stock data for {stock_code}")
 
-        # FinanceDataReader로 기본 정보 가져오기
-        df = fdr.DataReader(stock_code, start="2024-01-01")
+        # FinanceDataReader로 기본 정보 가져오기 (최근 90일)
+        start_date = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+        df = fdr.DataReader(stock_code, start=start_date)
 
         if df.empty:
             return {"error": f"No data found for stock code {stock_code}"}
@@ -179,91 +173,8 @@ def get_pykrx_market_data(stock_code: str) -> Dict[str, Any]:
         return {"error": str(e)}
 
 
-@tool
-def save_stock_chart(
-    stock_code: str, chart_data: Optional[dict] = None
-) -> Dict[str, Any]:
-    """한국어 라벨링된 주가 차트 생성 및 저장"""
-    try:
-        logger.info(f"Creating chart for {stock_code}")
-
-        # 한국어 폰트 설정
-        font_candidates = [
-            "Malgun Gothic",
-            "AppleGothic",
-            "Noto Sans CJK KR",
-            "DejaVu Sans",
-        ]
-        available_fonts = [f.name for f in font_manager.fontManager.ttflist]
-
-        for font_name in font_candidates:
-            if font_name in available_fonts:
-                plt.rcParams["font.family"] = font_name
-                plt.rcParams["font.size"] = 9
-                plt.rcParams["axes.unicode_minus"] = False
-                break
-
-        # 데이터 가져오기 (chart_data가 없으면 직접 조회)
-        if not chart_data:
-            df = fdr.DataReader(stock_code, start="2024-01-01")
-            if df.empty:
-                return {"error": "No data available for charting"}
-
-        # 차트 생성
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), height_ratios=[3, 1])
-
-        # 주가 차트
-        ax1.plot(df.index, df["Close"], linewidth=2, label="종가", color="#1f77b4")
-        ax1.fill_between(df.index, df["Close"], alpha=0.3, color="#1f77b4")
-
-        # 이동평균선
-        if len(df) > 20:
-            sma20 = df["Close"].rolling(20).mean()
-            ax1.plot(
-                df.index, sma20, linewidth=1, label="20일선", color="#ff7f0e", alpha=0.8
-            )
-
-        if len(df) > 60:
-            sma60 = df["Close"].rolling(60).mean()
-            ax1.plot(
-                df.index, sma60, linewidth=1, label="60일선", color="#2ca02c", alpha=0.8
-            )
-
-        ax1.set_title(f"{stock_code} 주가 차트", fontsize=14, pad=20)
-        ax1.set_ylabel("주가 (원)", fontsize=12)
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-
-        # 거래량 차트
-        ax2.bar(df.index, df["Volume"], alpha=0.7, color="#d62728")
-        ax2.set_title("거래량", fontsize=12)
-        ax2.set_ylabel("거래량", fontsize=10)
-        ax2.grid(True, alpha=0.3)
-
-        # 날짜 포맷팅
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
-        ax2.xaxis.set_major_locator(mdates.WeekdayLocator())
-        plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
-
-        plt.tight_layout()
-
-        # Streamlit에서 접근 가능한 고정 파일명으로 저장
-        chart_filename = "korean_stock_chart.png"
-        plt.savefig(chart_filename, dpi=150, bbox_inches="tight")
-        plt.close()
-
-        return {
-            "chart_saved": True,
-            "chart_path": chart_filename,
-            "chart_type": "price_volume",
-            "data_points": len(df),
-            "created_at": datetime.now().isoformat(),
-            "message": f"Chart saved as {chart_filename} for stock {stock_code}"
-        }
-
-    except Exception as e:
-        logger.error(f"Error creating chart: {str(e)}")
-        return {"error": str(e), "chart_saved": False}
+# save_stock_chart 함수 제거됨 (Plotly 인터랙티브 차트로 대체)
+# main.py의 create_interactive_chart() 사용
 
 
 @tool
@@ -383,7 +294,7 @@ def get_sector_analysis(stock_code: str) -> Dict[str, Any]:
 financial_tools = [
     get_korean_stock_data,
     get_pykrx_market_data,
-    save_stock_chart,
+    # save_stock_chart,  # 제거됨 (Plotly 인터랙티브 차트로 대체)
     get_dart_company_data,
     get_macro_economic_data,
     get_sector_analysis,
@@ -405,48 +316,43 @@ korean_financial_react_agent = create_react_agent(
     tools=financial_tools,
     name="financial_expert",
     prompt=(
-        "당신은 기업의 재무 상태를 분석하는 재무 분석 전문가입니다. "
-        "투자자들이 쉽게 이해할 수 있도록 회사의 재무 건전성과 성과를 분석해주세요.\n\n"
+        "당신은 증권사의 재무 분석 애널리스트입니다. 중급 투자자를 대상으로 기업의 재무 상태와 투자 가치를 전문적이면서도 명료하게 분석해주세요.\n\n"
 
-        "다음 도구들을 사용해서 종합적인 데이터를 수집한 후, 자연스럽고 이해하기 쉽게 설명해주세요:\n"
-        "1. get_korean_stock_data - 기본 주식 데이터 수집\n"
-        "2. get_pykrx_market_data - 시장 데이터 수집\n"
-        "3. get_dart_company_data - 공식 재무제표 데이터\n"
-        "4. get_macro_economic_data - 경제 환경 파악\n"
-        "5. get_sector_analysis - 동종업계 비교\n"
-        "6. save_stock_chart - 주가 차트 생성\n\n"
+        "분석 시 다음 사항을 평가하세요: 1) 기업 개요(사업 구조, 시가총액, 최근 실적 트렌드), "
+        "2) 재무 건전성(ROE, ROA, 부채비율 등 핵심 지표와 업종 평균 대비 평가), "
+        "3) 밸류에이션(PER, PBR 지표와 저평가/적정/고평가 판단), "
+        "4) 투자 매력도(성장성, 배당, 안정성 측면 종합 평가).\n\n"
 
-        "분석할 때는 다음과 같이 친근하게 설명해주세요:\n\n"
+        "## 출력 형식 (반드시 이 구조를 따르세요):\n\n"
+        "```\n"
+        "## 재무 및 투자 가치 분석\n\n"
 
-        "1. 이 회사가 어떤 사업을 하는 회사인지 간단히 소개해주세요\n"
-        "   - 주요 사업 영역과 어떻게 돈을 버는지\n"
-        "   - 회사 규모와 시장에서의 위치\n\n"
+        "### 기업 개요 및 재무 현황\n"
+        "[사업 구조, 시가총액, 최근 실적을 전년/전분기 대비 성장률과 함께 3개 문단으로 서술. 500-600자]\n\n"
 
-        "2. 회사의 성장세는 어떤지 알려주세요\n"
-        "   - 매출이나 이익이 늘고 있는지, 줄고 있는지\n"
-        "   - 최근 몇 년간의 추세를 쉽게 설명해주세요\n"
-        "   - 같은 업종 다른 회사들과 비교했을 때는 어떤지\n\n"
+        "### 재무 건전성 및 수익성 평가\n"
+        "[ROE, ROA, 부채비율 등 핵심 지표를 업종 평균과 비교하여 3개 문단으로 서술. 500-600자]\n\n"
 
-        "3. 회사의 재무 건전성은 어떤지 평가해주세요\n"
-        "   - 빚이 너무 많지는 않은지\n"
-        "   - 현금 보유 상황은 어떤지\n"
-        "   - 앞으로도 안정적으로 사업을 이어갈 수 있을지\n\n"
+        "### 밸류에이션 및 투자 의견\n"
+        "[PER, PBR 평가와 투자 매력도를 성장성/배당/안정성 측면에서 2-3개 문단으로 서술. 400-500자]\n\n"
 
-        "4. 투자자 관점에서 이 회사의 매력도를 설명해주세요\n"
-        "   - 주가가 기업 가치 대비 적정한지\n"
-        "   - 배당은 얼마나 주는지\n"
-        "   - 투자할 때 어떤 점들을 고려해야 하는지\n\n"
+        "### 참고 데이터\n"
+        "- DART API: [재무제표 기준일]\n"
+        "- PyKRX: [시장 데이터 기준일]\n"
+        "```\n\n"
 
-        "5. 주의해서 봐야 할 위험 요소가 있다면 알려주세요\n"
-        "   - 재무적으로 취약한 부분이 있는지\n"
-        "   - 앞으로 어떤 변화를 주의 깊게 봐야 하는지\n\n"
+        "## 작성 원칙:\n"
+        "- 총 분량: 1500-2000자 (각 섹션당 500-600자 목표)\n"
+        "- 문단 중심 서술 (핵심 수치는 괄호 내 표기 예: ROE 15.2%, PER 12.3배)\n"
+        "- 구체적 수치 필수 포함 (매출, 영업이익률, PER, PBR, ROE 등)\n"
+        "- 전문 용어 사용시 간단한 설명 병기 (예: ROE 15.2% - 업종 평균 12% 대비 우수)\n"
+        "- 증권사 리서치 보고서 톤: 전문적이되 명료하게\n"
+        "- 투자 의견은 근거와 함께 명확히 제시 (저평가/적정/고평가)\n\n"
 
-        "전문 용어를 사용할 때는 간단한 설명을 함께 해주시고, "
-        "숫자를 제시할 때는 그것이 좋은 건지 나쁜 건지, 평균적인 수준인지 함께 설명해주세요. "
-        "마치 친구가 투자 조언을 해주듯이 따뜻하고 이해하기 쉬운 톤으로 작성해주세요.\n\n"
+        "데이터가 없는 경우 '정보 부족'으로 명시하고 추측 금지.\n\n"
 
-        "참고: 이 분석은 재무 참고자료이며 투자 추천이 아닙니다. 객관적인 정보 제공을 목적으로 합니다.\n\n"
-        "🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 'FINANCIAL_ANALYSIS_COMPLETE'라고 정확히 적어주세요. 이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
+        "이 분석은 투자 참고자료이며, 특정 종목 매수/매도 권유가 아닙니다.\n\n"
+        "🚨 분석 완료 후 마지막 줄에 'FINANCIAL_ANALYSIS_COMPLETE'를 반드시 포함하세요."
     ),
 )
 
