@@ -1,24 +1,26 @@
 import streamlit as st
 import logging
 from datetime import datetime
-from PIL import Image
-import time
 import requests
 
-from core.korean_supervisor_langgraph import stream_korean_stock_analysis
+from core.korean_supervisor_langgraph import (
+    stream_korean_stock_analysis,
+    generate_comprehensive_report,
+    get_supervisor_llm,
+)
 from core.streamlit_parallel_engine import get_parallel_engine
 from core.streamlit_conversation_manager import get_conversation_manager
+from data.sqlite_client import get_db_client
 from utils.streamlit_helpers import (
     render_parallel_progress_dashboard,
-    render_parallel_execution_controls,
     render_parallel_results_summary,
-    show_parallel_status_indicator
+    show_parallel_status_indicator,
 )
 from config.settings import settings
 from utils.helpers import setup_logging
-from data.chart_generator import create_stock_chart
+from data.plotly_chart_generator import create_interactive_chart
 
-# 로깅 설정 - 파일 로깅 활성화
+# 로깅 설정
 logger = setup_logging(settings.log_level, enable_file_logging=True)
 
 # Streamlit 페이지 설정
@@ -28,56 +30,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-
-# 간소화된 스타일
-st.markdown("""
-<style>
-    .main > div { padding-top: 0.5rem; max-width: 1200px; margin: 0 auto; }
-    .main-header { text-align: center; padding: 1rem 0 0.5rem 0; border-bottom: 1px solid #f1f5f9; margin-bottom: 1rem; }
-    .main-title { font-size: 2rem; font-weight: 700; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-    .main-subtitle { font-size: 1rem; color: #64748b; margin: 0.3rem 0 0 0; }
-    .input-section { background: white; padding: 1rem; border-radius: 8px; border: 1px solid #e2e8f0;
-                     margin-bottom: 1rem; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
-    .input-header { font-size: 1.1rem; font-weight: 600; color: #334155; margin: 0 0 1rem 0; }
-    .popular-stocks { background: #f8fafc; padding: 0.8rem; border-radius: 6px; border: 1px solid #e2e8f0; }
-    .popular-title { font-size: 0.85rem; font-weight: 600; color: #475569; margin: 0 0 0.5rem 0; text-align: center; }
-    .stock-btn { display: block; width: 100%; padding: 0.4rem; margin: 0.2rem 0; background: white;
-                 border: 1px solid #e2e8f0; border-radius: 4px; color: #334155; font-size: 0.75rem;
-                 text-align: center; transition: all 0.15s ease; cursor: pointer; }
-    .stock-btn:hover { background: #f1f5f9; border-color: #cbd5e1; }
-    .progress-section { background: white; padding: 1rem; border-radius: 8px; border: 1px solid #e2e8f0;
-                        margin: 0.8rem 0; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
-    .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem; }
-    .progress-title { font-size: 1rem; font-weight: 600; color: #334155; margin: 0; }
-    .progress-percentage { font-size: 1rem; font-weight: 600; color: #667eea; }
-    .progress-bar { width: 100%; height: 6px; background: #f1f5f9; border-radius: 3px; overflow: hidden; margin: 0.3rem 0; }
-    .progress-fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); border-radius: 3px; transition: width 0.3s ease; }
-    .progress-status { font-size: 0.85rem; color: #64748b; margin: 0.3rem 0 0 0; }
-    .results-section { margin-top: 1rem; }
-    .result-card { background: white; border-radius: 8px; padding: 1rem; margin: 0.8rem 0; border: 1px solid #e2e8f0;
-                   box-shadow: 0 1px 4px rgba(0,0,0,0.04); border-left: 3px solid var(--accent-color); }
-    .result-header { display: flex; align-items: center; margin-bottom: 0.8rem; padding-bottom: 0.8rem; border-bottom: 1px solid #f1f5f9; }
-    .result-icon { font-size: 1.2rem; margin-right: 0.8rem; width: 32px; height: 32px; border-radius: 6px;
-                   display: flex; align-items: center; justify-content: center; background: var(--bg-color); }
-    .result-title { flex: 1; }
-    .result-name { font-size: 1rem; font-weight: 600; color: var(--accent-color); margin: 0; }
-    .result-desc { font-size: 0.8rem; color: #64748b; margin: 0.2rem 0 0 0; }
-    .result-status { padding: 0.25rem 0.6rem; border-radius: 8px; font-size: 0.7rem; font-weight: 500; text-transform: uppercase; }
-    .status-waiting { background: #f1f5f9; color: #64748b; }
-    .status-running { background: #fef3c7; color: #92400e; animation: pulse 2s infinite; }
-    .status-completed { background: #dcfce7; color: #166534; }
-    .result-content { line-height: 1.5; color: #374151; font-size: 0.9rem; white-space: pre-wrap; }
-    .final-report { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;
-                    padding: 1.5rem; border-radius: 8px; margin: 1.5rem 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .report-title { font-size: 1.3rem; font-weight: 700; margin: 0 0 0.8rem 0; }
-    .report-content { background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 6px;
-                      backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.2); line-height: 1.5;
-                      white-space: pre-wrap; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
-    @media (max-width: 768px) { .main-title { font-size: 1.8rem; } .input-section { padding: 0.8rem; } }
-</style>
-""", unsafe_allow_html=True)
 
 # 종목 데이터베이스
 STOCK_DATABASE = {
@@ -89,7 +41,7 @@ STOCK_DATABASE = {
         "068270": "셀트리온",
         "207940": "삼성바이오로직스",
         "005490": "POSCO홀딩스",
-        "035720": "카카오"
+        "035720": "카카오",
     },
     "중견주": {
         "028260": "삼성물산",
@@ -98,218 +50,197 @@ STOCK_DATABASE = {
         "003550": "LG",
         "017670": "SK텔레콤",
         "030200": "KT",
-        "032830": "삼성생명"
+        "032830": "삼성생명",
     },
     "성장주": {
         "251270": "넷마블",
         "036570": "엔씨소프트",
         "259960": "크래프톤",
-        "352820": "하이브"
-    }
+        "352820": "하이브",
+    },
 }
 
+
 def fetch_news_for_display(company_name):
-    """UI 표시용 뉴스 데이터 가져오기"""
     try:
         client_id = settings.naver_client_id
         client_secret = settings.naver_client_secret
-
         if not client_id or not client_secret:
             return []
-
-        # 🔧 최적화된 검색어 (감정 분석과 동일한 로직)
-        if company_name == "KT":
-            search_query = f"{company_name} 주식"
-        elif company_name in ["LG", "SK"]:
-            search_query = f"{company_name} 그룹"
-        elif company_name in ["현대차"]:
-            search_query = f"{company_name} 자동차"
-        else:
-            search_query = f"{company_name} 주식"
-
+        search_query = (
+            f"{company_name} 주식"
+            if company_name == "KT"
+            else (
+                f"{company_name} 그룹"
+                if company_name in ["LG", "SK"]
+                else (
+                    f"{company_name} 자동차"
+                    if company_name == "현대차"
+                    else f"{company_name} 주식"
+                )
+            )
+        )
         url = "https://openapi.naver.com/v1/search/news.json"
         headers = {
             "X-Naver-Client-Id": client_id,
             "X-Naver-Client-Secret": client_secret,
         }
-        params = {
-            "query": search_query,
-            "display": 10,
-            "sort": "sim",
-        }
-
+        params = {"query": search_query, "display": 10, "sort": "sim"}
         response = requests.get(url, headers=headers, params=params, timeout=10)
         response.raise_for_status()
         news_data = response.json()
-
-        # 뉴스 데이터 정제
-        news_sources = []
-        for item in news_data.get("items", []):
-            news_sources.append({
+        return [
+            {
                 "title": item.get("title", "").replace("<b>", "").replace("</b>", ""),
                 "url": item.get("link", ""),
-                "pub_date": item.get("pubDate", "")[:16]  # 날짜만 간단히
-            })
-
-        return news_sources
-
+                "pub_date": item.get("pubDate", "")[:16],
+            }
+            for item in news_data.get("items", [])
+        ]
     except Exception as e:
         logger.error(f"뉴스 데이터 가져오기 실패: {str(e)}")
         return []
 
+
 def get_agent_config(agent_name):
-    """에이전트별 설정"""
     configs = {
-        "context_expert": ("🌍", "시장 환경 분석", "#3b82f6", "#dbeafe", "거시경제 및 시장 동향"),
-        "sentiment_expert": ("📰", "뉴스 여론 분석", "#8b5cf6", "#ede9fe", "뉴스 감정 및 시장 심리"),
-        "financial_expert": ("💰", "재무 상태 분석", "#f59e0b", "#fef3c7", "재무제표 및 기업 건전성"),
-        "advanced_technical_expert": ("📈", "기술적 분석", "#ef4444", "#fee2e2", "차트 패턴 및 기술 지표"),
-        "institutional_trading_expert": ("🏦", "기관 수급 분석", "#06b6d4", "#cffafe", "기관투자자 매매 동향"),
-        "comparative_expert": ("⚖️", "상대 가치 분석", "#10b981", "#d1fae5", "동종업계 비교 평가"),
-        "esg_expert": ("🌱", "ESG 분석", "#84cc16", "#ecfccb", "지속가능경영 평가"),
-        "community_expert": ("💬", "커뮤니티 여론 분석", "#f97316", "#fed7aa", "실제 투자자 의견 및 심리")
+        "context_expert": ("🌍", "시장 환경 분석", "거시경제 및 시장 동향"),
+        "sentiment_expert": ("📰", "뉴스 여론 분석", "뉴스 감정 및 시장 심리"),
+        "financial_expert": ("💰", "재무 상태 분석", "재무제표 및 기업 건전성"),
+        "advanced_technical_expert": ("📈", "기술적 분석", "차트 패턴 및 기술 지표"),
+        "institutional_trading_expert": (
+            "🏦",
+            "기관 수급 분석",
+            "기관투자자 매매 동향",
+        ),
+        "comparative_expert": ("⚖️", "상대 가치 분석", "동종업계 비교 평가"),
+        "esg_expert": ("🌱", "ESG 분석", "지속가능경영 평가"),
+        "community_expert": ("💬", "커뮤니티 여론 분석", "실제 투자자 의견 및 심리"),
     }
-    if agent_name in configs:
-        icon, name, color, bg, desc = configs[agent_name]
-        return {"icon": icon, "name": name, "color": color, "bg": bg, "desc": desc}
-    return {"icon": "🤖", "name": agent_name, "color": "#6b7280", "bg": "#f9fafb", "desc": "AI 분석"}
+    return configs.get(agent_name, ("🤖", agent_name, "AI 분석"))
 
-def create_result_card(agent_name, config, status="waiting", content="", news_sources=None):
-    """결과 카드 생성 (뉴스 소스 정보 포함)"""
+
+def render_result_card(agent_name, status="waiting", content="", news_sources=None):
+    config = get_agent_config(agent_name)
     status_text = {"waiting": "대기 중", "running": "분석 중", "completed": "완료"}
-    if not content and status == "waiting":
-        content = f"<em style='color: #9ca3af;'>{config['name']}을 준비하고 있습니다...</em>"
+    status_state = {"waiting": "running", "running": "running", "completed": "complete"}
+    with st.container():
+        st.subheader(f"{config[0]} {config[1]}")
+        st.caption(config[2])
+        with st.status(status_text[status], state=status_state[status]):
+            if not content and status == "waiting":
+                st.write(f"{config[1]}을 준비하고 있습니다...")
+            else:
+                st.write(content)
+            if (
+                agent_name in ["sentiment_expert", "community_expert"]
+                and news_sources
+                and status == "completed"
+            ):
+                with st.expander(
+                    f"{'📰' if agent_name == 'sentiment_expert' else '💬'} 분석된 {'뉴스' if agent_name == 'sentiment_expert' else '커뮤니티 게시글'} (상위 5개)"
+                ):
+                    for i, item in enumerate(news_sources[:5], 1):
+                        title = item.get("title", "").strip()
+                        url = item.get("url", "")
+                        if title:
+                            st.link_button(f"{i}. {title}", url)
 
-    # 🔧 뉴스 감정 분석과 커뮤니티 분석의 경우 데이터 소스 추가
-    news_section = ""
-    if agent_name == "sentiment_expert" and news_sources and status == "completed":
-        news_section = "<div style='margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #f1f5f9;'>"
-        news_section += "<h4 style='font-size: 0.9rem; color: #64748b; margin: 0 0 0.5rem 0;'>📰 분석된 뉴스 (상위 5개)</h4>"
-        for i, news in enumerate(news_sources[:5], 1):
-            title = news.get('title', '').strip()
-            url = news.get('url', '')
-            if title:
-                news_section += f"<div style='margin: 0.3rem 0; font-size: 0.8rem;'>"
-                news_section += f"<a href='{url}' target='_blank' style='color: #667eea; text-decoration: none;'>{i}. {title}</a>"
-                news_section += "</div>"
-        news_section += "</div>"
-    elif agent_name == "community_expert" and news_sources and status == "completed":
-        news_section = "<div style='margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #f1f5f9;'>"
-        news_section += "<h4 style='font-size: 0.9rem; color: #64748b; margin: 0 0 0.5rem 0;'>💬 분석된 커뮤니티 게시글 (상위 5개)</h4>"
-        for i, post in enumerate(news_sources[:5], 1):
-            title = post.get('title', '').strip()
-            url = post.get('url', '')
-            if title:
-                news_section += f"<div style='margin: 0.3rem 0; font-size: 0.8rem;'>"
-                news_section += f"<a href='{url}' target='_blank' style='color: #f97316; text-decoration: none;'>{i}. {title}</a>"
-                news_section += "</div>"
-        news_section += "</div>"
-
-    return f"""<div class="result-card" style="--accent-color: {config['color']}; --bg-color: {config['bg']};">
-        <div class="result-header">
-            <div class="result-icon">{config['icon']}</div>
-            <div class="result-title">
-                <h3 class="result-name">{config['name']}</h3>
-                <p class="result-desc">{config['desc']}</p>
-            </div>
-            <span class="result-status status-{status}">{status_text[status]}</span>
-        </div>
-        <div class="result-content">{content}{news_section}</div>
-    </div>"""
 
 def run_analysis(symbol, company_name):
-    """분석 실행"""
-
-    # 분석 유형 설정 (순차 처리)
     st.session_state.current_analysis_type = "sequential"
-
-    # 뉴스 데이터 및 차트 미리 생성
     with st.spinner("📰 뉴스 데이터 수집 중..."):
-        news_sources = fetch_news_for_display(company_name)
-        st.session_state[f"news_sources_{symbol}"] = news_sources
+        st.session_state[f"news_sources_{symbol}"] = fetch_news_for_display(
+            company_name
+        )
+    with st.spinner("📈 인터랙티브 차트 생성 중..."):
+        # 차트 설정 가져오기 (기본값: 6개월, 기본 지표)
+        chart_period = st.session_state.get("chart_period", "6M")
+        chart_indicators = st.session_state.get("chart_indicators", ["MA5", "MA20", "MA60", "RSI", "MACD"])
 
-    with st.spinner("📈 차트 생성 중..."):
-        chart_base64 = create_stock_chart(symbol, company_name, period=120, chart_type="candle")
-        if chart_base64:
-            st.session_state[f"chart_{symbol}"] = chart_base64
-
-    # 결과 섹션 시작
-    st.markdown(f'<div class="results-section"><h2 style="color: #334155; margin: 0 0 1rem 0; font-size: 1.5rem;">📊 {symbol} {company_name} 분석 결과</h2></div>', unsafe_allow_html=True)
-
-    # 차트 표시
-    if f"chart_{symbol}" in st.session_state:
-        st.markdown("### 📈 기술적 차트 분석")
-        chart_html = f'<img src="data:image/png;base64,{st.session_state[f"chart_{symbol}"]}" style="width: 100%; max-width: 800px; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">'
-        st.markdown(chart_html, unsafe_allow_html=True)
-        st.markdown("---")
+        chart_fig = create_interactive_chart(
+            symbol=symbol,
+            company_name=company_name,
+            period=chart_period,
+            indicators=chart_indicators
+        )
+        st.session_state[f"chart_{symbol}"] = chart_fig if chart_fig else None
+        if not chart_fig:
+            st.warning("차트 생성 실패: 데이터 없음")
+            logger.warning(f"차트 생성 실패: {symbol}")
+    st.header(f"📊 {symbol} {company_name} 분석 결과")
+    if f"chart_{symbol}" in st.session_state and st.session_state[f"chart_{symbol}"]:
+        st.subheader("📈 인터랙티브 차트 분석")
+        try:
+            st.plotly_chart(
+                st.session_state[f"chart_{symbol}"],
+                use_container_width=True,
+                key=f"chart_plotly_{symbol}_main"
+            )
+        except Exception as e:
+            st.error(f"차트 표시 오류: {e}")
+            logger.error(f"차트 표시 오류: {str(e)}", exc_info=True)
+        st.divider()
     progress_container = st.empty()
-
-    # 에이전트 설정
-    agent_names = ["context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert", "institutional_trading_expert", "comparative_expert", "esg_expert", "community_expert"]
-    result_containers = {}
-    for agent_name in agent_names:
-        config = get_agent_config(agent_name)
-        result_containers[agent_name] = st.empty()
-        result_containers[agent_name].markdown(create_result_card(agent_name, config, "waiting"), unsafe_allow_html=True)
-
-    # 상태 변수
+    agent_names = [
+        "context_expert",
+        "sentiment_expert",
+        "financial_expert",
+        "advanced_technical_expert",
+        "institutional_trading_expert",
+        "comparative_expert",
+        "esg_expert",
+        "community_expert",
+    ]
+    result_containers = {name: st.empty() for name in agent_names}
     agent_states = {name: {"status": "waiting", "content": ""} for name in agent_names}
     completed_count, final_report = 0, ""
 
     def update_progress(completed, total, current_agent=""):
         progress_pct = (completed / total) * 100
-        status_text = f"{completed}/{total} 분석 완료"
-        if current_agent:
-            config = get_agent_config(current_agent)
-            status_text += f" • 현재: {config['name']}"
-        progress_container.markdown(f'<div class="progress-section"><div class="progress-header"><h3 class="progress-title">분석 진행 상황</h3><span class="progress-percentage">{progress_pct:.0f}%</span></div><div class="progress-bar"><div class="progress-fill" style="width: {progress_pct}%;"></div></div><p class="progress-status">{status_text}</p></div>', unsafe_allow_html=True)
+        status_text = f"{completed}/{total} 분석 완료" + (
+            f" • 현재: {get_agent_config(current_agent)[1]}" if current_agent else ""
+        )
+        with progress_container.container():
+            st.subheader("분석 진행 상황")
+            st.progress(progress_pct / 100)
+            st.metric("진행률", f"{progress_pct:.0f}%")
+            st.text(status_text)
 
     try:
-        # 로깅
-        logger.info(f"================== 주식 분석 시작 ==================")
-        logger.info(f"종목코드: {symbol}")
-        logger.info(f"회사명: {company_name}")
-        logger.info(f"분석 시작 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"====================================================")
-
-        # 분석 실행
+        logger.info(f"주식 분석 시작: {symbol} {company_name} at {datetime.now()}")
         for chunk_data in stream_korean_stock_analysis(symbol, company_name):
             if "error" in chunk_data:
-                st.error(f"분석 중 오류 발생: {chunk_data['error']}")
+                st.error(f"분석 중 오류: {chunk_data['error']}")
                 return
-
             supervisor_data = chunk_data.get("supervisor", {})
             if supervisor_data:
                 messages = supervisor_data.get("messages", [])
                 current_stage = supervisor_data.get("current_stage", "")
-
-                # 진행 중 상태 업데이트
                 if "분석 시작" in current_stage:
                     for agent_name in agent_names:
                         if agent_name in current_stage:
                             agent_states[agent_name]["status"] = "running"
-                            config = get_agent_config(agent_name)
-                            result_containers[agent_name].markdown(
-                                create_result_card(agent_name, config, "running"),
-                                unsafe_allow_html=True
+                            with result_containers[agent_name]:
+                                render_result_card(agent_name, "running")
+                            update_progress(
+                                completed_count, len(agent_names), agent_name
                             )
-                            update_progress(completed_count, len(agent_names), agent_name)
                             break
-
-                # 최종 보고서 처리
                 if supervisor_data.get("final_report_generated"):
                     for msg in messages:
-                        if isinstance(msg, dict):
-                            msg_content = msg.get("content", "")
-                        else:
-                            msg_content = msg.content if hasattr(msg, "content") else str(msg)
-
-                        if supervisor_data.get("progressive_mode") and len(msg_content) > 100:
+                        msg_content = (
+                            msg.get("content", "")
+                            if isinstance(msg, dict)
+                            else getattr(msg, "content", str(msg))
+                        )
+                        if (
+                            supervisor_data.get("progressive_mode")
+                            and len(msg_content) > 100
+                        ):
                             final_report = msg_content.strip()
                             break
                     continue
-
-                # 에이전트 완료 처리
                 completion_signals = {
                     "context_expert": "MARKET_CONTEXT_ANALYSIS_COMPLETE",
                     "sentiment_expert": "SENTIMENT_ANALYSIS_COMPLETE",
@@ -320,379 +251,484 @@ def run_analysis(symbol, company_name):
                     "esg_expert": "ESG_ANALYSIS_COMPLETE",
                     "community_expert": "COMMUNITY_ANALYSIS_COMPLETE",
                 }
-
                 for msg in messages:
-                    if isinstance(msg, dict):
-                        msg_content = msg.get("content", "")
-                    else:
-                        msg_content = msg.content if hasattr(msg, "content") else str(msg)
-
+                    msg_content = (
+                        msg.get("content", "")
+                        if isinstance(msg, dict)
+                        else getattr(msg, "content", str(msg))
+                    )
                     for agent_name, signal in completion_signals.items():
-                        if (signal in msg_content and
-                            agent_states[agent_name]["status"] != "completed"):
-
+                        if (
+                            signal in msg_content
+                            and agent_states[agent_name]["status"] != "completed"
+                        ):
                             content = msg_content.replace(signal, "").strip()
                             if len(content) > 100:
                                 agent_states[agent_name]["status"] = "completed"
                                 agent_states[agent_name]["content"] = content
                                 completed_count += 1
-
-                                # 카드 업데이트
-                                config = get_agent_config(agent_name)
-                                # 감정 분석과 커뮤니티 분석의 경우 데이터 소스 추가
-                                card_news_sources = None
-                                if agent_name == "sentiment_expert":
-                                    card_news_sources = st.session_state.get(f"news_sources_{symbol}", [])
-                                elif agent_name == "community_expert":
-                                    card_news_sources = st.session_state.get(f"community_sources_{symbol}", [])
-
-                                result_containers[agent_name].markdown(
-                                    create_result_card(agent_name, config, "completed", content, card_news_sources),
-                                    unsafe_allow_html=True
+                                card_news_sources = (
+                                    st.session_state.get(f"news_sources_{symbol}", [])
+                                    if agent_name == "sentiment_expert"
+                                    else st.session_state.get(
+                                        f"community_sources_{symbol}", []
+                                    )
                                 )
-
+                                with result_containers[agent_name]:
+                                    render_result_card(
+                                        agent_name,
+                                        "completed",
+                                        content,
+                                        card_news_sources,
+                                    )
                                 update_progress(completed_count, len(agent_names))
-                                # 개별 에이전트 분석 완료
+        if final_report and completed_count >= 5:
+            # ✅ 세션 상태에만 저장 (렌더링은 main()에서 수행)
+            agent_summaries_dict = {
+                name: state["content"]
+                for name, state in agent_states.items()
+                if state["content"]
+            }
 
-        # 최종 보고서 표시
-        if final_report and completed_count >= 5:  # 5개 이상 완료시
-            st.markdown(f"""
-            <div class="final-report">
-                <h2 class="report-title">🎯 종합 투자 분석 보고서</h2>
-                <div class="report-content">{final_report}</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Session State에 저장 (대화형 서비스용)
             st.session_state.final_report = final_report
-            st.session_state.agent_summaries = {name: state["content"] for name, state in agent_states.items() if state["content"]}
+            st.session_state.agent_summaries = agent_summaries_dict
+            st.session_state.stock_code = symbol
+            st.session_state.company_name = company_name
 
-            # 다운로드
-            st.download_button(
-                label="📋 보고서 다운로드",
-                data=final_report,
-                file_name=f"{symbol}_{company_name}_analysis_report.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
+            # ✅ NEW: DB에 보고서 저장
+            try:
+                db = get_db_client()
+                report_id = db.save_analysis_report(
+                    stock_code=symbol,
+                    company_name=company_name,
+                    analysis_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    analysis_method="순차 처리",
+                    final_report=final_report,
+                    agent_summaries=agent_summaries_dict,
+                    news_sources=st.session_state.get(f"news_sources_{symbol}", []),
+                    community_sources=st.session_state.get(f"community_sources_{symbol}", []),
+                    chart_image=None  # 차트는 세션에서 관리
+                )
+                st.session_state.current_report_id = report_id
+                logger.info(f"✅ 분석 보고서 DB 저장 완료: report_id={report_id}")
+            except Exception as e:
+                logger.error(f"DB 저장 실패 (계속 진행): {str(e)}")
+                st.session_state.current_report_id = None
 
-            # 🎉 대화형 Q&A 인터페이스 추가
-            st.markdown("---")
-            conversation_manager = get_conversation_manager()
-            conversation_manager.render_conversation_interface()
+            # ✅ 분석 완료 후 페이지 새로고침하여 보고서 렌더링 모드로 전환
+            st.success("✅ 분석 완료! 보고서를 표시합니다...")
+            st.rerun()
         elif completed_count < 7:
-            st.warning(f"⚠️ 일부 분석이 완료되지 않았습니다 ({completed_count}/7)")
-
-        # 최종 진행률
+            st.warning(f"⚠️ 일부 분석 미완료 ({completed_count}/7)")
         update_progress(completed_count, len(agent_names))
-
-        # 순차 분석 완료
-
     except Exception as e:
-        logger.error(f"분석 실행 중 치명적 오류 발생: {str(e)}", exc_info=True)
-        st.error(f"분석 프로세스 오류: {e}")
+        logger.error(f"분석 오류: {str(e)}", exc_info=True)
+        st.error(f"분석 오류: {e}")
+
 
 def run_parallel_analysis(symbol, company_name):
-    """병렬 처리 기반 AI 주식 분석 실행"""
     try:
-        logger.info(f"=================== 병렬 분석 시작 ===================")
-        logger.info(f"종목: {symbol} ({company_name})")
-        logger.info(f"시작 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"====================================================")
-
-        # 병렬 엔진 인스턴스 가져오기
+        logger.info(f"병렬 분석 시작: {symbol} {company_name} at {datetime.now()}")
         parallel_engine = get_parallel_engine()
-        logger.info(f"🎯 병렬 엔진 초기화 완료: {len(parallel_engine.agent_config)}개 에이전트 설정")
-
-        # 사이드바 상태 표시
         show_parallel_status_indicator()
-
-        # 🔧 뉴스 데이터 미리 가져오기 (UI 표시용)
-        st.session_state[f"news_sources_{symbol}"] = fetch_news_for_display(company_name or "")
-        st.session_state[f"community_sources_{symbol}"] = []  # 커뮤니티는 빈 리스트로 초기화
-
-        # 분석 시작 안내
-        st.markdown("### 🚀 병렬 AI 분석 진행 중")
-        st.info("8개 전문 에이전트가 동시에 분석을 수행합니다. 약 1-2분 소요됩니다.")
-
-        # 🔥 버튼 클릭 없이 바로 병렬 실행 시작
-        logger.info("🔥🔥🔥 ULTRATHINK 수정: 병렬 분석 즉시 실행 시작 🔥🔥🔥")
-
-        # 세션 상태 초기화
-        st.session_state.parallel_execution_started = True
-        st.session_state.parallel_execution_completed = False
-        st.session_state.parallel_results = {}
-        st.session_state.parallel_progress = {}
+        st.session_state[f"news_sources_{symbol}"] = fetch_news_for_display(
+            company_name or ""
+        )
+        st.session_state[f"community_sources_{symbol}"] = []
         st.session_state.current_analysis_type = "parallel"
-
-        # 병렬 실행 수행 (폴백: 순차 처리)
-        with st.spinner("분석 실행 중... (병렬 처리 시도, 실패시 순차 처리)"):
-            try:
-                # 병렬 처리 시도
-                logger.info(f"🚀🚀🚀 execute_agents_parallel 메서드 호출 직전 🚀🚀🚀")
-                success = parallel_engine.execute_agents_parallel(symbol, company_name)
-                logger.info(f"🎯🎯🎯 병렬 분석 시도 완료 - 성공: {success} 🎯🎯🎯")
-
-                if not success or len(parallel_engine.get_analysis_results()) < 3:
-                    logger.warning("병렬 처리 실패 - 순차 처리로 폴백")
-                    raise Exception("병렬 처리 실패")
-
-            except Exception as parallel_error:
-                logger.warning(f"병렬 처리 실패, 순차 처리로 폴백: {str(parallel_error)}")
-                st.warning("병렬 처리 실패 - 순차 처리로 전환합니다...")
-
-                # 순차 처리 실행
+        st.subheader("🚀 병렬 AI 분석 진행 중")
+        st.info("8개 에이전트 동시 분석 (1-2분 소요)")
+        with st.spinner("분석 중... (실패시 순차 전환)"):
+            success = parallel_engine.execute_agents_parallel(symbol, company_name)
+            if not success or len(parallel_engine.get_analysis_results()) < 3:
+                logger.warning("병렬 실패 - 순차 전환")
+                st.warning("병렬 실패 - 순차 전환")
                 run_analysis(symbol, company_name)
                 return
-
-        # 병렬 처리 성공
         analysis_results = parallel_engine.get_analysis_results()
         if len(analysis_results) >= 5:
-            st.success(f"병렬 분석 완료! {len(analysis_results)}/8 에이전트 성공")
-
-            # 최종 보고서 생성 및 표시
-            from core.korean_supervisor_langgraph import generate_comprehensive_report, get_supervisor_llm
+            st.success(f"완료! {len(analysis_results)}/8 성공")
             supervisor_llm = get_supervisor_llm()
-            final_report = generate_comprehensive_report(supervisor_llm, analysis_results, symbol, company_name)
-
+            final_report = generate_comprehensive_report(
+                supervisor_llm, analysis_results, symbol, company_name
+            )
             if final_report:
-                st.markdown("### 📈 병렬 분석 종합 보고서")
-                st.markdown(final_report)
-
-                # Session State에 저장 (대화형 서비스용)
+                # ✅ 세션 상태에만 저장 (렌더링은 main()에서 수행)
                 st.session_state.final_report = final_report
                 st.session_state.agent_summaries = analysis_results
+                st.session_state.stock_code = symbol
+                st.session_state.company_name = company_name
 
-                # 대화형 Q&A 인터페이스
-                st.markdown("---")
-                conversation_manager = get_conversation_manager()
-                conversation_manager.render_conversation_interface()
+                # ✅ NEW: DB에 보고서 저장
+                try:
+                    db = get_db_client()
+                    report_id = db.save_analysis_report(
+                        stock_code=symbol,
+                        company_name=company_name,
+                        analysis_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        analysis_method="병렬 처리",
+                        final_report=final_report,
+                        agent_summaries=analysis_results,
+                        news_sources=st.session_state.get(f"news_sources_{symbol}", []),
+                        community_sources=st.session_state.get(f"community_sources_{symbol}", []),
+                        chart_image=None  # 차트는 세션에서 관리
+                    )
+                    st.session_state.current_report_id = report_id
+                    logger.info(f"✅ 분석 보고서 DB 저장 완료: report_id={report_id}")
+                except Exception as e:
+                    logger.error(f"DB 저장 실패 (계속 진행): {str(e)}")
+                    st.session_state.current_report_id = None
+
+                # ✅ 분석 완료 후 페이지 새로고침
+                st.success("✅ 병렬 분석 완료! 보고서를 표시합니다...")
+                st.rerun()
+            else:
+                st.error("보고서 생성 실패")
+            with st.expander("📊 상세 결과"):
+                render_parallel_results_summary()
         else:
-            st.error(f"분석 실패: {len(analysis_results)}/8 에이전트만 성공")
-
-        # 진행률 표시 (분석 시작된 경우에만)
-        if st.session_state.get('parallel_execution_started', False):
-
-            # 진행률 대시보드 표시
-            render_parallel_progress_dashboard()
-
-            # 분석이 완료된 경우 결과 표시
-            if st.session_state.get('parallel_execution_completed', False):
-
-                # 분석 결과 가져오기
-                analysis_results = parallel_engine.get_analysis_results()
-
-                if len(analysis_results) >= 5:  # 최소 5개 에이전트 성공
-                    st.success(f"✅ 병렬 분석 완료! {len(analysis_results)}/8 에이전트 성공")
-
-                    # 최종 보고서 생성
-                    st.markdown("### 📝 종합 보고서 생성 중...")
-
-                    with st.spinner("Supervisor가 종합 보고서를 생성하고 있습니다..."):
-                        try:
-                            from core.korean_supervisor_langgraph import generate_comprehensive_report, get_supervisor_llm
-
-                            supervisor_llm = get_supervisor_llm()
-                            final_report = generate_comprehensive_report(
-                                supervisor_llm, analysis_results, symbol, company_name
-                            )
-
-                            # 최종 보고서 표시
-                            if final_report:
-                                st.markdown(f"""
-                                <div class="final-report">
-                                    <h2 class="report-title">🎯 병렬 분석 종합 투자 보고서</h2>
-                                    <div class="report-content">{final_report}</div>
-                                </div>
-                                """, unsafe_allow_html=True)
-
-                                # 다운로드 버튼
-                                st.download_button(
-                                    label="📋 보고서 다운로드",
-                                    data=final_report,
-                                    file_name=f"{symbol}_{company_name}_parallel_analysis_report.txt",
-                                    mime="text/plain",
-                                    use_container_width=True
-                                )
-
-                                # Session State에 보고서 저장 (대화형 서비스용)
-                                st.session_state.final_report = final_report
-                                st.session_state.agent_summaries = analysis_results
-
-                                logger.info("🎯 병렬 분석 최종 보고서 생성 완료")
-
-                                # 🎉 대화형 Q&A 인터페이스 추가
-                                st.markdown("---")
-                                conversation_manager = get_conversation_manager()
-                                conversation_manager.render_conversation_interface()
-                            else:
-                                st.error("최종 보고서 생성에 실패했습니다.")
-
-                        except Exception as report_error:
-                            logger.error(f"최종 보고서 생성 오류: {str(report_error)}")
-                            st.error(f"최종 보고서 생성 오류: {str(report_error)}")
-
-                    # 상세 분석 결과 (접을 수 있는 형태)
-                    with st.expander("📊 상세 분석 결과 보기"):
-                        render_parallel_results_summary()
-
-                else:
-                    st.error(f"⚠️ 분석 실패: {len(analysis_results)}/8 에이전트만 성공했습니다.")
-                    st.info("최소 5개 에이전트가 성공해야 종합 보고서를 생성할 수 있습니다.")
-
-                    # 부분 결과 표시
-                    if analysis_results:
-                        with st.expander("📊 부분 분석 결과 보기"):
-                            render_parallel_results_summary()
-
-        # 병렬 분석 완료
-
+            st.error(f"실패: {len(analysis_results)}/8 성공")
+            if analysis_results:
+                with st.expander("📊 부분 결과"):
+                    render_parallel_results_summary()
     except Exception as e:
-        logger.error(f"병렬 분석 실행 중 치명적 오류 발생: {str(e)}", exc_info=True)
-        st.error(f"병렬 분석 프로세스 오류: {e}")
+        logger.error(f"병렬 오류: {str(e)}", exc_info=True)
+        st.error(f"병렬 오류: {e}")
+
 
 def execute_analysis_based_on_method(symbol, company_name, analysis_method):
-    """선택된 분석 방법에 따라 실행"""
     if analysis_method == "🚀 병렬 처리 (빠름)":
         run_parallel_analysis(symbol, company_name)
-    else:  # "🔄 순차 처리 (안정)"
+    else:
         run_analysis(symbol, company_name)
 
+
+def load_saved_report(report_id: int):
+    """
+    저장된 보고서를 DB에서 로드하여 세션 상태에 복원
+
+    Args:
+        report_id: 보고서 ID
+    """
+    try:
+        db = get_db_client()
+        report_data = db.load_full_report(report_id)
+
+        if not report_data:
+            st.error(f"보고서를 찾을 수 없습니다 (ID: {report_id})")
+            return
+
+        # 세션 상태 초기화
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+
+        # 보고서 메타데이터 복원
+        st.session_state.stock_code = report_data["stock_code"]
+        st.session_state.company_name = report_data["company_name"]
+        st.session_state.final_report = report_data["final_report"]
+        st.session_state.agent_summaries = report_data.get("agent_summaries", {})
+        st.session_state.current_report_id = report_id
+
+        # 뉴스 소스 복원
+        symbol = report_data["stock_code"]
+        st.session_state[f"news_sources_{symbol}"] = report_data.get("news_sources", [])
+        st.session_state[f"community_sources_{symbol}"] = report_data.get("community_sources", [])
+
+        # 대화 히스토리 복원
+        st.session_state.chat_messages = report_data.get("conversation_history", [])
+        st.session_state.conversation_started = len(st.session_state.chat_messages) > 0
+
+        logger.info(f"✅ 보고서 로드 완료: {report_data['company_name']} ({report_data['analysis_date']})")
+        st.success(f"✅ 보고서 로드 완료: {report_data['company_name']} ({report_data['analysis_date']})")
+        st.rerun()
+
+    except Exception as e:
+        logger.error(f"보고서 로드 실패: {str(e)}")
+        st.error(f"보고서 로드 실패: {str(e)}")
+
+
 def render_conversation_sidebar_status():
-    """사이드바에 대화 상태 표시"""
     conversation_manager = get_conversation_manager()
-
     with st.sidebar:
-        st.markdown("### 💬 대화형 Q&A")
-
+        st.subheader("💬 대화형 Q&A")
         if conversation_manager.is_conversation_available():
-            # 대화 통계
             stats = conversation_manager.get_conversation_stats()
-
             if stats["conversation_started"]:
                 st.success("✅ 대화 활성")
-                st.metric("총 대화", stats["total_messages"])
-                st.metric("사용자 질문", stats["user_questions"])
-
-                # 대화 초기화 버튼
+                # ✅ 통계 제거: 히스토리는 세션에 저장되고, 초기화 버튼만 제공
                 if st.button("🗑️ 대화 초기화", use_container_width=True):
                     st.session_state.chat_messages = []
                     st.session_state.conversation_started = False
-                    st.success("대화 내역이 초기화되었습니다.")
+                    st.success("대화 내역이 초기화되었습니다")
                     st.rerun()
             else:
-                st.info("💬 대화 준비됨")
-                st.caption("보고서 하단에서 AI와 대화해보세요!")
+                st.info("💬 준비됨")
+                st.caption("보고서 하단에서 대화")
         else:
-            st.warning("⏳ 분석 대기")
-            st.caption("분석 완료 후 대화 가능합니다")
+            st.warning("⏳ 대기")
+            st.caption("분석 후 가능")
 
-def main():
-    # 메인 헤더
-    st.markdown("""
-    <div class="main-header">
-        <h1 class="main-title">📊 AI Stock Analyzer</h1>
-        <p class="main-subtitle">AI 전문가 7인의 종합 주식 분석</p>
-    </div>
-    """, unsafe_allow_html=True)
+        st.divider()
 
-    # 입력 섹션
-    st.markdown("""
-    <div class="input-section">
-        <h3 class="input-header">📈 분석할 종목 선택</h3>
-    </div>
-    """, unsafe_allow_html=True)
+        # ✅ NEW: 이전 보고서 조회
+        with st.expander("📂 이전 보고서", expanded=False):
+            try:
+                db = get_db_client()
+                recent_reports = db.get_recent_reports(limit=15)
 
-    # 메인 입력 구역
-    col1, col2 = st.columns([3, 1])
+                if not recent_reports:
+                    st.info("저장된 보고서가 없습니다")
+                else:
+                    st.caption(f"총 {len(recent_reports)}개 저장됨")
 
-    with col1:
-        # 종목 선택 - 드롭다운 + 직접 입력
-        input_method = st.radio(
-            "입력 방식 선택:",
-            ["드롭다운에서 선택", "직접 입력"],
-            horizontal=True,
-            label_visibility="collapsed"
+                    # 보고서 목록 표시
+                    for report in recent_reports:
+                        report_id = report["id"]
+                        stock_code = report["stock_code"]
+                        company_name = report["company_name"]
+                        analysis_date = report["analysis_date"]
+                        analysis_method = report.get("analysis_method", "분석")
+
+                        # 날짜 포맷팅 (YYYY-MM-DD HH:MM:SS → MM/DD HH:MM)
+                        try:
+                            date_obj = datetime.strptime(analysis_date, "%Y-%m-%d %H:%M:%S")
+                            date_str = date_obj.strftime("%m/%d %H:%M")
+                        except:
+                            date_str = analysis_date[:16]
+
+                        # 현재 보고서 강조
+                        current_report_id = st.session_state.get("current_report_id")
+                        is_current = (report_id == current_report_id)
+                        button_label = f"{'▶️ ' if is_current else ''}{company_name} ({stock_code})"
+
+                        if st.button(
+                            button_label,
+                            key=f"load_report_{report_id}",
+                            use_container_width=True,
+                            help=f"{date_str} | {analysis_method}",
+                            disabled=is_current
+                        ):
+                            load_saved_report(report_id)
+
+                # DB 통계 표시
+                st.caption("---")
+                db_stats = db.get_db_stats()
+                if db_stats:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("보고서", db_stats.get("total_reports", 0))
+                    with col2:
+                        st.metric("대화", db_stats.get("total_conversations", 0))
+
+            except Exception as e:
+                logger.error(f"이전 보고서 조회 실패: {str(e)}")
+                st.error("보고서 조회 실패")
+
+
+def render_persistent_report():
+    """분석 보고서를 session_state 기반으로 지속적으로 렌더링"""
+    if not st.session_state.get("final_report"):
+        return
+
+    # 보고서 메타데이터
+    symbol = st.session_state.get("stock_code", "")
+    company_name = st.session_state.get("company_name", "")
+
+    # 차트 표시 (있는 경우)
+    if f"chart_{symbol}" in st.session_state and st.session_state[f"chart_{symbol}"]:
+        st.subheader("📈 인터랙티브 차트 분석")
+        try:
+            st.plotly_chart(
+                st.session_state[f"chart_{symbol}"],
+                use_container_width=True,
+                key=f"chart_plotly_{symbol}_report"
+            )
+        except Exception as e:
+            logger.error(f"차트 표시 오류: {str(e)}")
+        st.divider()
+
+    # ✅ NEW: 8명 전문가 개별 보고서 표시
+    agent_summaries = st.session_state.get("agent_summaries", {})
+    if agent_summaries:
+        st.header("📊 전문가 분석 상세 보고서")
+        st.caption("각 전문가의 상세 분석 내용을 확인하세요 (대화 시 참고 자료)")
+
+        # 에이전트 순서 정의
+        agent_order = [
+            "context_expert",
+            "sentiment_expert",
+            "financial_expert",
+            "advanced_technical_expert",
+            "institutional_trading_expert",
+            "comparative_expert",
+            "esg_expert",
+            "community_expert",
+        ]
+
+        # 각 에이전트 보고서 표시
+        for agent_name in agent_order:
+            if agent_name in agent_summaries:
+                content = agent_summaries[agent_name]
+
+                # 뉴스/커뮤니티 소스 가져오기
+                news_sources = None
+                if agent_name == "sentiment_expert":
+                    news_sources = st.session_state.get(f"news_sources_{symbol}", [])
+                elif agent_name == "community_expert":
+                    news_sources = st.session_state.get(f"community_sources_{symbol}", [])
+
+                # 카드 렌더링
+                render_result_card(agent_name, "completed", content, news_sources)
+
+        st.divider()
+
+    # 종합 보고서 표시
+    with st.container():
+        st.header("🎯 종합 투자 분석 보고서")
+        st.markdown(st.session_state.final_report)
+        st.download_button(
+            "📋 보고서 다운로드",
+            data=st.session_state.final_report,
+            file_name=f"{symbol}_{company_name}_analysis_report.txt",
+            mime="text/plain",
+            use_container_width=True,
         )
 
-        if input_method == "드롭다운에서 선택":
-            category = st.selectbox("카테고리 선택", list(STOCK_DATABASE.keys()))
+
+def main():
+    st.title("📊 AI Stock Analyzer")
+    st.caption("AI 전문가 7인의 종합 주식 분석")
+
+    # ✅ NEW: 분석 완료 상태인 경우, 보고서를 먼저 렌더링
+    if st.session_state.get("final_report"):
+        render_persistent_report()
+        st.divider()
+
+        # 대화형 인터페이스 렌더링
+        conversation_manager = get_conversation_manager()
+        if conversation_manager.is_conversation_available():
+            conversation_manager.render_conversation_interface()
+
+        # 사이드바에 대화 상태 표시
+        render_conversation_sidebar_status()
+
+        # 새 분석 시작 버튼 (하단)
+        st.divider()
+        if st.button("🔄 새로운 종목 분석하기", type="secondary"):
+            # 세션 상태 초기화
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+
+        return  # ✅ 보고서가 있으면 여기서 종료
+
+    # ✅ 기존: 분석 전 상태 - 종목 선택 UI
+    with st.container():
+        st.subheader("📈 종목 선택")
+        input_method = st.radio(
+            "입력 방식:",
+            ["드롭다운", "직접 입력"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        if input_method == "드롭다운":
+            category = st.selectbox("카테고리", list(STOCK_DATABASE.keys()))
             stock_options = STOCK_DATABASE[category]
             selected_stock = st.selectbox(
-                "종목 선택",
+                "종목",
                 list(stock_options.keys()),
-                format_func=lambda x: f"{stock_options[x]} ({x})"
+                format_func=lambda x: f"{stock_options[x]} ({x})",
             )
             symbol = selected_stock
             company_name = stock_options[selected_stock]
         else:
             symbol = st.text_input(
-                "종목코드",
-                value="005930",
-                placeholder="예: 005930, 000660, 035420"
+                "종목코드", "005930", placeholder="005930, 000660 등"
             )
             company_name = st.text_input(
-                "회사명 (선택)",
-                value="삼성전자",
-                placeholder="예: 삼성전자, SK하이닉스"
+                "회사명 (선택)", "삼성전자", placeholder="삼성전자 등"
             )
 
-        # 분석 방법 선택
-        st.markdown("**분석 방법 선택:**")
+        # ✅ NEW: 차트 설정 UI
+        with st.expander("⚙️ 차트 설정 (선택)", expanded=False):
+            st.markdown("**📅 차트 기간 선택**")
+            col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+
+            # 기본값: 6M
+            if "chart_period" not in st.session_state:
+                st.session_state.chart_period = "6M"
+
+            period_buttons = {
+                "1W": (col1, "1주일"),
+                "1M": (col2, "1개월"),
+                "3M": (col3, "3개월"),
+                "6M": (col4, "6개월"),
+                "1Y": (col5, "1년"),
+                "YTD": (col6, "올해"),
+                "MAX": (col7, "전체")
+            }
+
+            for period_code, (col, period_label) in period_buttons.items():
+                with col:
+                    button_type = "primary" if st.session_state.chart_period == period_code else "secondary"
+                    if st.button(period_label, key=f"period_btn_{period_code}", type=button_type, use_container_width=True):
+                        st.session_state.chart_period = period_code
+
+            st.markdown("**📊 기술적 지표 선택**")
+
+            # 기본값: MA5, MA20, MA60, RSI, MACD
+            if "chart_indicators" not in st.session_state:
+                st.session_state.chart_indicators = ["MA5", "MA20", "MA60", "RSI", "MACD"]
+
+            available_indicators = {
+                "MA5": "이동평균선 5일",
+                "MA20": "이동평균선 20일",
+                "MA60": "이동평균선 60일",
+                "BB": "볼린저밴드",
+                "RSI": "RSI (14)",
+                "MACD": "MACD",
+                "Stochastic": "스토캐스틱"
+            }
+
+            selected_indicators = st.multiselect(
+                "표시할 지표를 선택하세요",
+                options=list(available_indicators.keys()),
+                default=st.session_state.chart_indicators,
+                format_func=lambda x: available_indicators[x],
+                key="indicator_multiselect"
+            )
+
+            # multiselect 변경 시 session_state 업데이트
+            if selected_indicators != st.session_state.chart_indicators:
+                st.session_state.chart_indicators = selected_indicators
+
+            st.caption(f"현재 설정: {st.session_state.chart_period} 기간, {len(st.session_state.chart_indicators)}개 지표")
+
         analysis_method = st.radio(
             "분석 방법:",
-            ["🔄 순차 처리 (안정)", "🚀 병렬 처리 (빠름)"],
-            help="순차 처리: 에이전트 순차 실행 (3-5분)\n병렬 처리: 8개 에이전트 동시 실행 (1-2분, Rate Limit 위험)",
+            ["🔄 순차 (안정)", "🚀 병렬 (빠름)"],
+            help="순차: 3-5분\n병렬: 1-2분 (Rate Limit 위험)",
             horizontal=True,
-            label_visibility="collapsed"
         )
-
-        # 선택된 방법에 대한 설명
-        if analysis_method == "🔄 순차 처리 (안정)":
-            st.info("💡 순차 처리: 에이전트가 순서대로 분석하며 실시간 진행상황을 확인할 수 있습니다. (권장)")
+        if analysis_method == "🔄 순차 (안정)":
+            st.info("순차: 실시간 진행 확인 (권장)")
         else:
-            st.warning("⚠️ 병렬 처리: 8개 전문 에이전트가 동시에 분석을 수행합니다. OpenAI Rate Limit 위험이 있습니다.")
-
-        # 분석 시작 버튼
-        button_text = "🔄 순차 분석 시작" if analysis_method == "🔄 순차 처리 (안정)" else "🚀 병렬 분석 시작"
-
-        if st.button(button_text, type="primary", use_container_width=True):
-            if symbol:
-                execute_analysis_based_on_method(
-                    symbol.strip(),
-                    company_name.strip() if company_name else None,
-                    analysis_method
-                )
-            else:
-                st.error("종목코드를 입력해주세요!")
-
-    with col2:
-        # 인기 종목 (오른쪽 사이드)
-        st.markdown('<div class="popular-stocks"><p class="popular-title">🔥 인기 종목</p></div>', unsafe_allow_html=True)
-        popular_stocks = [("005930", "삼성전자"), ("000660", "SK하이닉스"), ("035420", "NAVER"), ("005380", "현대차")]
-
-        # 인기 종목 분석 방법 (작은 라디오 버튼)
-        st.markdown('<p style="font-size: 0.8rem; color: #64748b; margin: 0.5rem 0;">분석 방법:</p>', unsafe_allow_html=True)
-        popular_analysis_method = st.radio(
-            "인기종목 분석방법:",
-            ["🔄 순차", "🚀 병렬"],
-            key="popular_analysis_method",
-            horizontal=True,
-            label_visibility="collapsed"
+            st.warning("병렬: 동시 분석, Rate Limit 위험")
+        button_text = "🔄 순차 시작" if "순차" in analysis_method else "🚀 병렬 시작"
+        if st.button(button_text, type="primary", use_container_width=True) and symbol:
+            execute_analysis_based_on_method(
+                symbol.strip(), company_name.strip() or None, analysis_method
+            )
+        else:
+            if not symbol:
+                st.error("종목코드 입력")
+    with st.expander("ℹ️ 시스템 정보"):
+        st.markdown(
+            "**🤖 AI 전문가:** 🌍 시장환경 📰 뉴스여론 💰 재무 📈 기술 🏦 기관 ⚖️ 상대 🌱 ESG\n**📊 데이터:** FinanceDataReader • PyKRX 등\n**💬 Q&A:** 분석 후 대화 가능"
         )
 
-        for code, name in popular_stocks:
-            if st.button(f"{name}\n{code}", key=f"popular_{code}", use_container_width=True):
-                # 선택된 분석 방법에 따라 실행
-                full_method = "🔄 순차 처리 (안정)" if popular_analysis_method == "🔄 순차" else "🚀 병렬 처리 (빠름)"
-                execute_analysis_based_on_method(code, name, full_method)
-
-    # 시스템 정보
-    with st.expander("ℹ️ 시스템 정보"):
-        st.markdown("**🤖 AI 전문가 구성:**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News\n\n**💬 대화형 Q&A:** 보고서 생성 후 AI와 대화하며 추가 질문 가능")
-
-    # 사이드바에 대화 상태 표시
     render_conversation_sidebar_status()
+
 
 if __name__ == "__main__":
     main()

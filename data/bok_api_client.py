@@ -30,17 +30,29 @@ class BOKAPIClient:
             'Accept': 'application/json'
         })
     
-    def _make_request(self, stat_code: str, cycle: str = 'D', start_date: str = None, end_date: str = None) -> Dict[str, Any]:
-        """API 요청 실행 - 실제 작동하는 fallback 포함"""
+    def _make_request(self, stat_code: str, cycle: str = 'D', start_date: str = None, end_date: str = None, item_code1: str = None) -> Dict[str, Any]:
+        """API 요청 실행 - 실제 작동하는 fallback 포함
+
+        Args:
+            stat_code: 통계표 코드
+            cycle: 주기 (D: 일, M: 월, A: 년)
+            start_date: 시작일
+            end_date: 종료일
+            item_code1: 세부 항목 코드 (필수: 특정 항목만 조회)
+        """
         if not end_date:
             end_date = datetime.now().strftime('%Y%m%d')
         if not start_date:
             start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
-            
+
         # 실제 API 키가 있을 때만 시도
         if self.api_key and self.api_key != "sample":
-            url = f"{self.base_url}/StatisticSearch/{self.api_key}/json/kr/1/1000/{stat_code}/{cycle}/{start_date}/{end_date}"
-            
+            # item_code1이 있으면 URL에 추가 (INFO-200 오류 방지)
+            if item_code1:
+                url = f"{self.base_url}/StatisticSearch/{self.api_key}/json/kr/1/10000/{stat_code}/{cycle}/{start_date}/{end_date}/{item_code1}"
+            else:
+                url = f"{self.base_url}/StatisticSearch/{self.api_key}/json/kr/1/10000/{stat_code}/{cycle}/{start_date}/{end_date}"
+
             try:
                 response = self.session.get(url, timeout=10)
                 response.raise_for_status()
@@ -48,32 +60,45 @@ class BOKAPIClient:
                 return response.json()
             except Exception as e:
                 logger.warning(f"BOK API request failed: {e}")
-        
+
         # API 연결 실패 시 에러 반환 (Mock 데이터 제공 금지)
         logger.error(f"BOK API 연결 실패: {stat_code}")
         return {"error": f"API 연결 실패 - {stat_code}", "status": "api_connection_failed"}
     
-    def _make_request_with_retry(self, stat_code: str, cycle: str = 'D', start_date: str = None, end_date: str = None, max_retries: int = 3) -> Dict[str, Any]:
-        """API 요청 재시도 로직 포함"""
+    def _make_request_with_retry(self, stat_code: str, cycle: str = 'D', start_date: str = None, end_date: str = None, item_code1: str = None, max_retries: int = 3) -> Dict[str, Any]:
+        """API 요청 재시도 로직 포함
+
+        Args:
+            stat_code: 통계표 코드
+            cycle: 주기 (D: 일, M: 월, A: 년)
+            start_date: 시작일
+            end_date: 종료일
+            item_code1: 세부 항목 코드 (특정 항목만 조회)
+            max_retries: 최대 재시도 횟수
+        """
         if not end_date:
             end_date = datetime.now().strftime('%Y%m%d')
         if not start_date:
             start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
-            
+
         # API 키 검증
         if not self.api_key or self.api_key == "sample":
             return {"error": f"유효하지 않은 API 키 - {stat_code}", "status": "invalid_api_key"}
-            
-        url = f"{self.base_url}/StatisticSearch/{self.api_key}/json/kr/1/1000/{stat_code}/{cycle}/{start_date}/{end_date}"
-        
+
+        # item_code1이 있으면 URL에 추가 (INFO-200 오류 방지)
+        if item_code1:
+            url = f"{self.base_url}/StatisticSearch/{self.api_key}/json/kr/1/10000/{stat_code}/{cycle}/{start_date}/{end_date}/{item_code1}"
+        else:
+            url = f"{self.base_url}/StatisticSearch/{self.api_key}/json/kr/1/10000/{stat_code}/{cycle}/{start_date}/{end_date}"
+
         for attempt in range(max_retries):
             try:
                 # BOK API 요청 시도
                 response = self.session.get(url, timeout=15)
                 response.raise_for_status()
-                
+
                 data = response.json()
-                
+
                 # API 응답 검증
                 if 'StatisticSearch' in data and data['StatisticSearch'].get('row'):
                     # BOK API 성공
@@ -82,26 +107,27 @@ class BOKAPIClient:
                 elif 'RESULT' in data and data['RESULT'].get('CODE') != '200':
                     logger.error(f"BOK API 오류 응답: {data['RESULT']}")
                     return {"error": f"API 오류 - {data['RESULT'].get('MESSAGE', 'Unknown')}", "status": "api_error"}
-                    
+
             except Exception as e:
                 logger.warning(f"BOK API 요청 실패 (시도 {attempt + 1}): {e}")
                 if attempt < max_retries - 1:
                     time.sleep(1 * (attempt + 1))  # 지수 백오프
                     continue
-        
+
         # 모든 재시도 실패
         logger.error(f"BOK API 연결 완전 실패: {stat_code}")
         return {"error": f"API 연결 실패 - {stat_code}", "status": "connection_failed"}
     
     def get_base_rate(self, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """기준금리 조회
-        
+
         Args:
             start_date: 시작일 (YYYYMMDD), 기본값은 1년 전
             end_date: 종료일 (YYYYMMDD), 기본값은 오늘
         """
         try:
-            result = self._make_request_with_retry('722Y001', 'D', start_date, end_date)
+            # 0101000: 한국은행 기준금리 (Base Rate)
+            result = self._make_request_with_retry('722Y001', 'D', start_date, end_date, item_code1='0101000')
             
             if result.get('StatisticSearch') and result['StatisticSearch'].get('row'):
                 rates = []
@@ -142,23 +168,24 @@ class BOKAPIClient:
     
     def get_exchange_rate(self, currency_code: str = "USD", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """환율 조회
-        
+
         Args:
             currency_code: 통화코드 (USD, EUR, JPY, CNY 등)
             start_date: 시작일 (YYYYMMDD)
             end_date: 종료일 (YYYYMMDD)
         """
         try:
-            # 통화별 아이템 코드 매핑
+            # 통화별 통계표 코드 매핑 (환율은 item_code 불필요)
             currency_codes = {
                 "USD": "731Y003",  # 원/달러 환율
                 "EUR": "731Y009",  # 원/유로 환율
                 "JPY": "731Y006",  # 원/엔 환율
                 "CNY": "731Y012"   # 원/위안 환율
             }
-            
-            item_code = currency_codes.get(currency_code, "731Y003")  # 기본값: USD
-            result = self._make_request_with_retry(item_code, 'D', start_date, end_date)
+
+            stat_code = currency_codes.get(currency_code, "731Y003")  # 기본값: USD
+            # Note: 환율 통계는 item_code1 없이도 작동함
+            result = self._make_request_with_retry(stat_code, 'D', start_date, end_date)
             
             if result.get('StatisticSearch') and result['StatisticSearch'].get('row'):
                 rates = []
@@ -614,13 +641,16 @@ def get_macro_economic_indicators(indicators_list: List[str] = None) -> Dict[str
             export_data = {"error": f"수출 API 오류: {str(e)}", "api_status": "failed"}
         
         indicators = {}
-        
-        # 기준금리 - 실제 데이터 또는 에러
+
+        # ✅ 토큰 최적화: 전체 배열 제거, 최신 값만 추출 (전문가 권장)
+
+        # 기준금리 - 최신 값만
         if not base_rate_data.get("error"):
+            latest_rate = base_rate_data.get("latest_rate", {})
             indicators["base_interest_rate"] = {
-                "data": base_rate_data,
-                "current_rate": base_rate_data.get("latest_rate", {}).get("rate"),
-                "source": "한국은행 ECOS API",
+                "current_rate": latest_rate.get("rate"),
+                "rate_date": latest_rate.get("date"),
+                "unit": latest_rate.get("unit", "%"),
                 "api_status": "success"
             }
         else:
@@ -628,13 +658,15 @@ def get_macro_economic_indicators(indicators_list: List[str] = None) -> Dict[str
                 "error": base_rate_data.get("error"),
                 "api_status": "failed"
             }
-        
-        # 환율 - 실제 데이터 또는 에러
+
+        # 환율 - 최신 값만
         if not usd_rate_data.get("error"):
+            latest_rate = usd_rate_data.get("latest_rate", {})
             indicators["usd_exchange_rate"] = {
-                "data": usd_rate_data,
-                "current_rate": usd_rate_data.get("latest_rate", {}).get("rate"),
-                "source": "한국은행 ECOS API",
+                "current_rate": latest_rate.get("rate"),
+                "rate_date": latest_rate.get("date"),
+                "currency": "USD",
+                "unit": latest_rate.get("unit", "원"),
                 "api_status": "success"
             }
         else:
@@ -642,13 +674,15 @@ def get_macro_economic_indicators(indicators_list: List[str] = None) -> Dict[str
                 "error": usd_rate_data.get("error"),
                 "api_status": "failed"
             }
-        
-        # GDP - 실제 데이터 또는 에러
+
+        # GDP - 최신 값 + 성장률만
         if not gdp_data_result.get("error"):
+            latest_gdp = gdp_data_result.get("latest_gdp", {})
             indicators["gdp"] = {
-                "data": gdp_data_result,
+                "current_value": latest_gdp.get("value"),
+                "period": latest_gdp.get("period"),
                 "growth_rate": gdp_data_result.get("quarterly_growth_rate"),
-                "source": "한국은행 ECOS API",
+                "unit": latest_gdp.get("unit", "십억원"),
                 "api_status": "success"
             }
         else:
@@ -656,14 +690,15 @@ def get_macro_economic_indicators(indicators_list: List[str] = None) -> Dict[str
                 "error": gdp_data_result.get("error"),
                 "api_status": "failed"
             }
-        
-        # CPI - 실제 데이터 또는 에러
+
+        # CPI - 최신 값 + 인플레이션율만
         if not cpi_data_result.get("error"):
+            latest_cpi = cpi_data_result.get("latest_cpi", {})
             indicators["consumer_price_index"] = {
-                "data": cpi_data_result,
-                "current_value": cpi_data_result.get("latest_cpi", {}).get("value"),
+                "current_value": latest_cpi.get("value"),
+                "period": latest_cpi.get("period"),
                 "inflation_rate": cpi_data_result.get("inflation_rate"),
-                "source": "한국은행 ECOS API",
+                "unit": latest_cpi.get("unit", "2020=100"),
                 "api_status": "success"
             }
         else:
@@ -671,14 +706,15 @@ def get_macro_economic_indicators(indicators_list: List[str] = None) -> Dict[str
                 "error": cpi_data_result.get("error"),
                 "api_status": "failed"
             }
-        
-        # 산업생산 - 실제 데이터 또는 에러
+
+        # 산업생산 - 최신 값 + 전월 대비만
         if not industrial_data.get("error"):
+            latest_index = industrial_data.get("latest_index", {})
             indicators["industrial_production"] = {
-                "data": industrial_data,
-                "latest_index": industrial_data.get("latest_index"),
+                "current_index": latest_index.get("value"),
+                "period": latest_index.get("period"),
                 "monthly_change": industrial_data.get("monthly_change"),
-                "source": "한국은행 ECOS API",
+                "unit": latest_index.get("unit", "2020=100"),
                 "api_status": "success"
             }
         else:
@@ -686,13 +722,14 @@ def get_macro_economic_indicators(indicators_list: List[str] = None) -> Dict[str
                 "error": industrial_data.get("error"),
                 "api_status": "failed"
             }
-        
-        # 실업률 - 실제 데이터 또는 에러
+
+        # 실업률 - 최신 값만
         if not unemployment_data.get("error"):
+            latest_unemployment = unemployment_data.get("latest_unemployment_rate", {})
             indicators["unemployment_rate"] = {
-                "data": unemployment_data,
-                "latest_rate": unemployment_data.get("latest_unemployment_rate"),
-                "source": "한국은행 ECOS API", 
+                "current_rate": latest_unemployment.get("rate"),
+                "period": latest_unemployment.get("period"),
+                "unit": latest_unemployment.get("unit", "%"),
                 "api_status": "success"
             }
         else:
@@ -700,19 +737,18 @@ def get_macro_economic_indicators(indicators_list: List[str] = None) -> Dict[str
                 "error": unemployment_data.get("error"),
                 "api_status": "failed"
             }
-        
-        # 수출입 - 실제 데이터 또는 에러
+
+        # 수출입 - 최신 무역수지만
         if not export_data.get("error"):
-            indicators["export_data"] = {
-                "data": export_data,
-                "latest_balance": export_data.get("latest_trade_balance"),
-                "export_data": export_data.get("export_data"),
-                "import_data": export_data.get("import_data"),
-                "source": "한국은행 ECOS API",
+            latest_balance = export_data.get("latest_trade_balance", {})
+            indicators["trade_balance"] = {
+                "current_balance": latest_balance.get("balance"),
+                "period": latest_balance.get("period"),
+                "unit": latest_balance.get("unit", "백만달러"),
                 "api_status": "success"
             }
         else:
-            indicators["export_data"] = {
+            indicators["trade_balance"] = {
                 "error": export_data.get("error"),
                 "api_status": "failed"
             }

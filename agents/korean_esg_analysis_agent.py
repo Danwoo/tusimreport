@@ -38,7 +38,7 @@ def get_dart_company_info_wrapper(stock_code: str, company_name: str) -> Dict[st
         if not dart_info or dart_info.get("error"):
             return {
                 "error": f"{company_name}에 대한 DART 정보를 가져올 수 없습니다.",
-                "details": dart_info.get("error", "Unknown error")
+                "details": dart_info.get("error", "Unknown error"),
             }
 
         # ESG 관련 정보 구조화
@@ -51,19 +51,19 @@ def get_dart_company_info_wrapper(stock_code: str, company_name: str) -> Dict[st
                 "ceo_info": dart_info.get("ceo_info", {}),
                 "board_composition": dart_info.get("board_info", {}),
                 "audit_opinion": dart_info.get("audit_opinion", "정보 없음"),
-                "major_shareholders": dart_info.get("shareholders", [])
+                "major_shareholders": dart_info.get("shareholders", []),
             },
             "social": {
                 "dividend_policy": dart_info.get("dividend_info", {}),
                 "employee_info": dart_info.get("employee_info", {}),
-                "business_segments": dart_info.get("business_info", {})
+                "business_segments": dart_info.get("business_info", {}),
             },
             "environmental": {
                 "business_nature": dart_info.get("business_nature", ""),
-                "environmental_disclosures": dart_info.get("environmental_info", {})
+                "environmental_disclosures": dart_info.get("environmental_info", {}),
             },
             "data_source": "DART OpenAPI",
-            "last_updated": datetime.now().isoformat()
+            "last_updated": datetime.now().isoformat(),
         }
 
         return convert_numpy_types(esg_info)
@@ -81,48 +81,48 @@ def create_esg_agent():
     """ESG Agent 생성 함수"""
     llm_provider, model_name, api_key = get_llm_model()
     if llm_provider == "gemini":
-        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0.1, google_api_key=api_key)
+        llm = ChatGoogleGenerativeAI(model=model_name, google_api_key=api_key)
     else:
-        llm = ChatOpenAI(model=model_name, temperature=0.1, api_key=api_key)
+        llm = ChatOpenAI(model=model_name, api_key=api_key)
 
     prompt = (
-        "당신은 ESG(환경·사회·지배구조) 분석 전문가입니다. "
-        "투자자들이 쉽게 이해할 수 있도록 이 회사의 ESG 경영 상태와 지속가능성을 분석해주세요.\n\n"
+        "당신은 증권사의 ESG(환경·사회·지배구조) 분석 애널리스트입니다. 중급 투자자를 대상으로 해당 기업의 ESG 경영과 지속가능성을 전문적이면서도 명료하게 분석해주세요.\n\n"
 
-        "먼저 `get_dart_company_info_wrapper` 도구를 사용해서 기업 공시 정보를 수집한 후, "
-        "다음과 같이 친근하고 이해하기 쉽게 설명해주세요:\n\n"
+        "분석 시 다음 사항을 평가하세요: 1) 지배구조 및 경영 투명성(경영진 구성, 이사회 독립성, 주주 권익 보호, 지배구조 리스크), "
+        "2) 사회적 책임 및 환경 경영(직원 처우, 산업 안전, 환경 규제 대응, ESG 공시 수준), "
+        "3) ESG 리스크 및 투자 관점(기업 가치 영향과 투자 펀드 편입 가능성).\n\n"
 
-        "1. 이 회사의 지배구조(경영 투명성)는 어떤지 알려주세요\n"
-        "   - 경영진의 전문성과 안정성은 어떤지\n"
-        "   - 이사회가 제대로 견제 역할을 하고 있는지\n"
-        "   - 주주들의 권익은 잘 보호받고 있는지\n\n"
+        "## 출력 형식 (반드시 이 구조를 따르세요):\n\n"
+        "```\n"
+        "## ESG 분석\n\n"
 
-        "2. 사회적 책임은 어떻게 수행하고 있는지 설명해주세요\n"
-        "   - 직원들을 어떻게 대우하고 있는지\n"
-        "   - 지역사회나 사회 전체에 어떤 기여를 하고 있는지\n"
-        "   - 고객이나 협력업체와의 관계는 어떤지\n\n"
+        "### 지배구조 및 경영 투명성\n"
+        "[경영진 구성, 이사회 독립성, 주주 권익 보호 수준, 지배구조 리스크 요인을 2-3개 문단으로 서술. 500-600자]\n\n"
 
-        "3. 환경 경영은 어떤 수준인지 평가해주세요\n"
-        "   - 환경 오염이나 기후변화에 대한 대응은 어떤지\n"
-        "   - 친환경 제품이나 기술 개발 노력은 있는지\n"
-        "   - 에너지 효율화나 탄소 배출 감소 노력은 어떤지\n\n"
+        "### 사회적 책임 및 환경 경영\n"
+        "[직원 처우, 산업 안전, 환경 규제 대응(탄소 배출, 친환경 기술), ESG 공시 여부와 지속가능경영 노력을 2개 문단으로 서술. 400-500자]\n\n"
 
-        "4. 장기적인 지속가능성은 어떻게 보이는지 분석해주세요\n"
-        "   - ESG 리스크가 사업에 어떤 영향을 줄 수 있는지\n"
-        "   - 미래 규제나 사회적 변화에 잘 대응할 수 있을지\n"
-        "   - ESG 경영이 기업 가치에 도움이 될지\n\n"
+        "### ESG 리스크 및 투자 관점\n"
+        "[ESG 리스크가 기업 가치에 미치는 영향과 투자 펀드 편입 가능성을 2개 문단으로 서술. 400-500자]\n\n"
 
-        "5. 투자자 관점에서 ESG 투자 매력도를 알려주세요\n"
-        "   - 다른 회사들과 비교해서 ESG 수준이 어떤지\n"
-        "   - ESG 투자 펀드들이 관심을 가질 만한지\n"
-        "   - 앞으로 ESG 개선 여지는 어느 정도인지\n\n"
+        "### 참고 데이터\n"
+        "- DART: [공시 자료 기준일]\n"
+        "```\n\n"
 
-        "전문 용어를 사용할 때는 쉬운 설명을 함께 해주시고, "
-        "ESG 점수나 등급보다는 실제 경영 활동과 그 의미를 중심으로 설명해주세요. "
-        "ESG 컨설턴트가 투자자에게 친근하게 설명해주는 느낌으로 작성해주세요.\n\n"
+        "## 작성 원칙:\n"
+        "- 총 분량: 1500-2000자 (각 섹션당 400-600자 목표)\n"
+        "- 문단 중심 서술 (핵심 사항은 괄호 내 표기)\n"
+        "- ESG 관련 구체적 정보 필수 포함 (이사회 구성, 배당 정책, 환경 공시 등)\n"
+        "- 전문 용어 사용시 간단한 설명 병기 (예: 지배구조 - 경영 투명성과 견제 체계)\n"
+        "- 증권사 리서치 보고서 톤: 전문적이되 명료하게\n"
+        "- ESG 리스크가 기업 가치에 미치는 영향을 투자 관점에서 평가\n\n"
 
-        "참고: 이 분석은 ESG 평가 참고자료이며 투자 추천이 아닙니다. 투자 시에는 신중히 판단하세요.\n\n"
-        "🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 'ESG_ANALYSIS_COMPLETE'라고 정확히 적어주세요. 이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
+        "데이터가 없는 경우 '정보 부족'으로 명시하고 추측 금지.\n\n"
+
+        "이 분석은 투자 참고자료이며, 특정 종목 매수/매도 권유가 아닙니다.\n\n"
+        "🚨 분석 완료 후 마지막 줄에 'ESG_ANALYSIS_COMPLETE'를 반드시 포함하세요."
     )
 
-    return create_react_agent(model=llm, tools=esg_tools, prompt=prompt, name="esg_expert")
+    return create_react_agent(
+        model=llm, tools=esg_tools, prompt=prompt, name="esg_expert"
+    )

@@ -7,49 +7,16 @@ import os
 from pathlib import Path
 
 def setup_logging(log_level: str = "INFO", enable_file_logging: bool = True) -> logging.Logger:
-    """로깅 설정 - 콘솔 및 파일 로깅 지원"""
-    # 루트 로거 설정으로 모든 모듈의 로그 캡처
-    root_logger = logging.getLogger()
+    """
+    로깅 설정 - ✅ 완전 비활성화됨
 
-    # 중복 핸들러 제거
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
+    로깅 시스템이 비활성화되어 로그 파일이 생성되지 않으며,
+    모든 logger 호출이 무시됩니다.
+    """
+    # ✅ 모든 로깅을 완전히 비활성화
+    logging.disable(logging.CRITICAL)
 
-    # 로거 레벨 설정
-    root_logger.setLevel(getattr(logging, log_level.upper()))
-
-    # 상세 포매터 설정
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-
-    # 콘솔 핸들러 추가
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-
-    # 파일 로깅 활성화시 파일 핸들러 추가
-    if enable_file_logging:
-        # logs 디렉토리 생성
-        logs_dir = Path("logs")
-        logs_dir.mkdir(exist_ok=True)
-
-        # 타임스탬프 기반 로그 파일명 생성
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file = logs_dir / f"streamlit_analysis_{timestamp}.log"
-
-        # 파일 핸들러 추가 - 모든 레벨 캡처
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
-        file_handler.setLevel(logging.DEBUG)  # 파일에는 모든 로그 저장
-        file_handler.setFormatter(formatter)
-        root_logger.addHandler(file_handler)
-
-        print(f"\n[LOG] 로그 파일 생성: {log_file}")
-        print(f"[LOG] 로그 레벨: {log_level}")
-        print(f"[LOG] 로그 저장 경로: {log_file.absolute()}\n")
-
-    # 특정 모듈 로거 반환
+    # 더미 로거 반환 (호출되어도 아무것도 하지 않음)
     return logging.getLogger("streamlit_analysis")
 
 def format_korean_currency(amount: float) -> str:

@@ -107,7 +107,7 @@ class DARTAPIClient:
     def get_financial_statements(
         self, corp_code: str, bsns_year: str, reprt_code: str = "11013"
     ) -> Dict[str, Any]:
-        """재무제표 조회
+        """재무제표 조회 - 핵심 지표만 추출 (전문가 권장)
 
         Args:
             corp_code: 고유번호
@@ -124,22 +124,52 @@ class DARTAPIClient:
             result = self._make_request("fnlttSinglAcnt.json", params)
 
             if result.get("status") == "000" and result.get("list"):
-                financial_data = {}
+                # ✅ 토큰 최적화: 100+ 계정과목 중 핵심 6개 지표만 추출
+                # 증권분석가 권장: 매출액, 영업이익, 당기순이익, 자산총계, 부채총계, 자본총계
 
+                core_accounts = {
+                    "매출액": ["매출액", "수익(매출액)"],
+                    "영업이익": ["영업이익", "영업이익(손실)"],
+                    "당기순이익": ["당기순이익", "당기순이익(손실)"],
+                    "자산총계": ["자산총계"],
+                    "부채총계": ["부채총계"],
+                    "자본총계": ["자본총계"]
+                }
+
+                extracted_data = {}
+
+                # 원본 데이터에서 핵심 계정 검색
                 for item in result["list"]:
                     account_nm = item.get("account_nm", "")
                     thstrm_amount = item.get("thstrm_amount", "0").replace(",", "")
 
-                    try:
-                        amount = float(thstrm_amount) if thstrm_amount != "-" else 0
-                        financial_data[account_nm] = amount
-                    except (ValueError, TypeError):
-                        financial_data[account_nm] = 0
+                    # 핵심 계정 매칭
+                    for key, variations in core_accounts.items():
+                        if any(var in account_nm for var in variations) and key not in extracted_data:
+                            try:
+                                amount = float(thstrm_amount) if thstrm_amount != "-" else 0
+                                extracted_data[key] = amount
+                            except (ValueError, TypeError):
+                                extracted_data[key] = 0
+                            break
+
+                # 파생 지표 계산
+                metrics = {}
+                if "매출액" in extracted_data and extracted_data["매출액"] > 0:
+                    if "영업이익" in extracted_data:
+                        metrics["영업이익률"] = round((extracted_data["영업이익"] / extracted_data["매출액"]) * 100, 2)
+                    if "당기순이익" in extracted_data:
+                        metrics["순이익률"] = round((extracted_data["당기순이익"] / extracted_data["매출액"]) * 100, 2)
+
+                if "자산총계" in extracted_data and "부채총계" in extracted_data:
+                    if extracted_data["자산총계"] > 0:
+                        metrics["부채비율"] = round((extracted_data["부채총계"] / extracted_data["자산총계"]) * 100, 2)
 
                 return {
                     "year": bsns_year,
                     "report_code": reprt_code,
-                    "financial_data": financial_data,
+                    "core_financials": extracted_data,
+                    "financial_metrics": metrics,
                     "last_updated": datetime.now().isoformat(),
                 }
 

@@ -46,6 +46,72 @@ class EnterpriseContextManager:
         logger.info(f"[{agent_name}] 컨텍스트 완전 보존: {original_tokens:,} 토큰")
         return full_output
 
+    def compress_agent_output(self, agent_name: str, full_output: str, target_tokens: int = 3000) -> str:
+        """에이전트 출력을 intelligent compression (핵심 정보 보존)"""
+        try:
+            original_tokens = self.count_tokens(full_output)
+
+            # 이미 목표 토큰 이하면 그대로 반환
+            if original_tokens <= target_tokens:
+                logger.info(f"[{agent_name}] 압축 불필요: {original_tokens:,} 토큰")
+                return full_output
+
+            # 핵심 정보 추출 전략
+            lines = full_output.split('\n')
+
+            # 1. 숫자/지표가 포함된 라인 (실제 데이터)
+            data_lines = []
+            # 2. 결론/요약 라인
+            conclusion_lines = []
+            # 3. 일반 설명 라인
+            detail_lines = []
+
+            for line in lines:
+                # 숫자, 퍼센트, 원화, 달러 등 실제 데이터 포함 여부
+                if any(indicator in line for indicator in ['%', '원', '달러', 'KRW', 'USD', '억', '조', '점']) or \
+                   any(char.isdigit() for char in line):
+                    data_lines.append(line)
+                # 결론/요약 키워드
+                elif any(keyword in line for keyword in ['결론', '요약', '종합', '판단', '전망', '추천', 'COMPLETE', '##', '###']):
+                    conclusion_lines.append(line)
+                # 일반 설명
+                elif line.strip():
+                    detail_lines.append(line)
+
+            # 압축 비율 계산
+            compression_ratio = target_tokens / original_tokens
+
+            # 중요도 기반 선택
+            # 데이터 라인: 70% 보존
+            # 결론 라인: 100% 보존
+            # 상세 라인: 30% 보존
+            selected_data = data_lines[:int(len(data_lines) * min(1.0, compression_ratio / 0.3))]
+            selected_conclusion = conclusion_lines  # 전부 보존
+            selected_detail = detail_lines[:int(len(detail_lines) * min(1.0, compression_ratio / 0.7))]
+
+            # 재구성
+            compressed_lines = selected_conclusion + selected_data + selected_detail
+            compressed_output = '\n'.join(compressed_lines)
+
+            # 최종 토큰 확인
+            compressed_tokens = self.count_tokens(compressed_output)
+
+            # 여전히 초과하면 단순 truncation
+            if compressed_tokens > target_tokens:
+                char_limit = int(len(compressed_output) * (target_tokens / compressed_tokens))
+                compressed_output = compressed_output[:char_limit]
+                compressed_tokens = self.count_tokens(compressed_output)
+
+            logger.info(f"[{agent_name}] 압축 완료: {original_tokens:,} → {compressed_tokens:,} 토큰 ({compressed_tokens/original_tokens*100:.1f}%)")
+
+            return compressed_output
+
+        except Exception as e:
+            logger.error(f"압축 중 오류: {str(e)}")
+            # 실패시 단순 truncation
+            char_limit = int(len(full_output) * 0.3)
+            return full_output[:char_limit]
+
     def create_progressive_summary(self, agent_outputs: Dict[str, str]) -> str:
         """점진적 요약 생성 - 정보 손실 최소화"""
         try:

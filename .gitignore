@@ -1,8 +1,11 @@
 .env
 __pycache__/
+.vscode/
 .claude/
 CLAUDE.md
 *.png
-.vscode/
+*.html
+*.tmp.*
+nul
 test/
 logs/

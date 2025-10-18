@@ -53,17 +53,17 @@ class ProgressiveAnalysisEngine:
             if not agent:
                 raise ValueError(f"에이전트를 찾을 수 없음: {agent_name}")
 
-            # 🎯 Smart Context Building: LLM 기반 요약으로 품질 보존
+            # 🎯 Smart Context Building: Intelligent Compression으로 품질 보존
             context_info = ""
             if previous_summaries:
-                # 📊 이전 에이전트 결과를 간결하게 요약하여 컨텍스트 구성
+                # 📊 이전 에이전트 결과를 간결하게 압축하여 컨텍스트 구성
                 key_summaries = []
                 for prev_agent, summary in previous_summaries.items():
-                    # 완전 보존 - 압축하지 않고 원본 그대로 전달
-                    preserved_content = self.context_manager.preserve_agent_output(
-                        prev_agent, summary
+                    # 🔧 Intelligent Compression - 실제 데이터 우선 보존
+                    compressed_content = self.context_manager.compress_agent_output(
+                        prev_agent, summary, target_tokens=3000
                     )
-                    key_summaries.append(f"[{prev_agent}]: {preserved_content}")
+                    key_summaries.append(f"[{prev_agent}]: {compressed_content}")
 
                 context_info = "\n".join(key_summaries)
 
@@ -71,6 +71,10 @@ class ProgressiveAnalysisEngine:
             analysis_request = self._create_targeted_request(
                 agent_name, stock_code, company_name, context_info
             )
+
+            # 🔍 DEBUG: 요청 크기 로깅
+            request_tokens = self.context_manager.count_tokens(analysis_request)
+            logger.info(f"[{agent_name}] 요청 메시지: {len(analysis_request):,} 문자, {request_tokens:,} 토큰")
 
             # 에이전트 실행
             result = agent.invoke({"messages": [{"role": "user", "content": analysis_request}]})
@@ -101,9 +105,9 @@ class ProgressiveAnalysisEngine:
                     content = content.strip() + f"\n\n{expected_signal}"
                     is_complete = True
 
-                # 🎯 컨텍스트 완전 보존 - 압축/요약 없음
-                compressed_content = self.context_manager.preserve_agent_output(
-                    agent_name, content
+                # 🎯 Intelligent Compression - 실제 데이터 우선 보존
+                compressed_content = self.context_manager.compress_agent_output(
+                    agent_name, content, target_tokens=3000
                 )
 
                 # 에이전트 실행 완료
@@ -246,14 +250,14 @@ class ProgressiveAnalysisEngine:
                         agent_summaries[agent_name] = result["compressed_content"]  # 컨텍스트용 압축본
                         completed_agents += 1
 
-                        # 완료 상태 yield
+                        # 완료 상태 yield - 🔥 Streamlit UI에는 전체 원본 보고서 전달
                         yield {
                             "type": "agent_complete",
                             "agent_name": agent_name,
                             "progress": (i + 1) / total_agents,
                             "status": "completed",
                             "message": f"{agent_name} 분석 완료",
-                            "content": self._preserve_completion_signal(result["compressed_content"], 2000),  # 완료 신호 보존하면서 제한
+                            "content": result["content"],  # ✅ 전체 원본 내용 (길이 제한 없음)
                             "token_count": result["token_count"],
                             "completed_agents": completed_agents,
                             "total_agents": total_agents
