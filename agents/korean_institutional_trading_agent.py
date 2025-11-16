@@ -17,25 +17,12 @@ from langchain_core.messages import HumanMessage
 from config.settings import get_llm_model
 from utils.helpers import convert_numpy_types
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
-from data.demo_loader import get_agent_demo
 
 logger = logging.getLogger(__name__)
 
-def get_investor_trading_analysis_logic(stock_code: str, company_name: str = "Unknown", period_days: int = 20, use_demo: bool = False) -> Dict[str, Any]:
+def get_investor_trading_analysis_logic(stock_code: str, company_name: str = "Unknown", period_days: int = 20) -> Dict[str, Any]:
     """투자자별 매매 동향 분석 로직"""
     try:
-        # 🔧 Phase 3 개선: 데모 모드 지원
-        if use_demo:
-            demo_data = get_agent_demo(stock_code, "institutional")
-            if demo_data:
-                logger.info(f"Using demo data for Korean Institutional Trading Agent: {stock_code}")
-                return {
-                    "status": "demo",
-                    "summary": demo_data.get("summary", ""),
-                    "agent": demo_data.get("agent", "Korean Institutional Trading Agent"),
-                    "note": "🎭 이 데이터는 데모 샘플입니다."
-                }
-
         end_date = datetime.now()
         start_date = end_date - timedelta(days=period_days + 10)
         start_str = start_date.strftime('%Y%m%d')
@@ -87,7 +74,7 @@ def create_institutional_trading_agent():
     # 🔧 Phase 3 개선: Graceful degradation
     llm_config = get_llm_model(raise_on_missing=False)
     if llm_config is None:
-        logger.warning("⚠️ LLM API 키가 설정되지 않았습니다. 데모 모드를 사용하세요.")
+        logger.error("❌ LLM API 키가 설정되지 않았습니다.")
         raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
 
     llm_provider, llm_model_name, llm_api_key = llm_config
