@@ -28,7 +28,6 @@ from data.dart_api_client import get_comprehensive_company_data
 from data.bok_api_client import get_macro_economic_indicators
 from data.sector_analysis_client import analyze_sector_relative_performance
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
-from data.demo_loader import get_agent_demo
 
 logger = logging.getLogger(__name__)
 
@@ -395,7 +394,7 @@ financial_tools = [
 # 🔧 Phase 3 개선: Graceful degradation
 llm_config = get_llm_model(raise_on_missing=False)
 if llm_config is None:
-    logger.warning("⚠️ LLM API 키가 설정되지 않았습니다. 데모 모드를 사용하세요.")
+    logger.error("❌ LLM API 키가 설정되지 않았습니다.")
     raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
 
 provider, model_name, api_key = llm_config
@@ -460,21 +459,9 @@ korean_financial_react_agent = create_react_agent(
 
 
 # 편의 함수
-def get_financial_analysis_logic(stock_code: str, company_name: str = None, use_demo: bool = False) -> dict:
+def get_financial_analysis_logic(stock_code: str, company_name: str = None) -> dict:
     """Korean Financial Agent 실행 로직"""
     try:
-        # 🔧 Phase 3 개선: 데모 모드 지원
-        if use_demo:
-            demo_data = get_agent_demo(stock_code, "financial")
-            if demo_data:
-                logger.info(f"Using demo data for Korean Financial ReAct Agent: {stock_code}")
-                return {
-                    "status": "demo",
-                    "summary": demo_data.get("summary", ""),
-                    "agent": demo_data.get("agent", "Korean Financial ReAct Agent"),
-                    "note": "🎭 이 데이터는 데모 샘플입니다."
-                }
-
         messages = [
             HumanMessage(
                 content=f"Analyze Korean stock {stock_code} ({company_name or 'Unknown Company'}). "
