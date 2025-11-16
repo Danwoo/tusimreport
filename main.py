@@ -6,9 +6,11 @@ import time
 import requests
 
 from core.korean_supervisor_langgraph import stream_korean_stock_analysis
-from config.settings import settings
+from config.settings import settings, get_api_key_status, check_minimum_requirements
 from utils.helpers import setup_logging
 from data.chart_generator import create_stock_chart
+from utils.agent_helpers import validate_stock_code
+from data.demo_loader import DemoDataLoader, is_demo_available, get_demo_message
 
 # 로깅 설정 - 파일 로깅 활성화
 logger = setup_logging(settings.log_level, enable_file_logging=True)
@@ -209,9 +211,64 @@ def create_result_card(agent_name, config, status="waiting", content="", news_so
         <div class="result-content">{content}{news_section}</div>
     </div>"""
 
-def run_analysis(symbol, company_name):
+def run_analysis(symbol, company_name, demo_mode=False):
     """분석 실행"""
 
+    # 🔧 Phase 3 개선: 데모 모드 처리
+    if demo_mode:
+        demo_loader = DemoDataLoader()
+        if not demo_loader.is_demo_available(symbol):
+            st.error(f"❌ 데모 데이터가 없는 종목입니다.\n\n💡 사용 가능한 종목: 삼성전자(005930), 네이버(035420)")
+            return
+
+        st.info("🎭 **데모 모드**: 샘플 데이터로 시스템을 체험하고 있습니다. 실제 분석을 위해서는 API 키를 설정해주세요.")
+
+        # 데모 데이터 표시
+        demo_data = demo_loader.get_company_demo(symbol)
+        if demo_data:
+            st.markdown(f'<div class="results-section"><h2 style="color: #334155; margin: 0 0 1rem 0; font-size: 1.5rem;">📊 {symbol} {demo_data["company_name"]} 분석 결과 (데모)</h2></div>', unsafe_allow_html=True)
+
+            # 각 에이전트 결과 표시
+            agent_mapping = {
+                "context": "context_expert",
+                "sentiment": "sentiment_expert",
+                "financial": "financial_expert",
+                "technical": "advanced_technical_expert",
+                "institutional": "institutional_trading_expert",
+                "comparative": "comparative_expert",
+                "esg": "esg_expert",
+                "community": "community_expert"
+            }
+
+            for demo_key, agent_name in agent_mapping.items():
+                if demo_key in demo_data.get("demo_analysis", {}):
+                    analysis = demo_data["demo_analysis"][demo_key]
+                    config = get_agent_config(agent_name)
+                    st.markdown(create_result_card(agent_name, config, "completed", analysis.get("summary", "")), unsafe_allow_html=True)
+
+            # 종합 추천
+            if "综合_recommendation" in demo_data:
+                rec = demo_data["综合_recommendation"]
+                final_report = f"""
+**투자 의견**: {rec.get('overall_sentiment', 'N/A')}
+**투자 점수**: {rec.get('investment_score', 'N/A')}/100
+**리스크**: {rec.get('risk_level', 'N/A')}
+**투자 기간**: {rec.get('timeframe', 'N/A')}
+
+**주요 포인트**:
+{chr(10).join(rec.get('key_points', []))}
+
+⚠️ {rec.get('note', '이는 데모 데이터입니다.')}
+                """
+                st.markdown(f"""
+                <div class="final-report">
+                    <h2 class="report-title">🎯 종합 투자 분석 보고서 (데모)</h2>
+                    <div class="report-content">{final_report}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        return
+
+    # 실제 분석 모드
     # 뉴스 데이터 및 차트 미리 생성
     with st.spinner("📰 뉴스 데이터 수집 중..."):
         news_sources = fetch_news_for_display(company_name)
@@ -382,9 +439,33 @@ def main():
     st.markdown("""
     <div class="main-header">
         <h1 class="main-title">📊 AI Stock Analyzer</h1>
-        <p class="main-subtitle">AI 전문가 7인의 종합 주식 분석</p>
+        <p class="main-subtitle">AI 전문가 8인의 종합 주식 분석</p>
     </div>
     """, unsafe_allow_html=True)
+
+    # 🔧 Phase 3 개선: API 키 상태 사이드바
+    with st.sidebar:
+        st.subheader("🔑 API 키 상태")
+        api_status = get_api_key_status()
+        for key, msg in api_status.items():
+            st.write(msg)
+
+        st.divider()
+        st.caption("💡 API 키 설정: .env 파일 참고")
+
+    # 🔧 Phase 3 개선: 데모 모드 확인
+    has_llm, warnings = check_minimum_requirements()
+    demo_mode_enabled = False
+
+    if not has_llm:
+        st.warning("⚠️ **LLM API 키가 설정되지 않았습니다**\n\n" + get_demo_message())
+        demo_mode_enabled = st.checkbox("🎭 **데모 모드로 체험하기** (샘플 데이터 사용)", value=False)
+
+        if demo_mode_enabled:
+            st.info("ℹ️ 데모 모드: 삼성전자(005930), 네이버(035420) 샘플 데이터로 시스템을 체험할 수 있습니다.")
+
+    # 세션 상태에 데모 모드 저장
+    st.session_state['demo_mode'] = demo_mode_enabled
 
     # 입력 섹션
     st.markdown("""
@@ -429,10 +510,17 @@ def main():
 
         # 분석 시작 버튼
         if st.button("🚀 AI 분석 시작", type="primary", use_container_width=True):
-            if symbol:
-                run_analysis(symbol.strip(), company_name.strip() if company_name else None)
+            if not symbol:
+                st.error("❌ 종목코드를 입력해주세요!")
             else:
-                st.error("종목코드를 입력해주세요!")
+                # 🔧 Phase 3 개선: 종목 코드 검증
+                is_valid, validation_msg = validate_stock_code(symbol.strip())
+                if not is_valid:
+                    st.error(validation_msg)
+                else:
+                    # 데모 모드 확인
+                    demo_mode = st.session_state.get('demo_mode', False)
+                    run_analysis(symbol.strip(), company_name.strip() if company_name else None, demo_mode=demo_mode)
 
     with col2:
         # 인기 종목 (오른쪽 사이드)
@@ -440,11 +528,12 @@ def main():
         popular_stocks = [("005930", "삼성전자"), ("000660", "SK하이닉스"), ("035420", "NAVER"), ("005380", "현대차")]
         for code, name in popular_stocks:
             if st.button(f"{name}\n{code}", key=f"popular_{code}", use_container_width=True):
-                run_analysis(code, name)
+                demo_mode = st.session_state.get('demo_mode', False)
+                run_analysis(code, name, demo_mode=demo_mode)
 
     # 시스템 정보
     with st.expander("ℹ️ 시스템 정보"):
-        st.markdown("**🤖 AI 전문가 구성:**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News")
+        st.markdown("**🤖 AI 전문가 구성 (8인):**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석 💬 커뮤니티분석\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News • Paxnet")
 
 if __name__ == "__main__":
     main()
