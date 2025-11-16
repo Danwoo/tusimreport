@@ -6,6 +6,7 @@ import time
 import requests
 
 from core.korean_supervisor_langgraph import stream_korean_stock_analysis
+from core.chat_session import create_chat_session
 from config.settings import settings, get_api_key_status, check_minimum_requirements
 from utils.helpers import setup_logging
 from data.chart_generator import create_stock_chart
@@ -367,9 +368,23 @@ def run_analysis(symbol, company_name):
         # 최종 진행률
         update_progress(completed_count, len(agent_names))
 
+        # 🔧 Phase 4: 분석 결과 저장 (채팅용)
+        if completed_count >= 5:  # 5개 이상 완료 시
+            st.session_state['analysis_completed'] = True
+            st.session_state['analysis_symbol'] = symbol
+            st.session_state['analysis_company'] = company_name
+            st.session_state['analysis_agents'] = agent_states
+            st.session_state['analysis_timestamp'] = datetime.now().isoformat()
+
+            # 채팅 세션 생성
+            chat_session = create_chat_session(symbol, company_name, agent_states)
+            if chat_session:
+                st.session_state['chat_session'] = chat_session
+                logger.info("Chat session created successfully")
+
         # 로깅
         logger.info(f"================== 주식 분석 완료 ==================")
-        logger.info(f"완료된 전문가 수: {completed_count}/7")
+        logger.info(f"완료된 전문가 수: {completed_count}/{len(agent_names)}")
         logger.info(f"최종 보고서 생성: {'예' if final_report else '아니오'}")
         logger.info(f"분석 완료 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"====================================================")
@@ -467,6 +482,47 @@ def main():
     # 시스템 정보
     with st.expander("ℹ️ 시스템 정보"):
         st.markdown("**🤖 AI 전문가 구성 (8인):**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석 💬 커뮤니티분석\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News • Paxnet")
+
+    # 🔧 Phase 4: 대화형 AI 채팅 인터페이스
+    if st.session_state.get('analysis_completed') and st.session_state.get('chat_session'):
+        st.markdown("---")
+        st.markdown("## 💬 AI와 대화하기")
+
+        analysis_company = st.session_state.get('analysis_company', '종목')
+        st.info(f"✨ **{analysis_company}** 분석 결과에 대해 궁금한 점을 물어보세요!\n\n"
+                f"예: '재무 상태가 괜찮아?', '지금 사도 될까?', '리스크는 뭐야?'")
+
+        chat_session = st.session_state['chat_session']
+
+        # 대화 히스토리 초기화 (세션 상태에 저장)
+        if 'chat_history' not in st.session_state:
+            st.session_state['chat_history'] = []
+
+        # 기존 대화 표시
+        for message in st.session_state['chat_history']:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        # 채팅 입력
+        if prompt := st.chat_input("질문을 입력하세요..."):
+            # 사용자 메시지 표시 및 저장
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            st.session_state['chat_history'].append({"role": "user", "content": prompt})
+
+            # AI 응답 생성
+            with st.chat_message("assistant"):
+                with st.spinner("🤔 생각 중..."):
+                    response = chat_session.ask(prompt)
+                    st.markdown(response)
+
+            st.session_state['chat_history'].append({"role": "assistant", "content": response})
+
+        # 대화 초기화 버튼
+        if st.button("🔄 대화 내역 지우기", key="clear_chat"):
+            st.session_state['chat_history'] = []
+            chat_session.clear_history()
+            st.rerun()
 
 if __name__ == "__main__":
     main()
