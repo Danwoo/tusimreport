@@ -22,14 +22,27 @@ from langgraph.prebuilt import create_react_agent
 from config.settings import get_llm_model
 from data.dart_api_client import get_comprehensive_company_data
 from utils.helpers import convert_numpy_types
+from utils.agent_helpers import create_fallback_message, format_error_message_korean
+from data.demo_loader import get_agent_demo
 
 logger = logging.getLogger(__name__)
 
 
-@tool
-def get_dart_company_info_wrapper(stock_code: str, company_name: str) -> Dict[str, Any]:
-    """DART API를 통해 기업 공시정보를 수집하고 ESG 관련 정보를 추출합니다."""
+def get_esg_analysis_logic(stock_code: str, company_name: str, use_demo: bool = False) -> Dict[str, Any]:
+    """ESG 분석 로직"""
     try:
+        # 🔧 Phase 3 개선: 데모 모드 지원
+        if use_demo:
+            demo_data = get_agent_demo(stock_code, "esg")
+            if demo_data:
+                logger.info(f"Using demo data for Korean ESG Analysis Agent: {stock_code}")
+                return {
+                    "status": "demo",
+                    "summary": demo_data.get("summary", ""),
+                    "agent": demo_data.get("agent", "Korean ESG Analysis Agent"),
+                    "note": "🎭 이 데이터는 데모 샘플입니다."
+                }
+
         logger.info(f"Fetching DART company info for {company_name} ({stock_code})")
 
         # DART API 클라이언트 호출
@@ -69,8 +82,21 @@ def get_dart_company_info_wrapper(stock_code: str, company_name: str) -> Dict[st
         return convert_numpy_types(esg_info)
 
     except Exception as e:
-        logger.error(f"Error in get_dart_company_info_wrapper: {str(e)}")
-        return {"error": str(e)}
+        error_msg = format_error_message_korean(e, "ESG 분석")
+        logger.error(error_msg)
+        return create_fallback_message(
+            agent_name="Korean ESG Analysis Agent",
+            company_name=company_name,
+            stock_code=stock_code,
+            reason=error_msg,
+            data_source="DART API"
+        )
+
+
+@tool
+def get_dart_company_info_wrapper(stock_code: str, company_name: str) -> Dict[str, Any]:
+    """DART API를 통해 기업 공시정보를 수집하고 ESG 관련 정보를 추출합니다."""
+    return get_esg_analysis_logic(stock_code, company_name)
 
 
 # ESG 분석 도구 목록
@@ -79,7 +105,13 @@ esg_tools = [get_dart_company_info_wrapper]
 
 def create_esg_agent():
     """ESG Agent 생성 함수"""
-    llm_provider, model_name, api_key = get_llm_model()
+    # 🔧 Phase 3 개선: Graceful degradation
+    llm_config = get_llm_model(raise_on_missing=False)
+    if llm_config is None:
+        logger.warning("⚠️ LLM API 키가 설정되지 않았습니다. 데모 모드를 사용하세요.")
+        raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
+
+    llm_provider, model_name, api_key = llm_config
     if llm_provider == "gemini":
         llm = ChatGoogleGenerativeAI(model=model_name, temperature=0.1, google_api_key=api_key)
     else:
