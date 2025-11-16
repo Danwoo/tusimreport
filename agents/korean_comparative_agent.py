@@ -17,12 +17,26 @@ from langchain_core.messages import HumanMessage
 
 from config.settings import get_llm_model
 from utils.helpers import convert_numpy_types
+from utils.agent_helpers import create_fallback_message, format_error_message_korean
+from data.demo_loader import get_agent_demo
 
 logger = logging.getLogger(__name__)
 
-def get_comparative_analysis_logic(stock_code: str, company_name: str) -> Dict[str, Any]:
+def get_comparative_analysis_logic(stock_code: str, company_name: str, use_demo: bool = False) -> Dict[str, Any]:
     """업종 내 경쟁사 비교 및 전체 시장 내 순위 분석을 통합적으로 수행하는 로직"""
     try:
+        # 🔧 Phase 3 개선: 데모 모드 지원
+        if use_demo:
+            demo_data = get_agent_demo(stock_code, "comparative")
+            if demo_data:
+                logger.info(f"Using demo data for Korean Comparative Agent: {stock_code}")
+                return {
+                    "status": "demo",
+                    "summary": demo_data.get("summary", ""),
+                    "agent": demo_data.get("agent", "Korean Comparative Agent"),
+                    "note": "🎭 이 데이터는 데모 샘플입니다."
+                }
+
         logger.info(f"Performing comprehensive comparative analysis for {stock_code}")
         today_str = datetime.now().strftime('%Y%m%d')
 
@@ -188,8 +202,15 @@ def get_comparative_analysis_logic(stock_code: str, company_name: str) -> Dict[s
             "analysis_date": today_str
         })
     except Exception as e:
-        logger.error(f"Error in comparative analysis: {str(e)}")
-        return {"error": str(e)}
+        error_msg = format_error_message_korean(e, "상대 가치 분석")
+        logger.error(error_msg)
+        return create_fallback_message(
+            agent_name="Korean Comparative Agent",
+            company_name=company_name,
+            stock_code=stock_code,
+            reason=error_msg,
+            data_source="FinanceDataReader, PyKRX"
+        )
 
 @tool
 def get_comparative_analysis(stock_code: str, company_name: str) -> Dict[str, Any]:
@@ -201,7 +222,13 @@ comparative_tools = [get_comparative_analysis]
 
 def create_comparative_agent():
     """Comparative Analysis Agent 생성 함수"""
-    llm_provider, llm_model_name, llm_api_key = get_llm_model()
+    # 🔧 Phase 3 개선: Graceful degradation
+    llm_config = get_llm_model(raise_on_missing=False)
+    if llm_config is None:
+        logger.warning("⚠️ LLM API 키가 설정되지 않았습니다. 데모 모드를 사용하세요.")
+        raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
+
+    llm_provider, llm_model_name, llm_api_key = llm_config
     if llm_provider == "gemini":
         llm = ChatGoogleGenerativeAI(model=llm_model_name, temperature=0.1, google_api_key=llm_api_key)
     else:
