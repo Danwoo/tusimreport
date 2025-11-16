@@ -64,37 +64,121 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+def _is_valid_api_key(key: Optional[str], placeholder: str = "") -> bool:
+    """API 키가 유효한지 확인 (None이거나 placeholder가 아니어야 함)"""
+    if not key:
+        return False
+    if placeholder and key == placeholder:
+        return False
+    if key.startswith("your_") and key.endswith("_here"):
+        return False
+    return True
+
+
 def validate_api_keys() -> dict[str, bool]:
-    """API 키 유효성 검증"""
+    """
+    API 키 유효성 검증
+
+    Returns:
+        각 API 키의 유효성 여부를 담은 딕셔너리
+    """
     return {
-        "openai": bool(
-            settings.openai_api_key
-            and settings.openai_api_key != "your_openai_api_key_here"
-        ),
-        "google": bool(
-            settings.google_api_key
-            and settings.google_api_key != "your_google_api_key_here"
-        ),
-        "naver": bool(
-            settings.naver_client_id
-            and settings.naver_client_secret
-            and settings.naver_client_id != "your_naver_client_id_here"
-            and settings.naver_client_secret != "your_naver_client_secret_here"
-        ),
+        "openai": _is_valid_api_key(settings.openai_api_key),
+        "google": _is_valid_api_key(settings.google_api_key),
+        "dart": _is_valid_api_key(settings.dart_api_key),
+        "ecos": _is_valid_api_key(settings.ecos_api_key),
+        "naver": _is_valid_api_key(settings.naver_client_id) and
+                _is_valid_api_key(settings.naver_client_secret),
+        "tavily": _is_valid_api_key(settings.tavily_api_key),
     }
 
 
-def get_llm_model():
-    """현재 설정에 따라 LLM 모델 반환"""
+def get_api_key_status() -> dict[str, str]:
+    """
+    API 키 상태를 사람이 읽을 수 있는 형태로 반환
+
+    Returns:
+        각 API 키의 상태 메시지
+    """
+    validation = validate_api_keys()
+    return {
+        "llm": "✅ 설정됨" if (validation["openai"] or validation["google"]) else "❌ 미설정 (필수)",
+        "dart": "✅ 설정됨" if validation["dart"] else "⚠️ 미설정 (재무 분석 제한)",
+        "ecos": "✅ 설정됨" if validation["ecos"] else "⚠️ 미설정 (경제 지표 제한)",
+        "naver": "✅ 설정됨" if validation["naver"] else "⚠️ 미설정 (뉴스 분석 제한)",
+        "tavily": "✅ 설정됨" if validation["tavily"] else "ℹ️ 미설정 (선택사항)",
+    }
+
+
+def get_llm_model(raise_on_missing: bool = False):
+    """
+    현재 설정에 따라 LLM 모델 반환
+
+    Args:
+        raise_on_missing: True면 API 키 없을 때 에러 발생, False면 None 반환
+
+    Returns:
+        (provider, model_name, api_key) 튜플 또는 None
+
+    Raises:
+        ValueError: raise_on_missing=True이고 API 키가 없을 때
+    """
+    # Gemini 우선 시도
     if settings.use_gemini:
-        if not settings.google_api_key:
+        if _is_valid_api_key(settings.google_api_key):
+            return "gemini", settings.gemini_model, settings.google_api_key
+        elif raise_on_missing:
             raise ValueError(
-                "Google API Key가 설정되지 않았습니다. .env 파일에 GOOGLE_API_KEY를 추가하세요."
+                "❌ Google API 키가 설정되지 않았습니다.\n"
+                "💡 해결 방법:\n"
+                "   1. .env 파일에 GOOGLE_API_KEY를 추가하세요\n"
+                "   2. 또는 USE_GEMINI=false로 설정하고 OpenAI를 사용하세요\n"
+                "   3. API 키 발급: https://aistudio.google.com/app/apikey"
             )
-        return "gemini", settings.gemini_model, settings.google_api_key
-    else:
-        if not settings.openai_api_key:
-            raise ValueError(
-                "OpenAI API Key가 설정되지 않았습니다. .env 파일에 OPENAI_API_KEY를 추가하세요."
-            )
+
+    # OpenAI fallback
+    if _is_valid_api_key(settings.openai_api_key):
         return "openai", settings.openai_model, settings.openai_api_key
+
+    # Gemini도 시도 (USE_GEMINI=false여도)
+    if _is_valid_api_key(settings.google_api_key):
+        return "gemini", settings.gemini_model, settings.google_api_key
+
+    if raise_on_missing:
+        raise ValueError(
+            "❌ LLM API 키가 설정되지 않았습니다.\n"
+            "💡 해결 방법:\n"
+            "   1. Google Gemini: .env 파일에 GOOGLE_API_KEY 추가\n"
+            "      발급: https://aistudio.google.com/app/apikey\n"
+            "   2. 또는 OpenAI: .env 파일에 OPENAI_API_KEY 추가\n"
+            "      발급: https://platform.openai.com/api-keys\n"
+            "   3. 최소 하나의 LLM API 키가 필요합니다"
+        )
+
+    return None
+
+
+def check_minimum_requirements() -> tuple[bool, list[str]]:
+    """
+    최소 요구사항 확인
+
+    Returns:
+        (모든 요구사항 충족 여부, 경고 메시지 리스트)
+    """
+    warnings = []
+    validation = validate_api_keys()
+
+    # LLM은 필수
+    has_llm = validation["openai"] or validation["google"]
+    if not has_llm:
+        warnings.append("❌ LLM API 키 필요 (Google Gemini 또는 OpenAI)")
+
+    # 데이터 API는 경고만
+    if not validation["dart"]:
+        warnings.append("⚠️ DART API 키 권장 (재무 분석 기능 제한)")
+    if not validation["ecos"]:
+        warnings.append("⚠️ ECOS API 키 권장 (경제 지표 기능 제한)")
+    if not validation["naver"]:
+        warnings.append("⚠️ Naver API 키 권장 (뉴스 분석 기능 제한)")
+
+    return has_llm, warnings
