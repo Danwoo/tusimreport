@@ -1,275 +1,217 @@
 # TuSimReport - 한국 주식 분석 AI 에이전트 시스템
 
-LangGraph Supervisor 아키텍처 기반의 전문급 AI 멀티 에이전트 시스템으로, 7개 전문 에이전트와 5개의 검증된 실시간 데이터 소스를 활용한 종합적인 한국 주식 시장 분석 시스템입니다.
+> ⚠️ **프로젝트 상태: 개발 중** (v2.1 - 2025-11-16)
+> 현재 기능 개발 및 안정화 작업 진행 중입니다.
 
-## 프로젝트 개요
+LangGraph Supervisor 아키텍처 기반의 AI 멀티 에이전트 시스템으로, **8개 전문 에이전트**와 **6개 데이터 소스**를 활용한 한국 주식 시장 분석 시스템입니다.
 
-TuSimReport는 100% 실제 데이터 통합을 통해 한국 주식 시장에 대한 기관급 투자 분석을 제공합니다. 모의 데이터를 완전히 배제하고 투명성, 정확성, 실행 가능한 투자 인사이트에 집중합니다.
+---
 
-## 시스템 아키텍처
+## 📊 프로젝트 개요
 
-### 멀티 에이전트 아키텍처
+TuSimReport는 실제 데이터를 우선으로 하는 한국 주식 분석 시스템입니다.
 
-```mermaid
-graph TD
-    User[사용자 입력] --> Progressive[점진적 분석 엔진]
-    Progressive --> Supervisor[LangGraph Supervisor]
+### 핵심 특징
+- ✅ **8개 전문 에이전트**: 시장환경, 뉴스, 재무, 기술, 수급, 비교, ESG, 커뮤니티 분석
+- ✅ **실제 데이터**: 한국은행, 금감원, 한국거래소, 네이버 뉴스 등 공식 데이터 소스
+- ✅ **커뮤니티 분석**: Paxnet 종목토론 크롤링 (v2.1 신규)
+- ✅ **No Mock Data**: 실제 API 데이터만 사용
 
-    subgraph "7개 전문 에이전트"
-        Context[Korean Context Agent<br/>시장 환경 분석]
-        Sentiment[Korean Sentiment Agent<br/>뉴스 분석]
-        Financial[Korean Financial Agent<br/>재무 분석]
-        Technical[Advanced Technical Agent<br/>차트 분석]
-        Institutional[Institutional Trading Agent<br/>수급 분석]
-        Comparative[Comparative Agent<br/>상대 가치 분석]
-        ESG[ESG Analysis Agent<br/>지속가능경영 분석]
-    end
+### 현재 상태
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| 아키텍처 설계 | ✅ 완료 | 8개 에이전트, LangGraph Supervisor |
+| 데이터 소스 연동 | ⚠️ 부분 완료 | 6개 소스 (API 키 필요) |
+| 환경 설정 | ✅ 개선 | .env.example 추가 |
+| 테스트 | 🚧 진행 중 | 기본 테스트 추가 예정 |
+| 프로덕션 배포 | ❌ 미지원 | Docker 지원 예정 |
 
-    Supervisor --> Context
-    Supervisor --> Sentiment
-    Supervisor --> Financial
-    Supervisor --> Technical
-    Supervisor --> Institutional
-    Supervisor --> Comparative
-    Supervisor --> ESG
+---
 
-    Context --> Report[종합 보고서]
-    Sentiment --> Report
-    Financial --> Report
-    Technical --> Report
-    Institutional --> Report
-    Comparative --> Report
-    ESG --> Report
+## 🏗️ 시스템 아키텍처
 
-    Report --> User
+### 8개 전문 에이전트 (v2.1)
+
+```
+tusimreport/
+├── agents/                    # 8개 전문 에이전트
+│   ├── korean_context_agent.py          # 1. 시장 환경 분석
+│   ├── korean_sentiment_agent.py        # 2. 뉴스 여론 분석
+│   ├── korean_financial_react_agent.py  # 3. 재무 상태 분석
+│   ├── korean_advanced_technical_agent.py # 4. 기술적 분석
+│   ├── korean_institutional_trading_agent.py # 5. 기관 수급 분석
+│   ├── korean_comparative_agent.py      # 6. 상대 가치 분석
+│   ├── korean_esg_analysis_agent.py     # 7. ESG 분석
+│   └── korean_community_agent.py        # 8. 커뮤니티 분석 (v2.1)
+├── core/                      # 핵심 시스템
+│   ├── korean_supervisor_langgraph.py   # LangGraph Supervisor
+│   ├── progressive_supervisor.py        # 점진적 분석 엔진
+│   └── context_manager.py               # 컨텍스트 관리
+├── data/                      # 데이터 클라이언트
+│   ├── bok_api_client.py                # 한국은행 API
+│   ├── dart_api_client.py               # DART (금감원)
+│   ├── naver_api_client.py              # 네이버 뉴스
+│   ├── tavily_api_client.py             # Tavily (글로벌 뉴스)
+│   ├── paxnet_crawl_client.py           # Paxnet 크롤링 (v2.1)
+│   ├── chart_generator.py               # 차트 생성
+│   └── sector_analysis_client.py        # 섹터 분석
+└── main.py                    # Streamlit UI
 ```
 
-### 에이전트 의존성 관계
+### 데이터 소스 (6개)
 
-```mermaid
-graph LR
-    Context[시장 환경] --> Sentiment[뉴스 여론]
-    Sentiment --> Financial[재무 분석]
-    Financial --> Technical[기술적 분석]
-    Technical --> Institutional[기관 수급]
-    Institutional --> Comparative[상대 가치]
-    Comparative --> ESG[ESG 분석]
-    ESG --> Report[최종 보고서]
-```
+| 데이터 소스 | API 키 필요 | 용도 |
+|------------|-----------|------|
+| FinanceDataReader | ❌ | 주가 데이터 |
+| PyKRX | ❌ | 한국거래소 데이터 |
+| BOK ECOS | ✅ | 거시경제 지표 |
+| DART | ✅ | 기업 공시/재무 |
+| Naver News | ✅ | 한국 뉴스 |
+| Paxnet (Selenium) | ❌ | 커뮤니티 토론 |
 
-### 핵심 컴포넌트
+---
 
-```mermaid
-graph TB
-    subgraph "핵심 시스템"
-        Supervisor[LangGraph Supervisor]
-        Progressive[점진적 분석 엔진]
-        Context[컨텍스트 관리자]
-        Enhanced[향상된 ReAct 에이전트]
-    end
+## 🚀 빠른 시작
 
-    subgraph "데이터 레이어"
-        BOK[BOK ECOS API<br/>경제 데이터]
-        DART[DART API<br/>기업 공시 데이터]
-        Naver[네이버 뉴스 API<br/>뉴스 데이터]
-        Tavily[Tavily API<br/>글로벌 뉴스]
-        PyKRX[PyKRX 라이브러리<br/>거래소 데이터]
-        FDR[FinanceDataReader<br/>주가 데이터]
-    end
-
-    subgraph "표현 레이어"
-        Streamlit[Streamlit UI]
-        Charts[차트 생성기]
-    end
-
-    Supervisor --> Progressive
-    Progressive --> Context
-    Context --> Enhanced
-
-    Enhanced --> BOK
-    Enhanced --> DART
-    Enhanced --> Naver
-    Enhanced --> Tavily
-    Enhanced --> PyKRX
-    Enhanced --> FDR
-
-    Progressive --> Streamlit
-    Enhanced --> Charts
-```
-
-## 에이전트 사양
-
-### 7개 전문 분석 에이전트
-
-| 에이전트 | 주요 기능 | 데이터 소스 | 출력 결과 |
-|-------|----------|------------|---------|
-| **Korean Context Agent** | 시장 환경 및 거시경제 분석 | FinanceDataReader, PyKRX, BOK ECOS | 시장 동향, 경제 지표 |
-| **Korean Sentiment Agent** | 뉴스 감정 분석 및 시장 심리 | Naver News API, Tavily Search API | 감정 점수, 뉴스 투명성 |
-| **Korean Financial Agent** | 재무제표 및 기업 건전성 | FinanceDataReader, PyKRX, DART API | 재무 비율, 기업 지표 |
-| **Advanced Technical Agent** | 기술적 지표 및 차트 패턴 | FinanceDataReader, PyKRX | RSI, MACD, 볼린저밴드 |
-| **Institutional Trading Agent** | 기관투자자 매매 흐름 분석 | PyKRX | 매수/매도 패턴, 기관 심리 |
-| **Comparative Agent** | 섹터 비교 및 상대 가치 평가 | FinanceDataReader, PyKRX | PER, PBR 비율, 섹터 순위 |
-| **ESG Analysis Agent** | ESG 및 지배구조 분석 | DART API | 지속가능성 보고서, 지배구조 점수 |
-
-## 데이터 소스
-
-### 5개 검증된 실시간 데이터 소스
-
-| 데이터 소스 | 타입 | 용도 | 검증 상태 |
-|-------------|------|------|---------|
-| **FinanceDataReader** | Python 라이브러리 | 한국 주가 데이터 | 검증 완료 |
-| **PyKRX** | Python 라이브러리 | 한국거래소 공식 데이터 | 검증 완료 |
-| **BOK ECOS API** | REST API | 한국은행 경제통계 | 검증 완료 |
-| **DART API** | REST API | 금융감독원 기업공시 | 검증 완료 |
-| **Naver News API** | REST API | 한국 뉴스 검색 | 검증 완료 |
-
-### 추가 데이터 소스 (선택사항)
-
-| 데이터 소스 | 타입 | 용도 | 상태 |
-|-------------|------|------|------|
-| **Tavily Search API** | REST API | 글로벌 금융 뉴스 | 선택사항 |
-
-## 기술 스택
-
-### AI 및 ML 프레임워크
-- **LangGraph Supervisor**: 멀티 에이전트 오케스트레이션
-- **Google Gemini 2.0 Flash Lite**: 주요 LLM
-- **OpenAI GPT-4o**: 대체 LLM
-- **점진적 분석 엔진**: 메모리 효율적 실행
-
-### 데이터 처리
-- **Pandas**: 데이터 조작 및 분석
-- **NumPy**: 수치 계산
-- **TA-Lib**: 기술적 분석 계산
-
-### 웹 인터페이스
-- **Streamlit**: 인터랙티브 웹 애플리케이션
-- **Matplotlib**: 한글 폰트 지원 차트 생성
-- **Plotly**: 인터랙티브 시각화
-
-### 설정 및 인프라
-- **Pydantic Settings**: 설정 관리
-- **Python-dotenv**: 환경 변수 처리
-
-## 설치 및 설정
-
-### 시스템 요구사항
-- Python 3.11+
-- Miniconda 또는 Anaconda
-
-### 환경 설정
+### 1️⃣ **사전 요구사항**
 
 ```bash
-# conda 환경 생성 및 활성화
-conda create -n tusimreport python=3.11
-conda activate tusimreport
-
-# 핵심 의존성 설치
-pip install -r requirements.txt
+Python 3.11+
+Chrome/Chromium (Selenium 크롤링용)
 ```
 
-### API 설정
+### 2️⃣ **설치**
 
-프로젝트 루트에 `.env` 파일 생성:
+```bash
+# 1. 저장소 복제
+git clone https://github.com/Danwoo/tusimreport.git
+cd tusimreport
+
+# 2. 의존성 설치
+pip install -r requirements.txt
+
+# 3. 환경 설정
+cp .env.example .env
+# .env 파일을 열어서 API 키 입력
+
+# 4. 환경 검증 (선택)
+python setup_check.py
+```
+
+### 3️⃣ **API 키 발급** (필수)
+
+최소 요구사항 (3개):
+1. **Google Gemini** 또는 **OpenAI**: https://aistudio.google.com/app/apikey
+2. **DART**: https://opendart.fss.or.kr/
+3. **ECOS**: https://ecos.bok.or.kr/
+
+권장 (더 나은 분석):
+4. **Naver News**: https://developers.naver.com/products/search/
+5. **Tavily**: https://tavily.com/
+
+### 4️⃣ **실행**
+
+```bash
+streamlit run main.py
+```
+
+브라우저에서 http://localhost:8501 접속
+
+---
+
+## ⚙️ 환경 설정
+
+### .env 파일 설정
 
 ```env
-# LLM 설정 (필수)
+# 필수 (최소 3개)
 GOOGLE_API_KEY=your_google_api_key
+DART_API_KEY=your_dart_api_key
+ECOS_API_KEY=your_ecos_api_key
+
+# 권장 (더 나은 분석)
+NAVER_CLIENT_ID=your_naver_client_id
+NAVER_CLIENT_SECRET=your_naver_client_secret
+TAVILY_API_KEY=your_tavily_api_key
+
+# LLM 설정
 USE_GEMINI=true
 GEMINI_MODEL=gemini-2.0-flash-lite
-OPENAI_API_KEY=your_openai_api_key  # 대체용
-
-# 한국 데이터 API (검증 완료)
-DART_API_KEY=your_dart_api_key      # 금융감독원
-ECOS_API_KEY=your_ecos_api_key      # 한국은행
-NAVER_CLIENT_ID=your_naver_id       # 네이버 뉴스
-NAVER_CLIENT_SECRET=your_naver_secret
-TAVILY_API_KEY=your_tavily_api_key  # 글로벌 뉴스 (선택사항)
 ```
 
-### 애플리케이션 실행
+자세한 설정은 `.env.example` 파일 참고
+
+---
+
+## 🧪 테스트
 
 ```bash
-# Streamlit 애플리케이션 시작
-streamlit run main.py
+# 기본 테스트
+pytest tests/
 
-# http://localhost:8501 에서 접속
+# 커버리지 포함
+pytest tests/ --cov=agents --cov=core --cov=data
+
+# 환경 검증
+python setup_check.py
 ```
 
-## 프로젝트 구조
+---
 
-```
-tusimreport/                             # 5,427줄 (최적화됨)
-├── agents/                              # 7개 전문 에이전트
-│   ├── korean_context_agent.py          # 시장 환경 분석 (123줄)
-│   ├── korean_sentiment_agent.py        # 뉴스 감정 분석 (297줄)
-│   ├── korean_financial_react_agent.py  # 재무 분석 (481줄)
-│   ├── korean_advanced_technical_agent.py # 기술적 분석 (112줄)
-│   ├── korean_institutional_trading_agent.py # 기관 수급 분석 (116줄)
-│   ├── korean_comparative_agent.py      # 상대 가치 분석 (303줄)
-│   └── korean_esg_analysis_agent.py     # ESG 분석 (127줄)
-├── core/                                # 엔터프라이즈급 핵심 시스템
-│   ├── korean_supervisor_langgraph.py   # LangGraph Supervisor (485줄)
-│   ├── progressive_supervisor.py        # 점진적 분석 엔진 (346줄)
-│   ├── enhanced_react_agent.py          # 향상된 ReAct 패턴 (168줄)
-│   └── context_manager.py               # 컨텍스트 관리 (176줄)
-├── data/                                # 6개 실제 데이터 클라이언트
-│   ├── bok_api_client.py               # 한국은행 API (783줄)
-│   ├── dart_api_client.py              # DART API (550줄)
-│   ├── naver_api_client.py             # 네이버 뉴스 API (43줄)
-│   ├── tavily_api_client.py            # Tavily 검색 API (119줄)
-│   ├── chart_generator.py              # 차트 생성 (256줄)
-│   └── sector_analysis_client.py       # 섹터 분석 (257줄)
-├── config/
-│   └── settings.py                     # 환경 설정
-├── utils/
-│   └── helpers.py                      # 유틸리티 함수
-├── main.py                             # Streamlit UI (434줄 최적화)
-├── requirements.txt                    # 의존성
-└── README.md                           # 이 파일
-```
+## 📚 문서
 
-## 주요 기능
+- **[CLAUDE.md](./CLAUDE.md)**: AI Assistant 개발 가이드 (상세)
+- **[.env.example](./.env.example)**: 환경 설정 예제
 
-### 핵심 기능
-- **실시간 분석**: 라이브 시장 데이터 통합
-- **뉴스 투명성**: 감정 분석을 위한 완전한 소스 공개
-- **기술적 차트**: 전문가급 차트 생성
-- **점진적 실행**: 메모리 효율적 에이전트 오케스트레이션
-- **한국 시장 특화**: 한국 주식 시장 전문화
+---
 
-### 사용자 인터페이스
-- **직관적 선택**: 드롭다운 기반 종목 선택기
-- **실시간 진행률**: 단계별 분석 추적
-- **카드 기반 레이아웃**: 깔끔한 결과 표시
-- **모바일 반응형**: 모든 기기에 최적화
+## 🔧 알려진 문제
 
-## 사용 예시
+### 현재 제한사항
+- ⚠️ **설정 복잡도**: API 키 5-6개 필요 (일반 사용자에게 부담)
+- ⚠️ **Selenium 의존성**: Chrome/Chromium 필요 (서버 환경에서 추가 설정)
+- ⚠️ **API 호출 제한**: 무료 API는 일일 호출 제한 있음
+- ⚠️ **에러 메시지**: 일부 영어로 표시 (한글화 필요)
+- ⚠️ **Docker 미지원**: 현재 로컬 환경만 지원
 
-### 지원 종목 코드
-- 삼성전자: 005930
-- 네이버: 035420
-- 현대차: 005380
-- SK하이닉스: 000660
-- LG화학: 051910
+### 해결 예정
+- [ ] API 키 없이도 데모 모드 지원
+- [ ] Docker/Docker Compose 지원
+- [ ] 에러 메시지 한글화
+- [ ] 설치 자동화 스크립트 (`install.sh`)
+- [ ] 통합 테스트 확대
 
-### 분석 과정
-1. **환경 설정**: API 키 설정
-2. **종목 선택**: 드롭다운에서 선택 또는 코드 입력
-3. **에이전트 실행**: 7단계 점진적 분석
-4. **결과 생성**: 종합 투자 보고서
+---
 
-## 성능 지표
+## 🤝 기여
 
-### 시스템 성능
-- **코드 효율성**: 434줄 최적화된 UI
-- **데이터 정확성**: 100% 실제 데이터 소스
-- **분석 속도**: 점진적 메모리 관리
-- **사용자 경험**: Streamlit 모범 사례
+프로젝트는 현재 활발히 개발 중입니다. 이슈 및 PR 환영합니다!
 
-### 전문가 검증
-- **구글 시니어 파이썬 개발자**: A등급
-- **에이전트 서비스 CTO**: A+등급
-- **Streamlit 개발자 + UI 디자이너**: A등급
-- **증권 분석가**: A+등급
-- **파이썬 유지보수 전문가**: A등급
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
+
+## 📄 라이선스
+
+이 프로젝트는 개인 학습 및 연구 목적으로 제작되었습니다.
+
+---
+
+## ⚠️ 면책 조항
+
+**이 시스템은 투자 참고 자료일 뿐, 투자 권유가 아닙니다.**
+
+- 📊 AI 분석 결과는 절대적이지 않습니다
+- 💰 실제 투자 결정은 본인의 판단과 책임입니다
+- 🔍 추가적인 조사와 전문가 상담을 권장합니다
+- ⚠️ 과거 데이터는 미래 수익을 보장하지 않습니다
+
+---
+
+**마지막 업데이트**: 2025-11-16
+**버전**: v2.1 (개발 중)
+**Python**: 3.11.14

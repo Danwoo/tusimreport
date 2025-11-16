@@ -1,7 +1,47 @@
+# Environment variables (보안)
 .env
+
+# Python cache
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Claude workspace (로컬 설정)
 .claude/
-CLAUDE.md
-*.png
+
+# IDE settings
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
 test/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Data files (if large)
+*.csv
+*.db
+*.sqlite
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Note: 차트 이미지는 필요시 추적 가능
+# 현재는 캐시용으로 제외
+korean_stock_chart.png

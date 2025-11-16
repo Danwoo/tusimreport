@@ -32,9 +32,8 @@ class Settings(BaseSettings):
     # 딥서치 뉴스 API 키 (월 20회 제한)
     # Function Call API: https://api.deepsearch.com/note/v1/function
     # 주의: 월 20회 호출 제한으로 인해 현재 비활성화됨
-    deepsearch_api_key: Optional[str] = Field(
-        "9a0ff6e5e09744fd8a536f2eca645d18", env="DEEPSEARCH_API_KEY"
-    )
+    # 보안: API 키는 환경 변수로만 설정
+    deepsearch_api_key: Optional[str] = Field(None, env="DEEPSEARCH_API_KEY")
 
     # KOSIS 국가통계포털 서비스 키 (무료)
     # 경제지표, 인구통계, 고용통계, 소비자물가지수 등
