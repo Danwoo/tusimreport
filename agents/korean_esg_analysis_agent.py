@@ -23,26 +23,13 @@ from config.settings import get_llm_model
 from data.dart_api_client import get_comprehensive_company_data
 from utils.helpers import convert_numpy_types
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
-from data.demo_loader import get_agent_demo
 
 logger = logging.getLogger(__name__)
 
 
-def get_esg_analysis_logic(stock_code: str, company_name: str, use_demo: bool = False) -> Dict[str, Any]:
+def get_esg_analysis_logic(stock_code: str, company_name: str) -> Dict[str, Any]:
     """ESG 분석 로직"""
     try:
-        # 🔧 Phase 3 개선: 데모 모드 지원
-        if use_demo:
-            demo_data = get_agent_demo(stock_code, "esg")
-            if demo_data:
-                logger.info(f"Using demo data for Korean ESG Analysis Agent: {stock_code}")
-                return {
-                    "status": "demo",
-                    "summary": demo_data.get("summary", ""),
-                    "agent": demo_data.get("agent", "Korean ESG Analysis Agent"),
-                    "note": "🎭 이 데이터는 데모 샘플입니다."
-                }
-
         logger.info(f"Fetching DART company info for {company_name} ({stock_code})")
 
         # DART API 클라이언트 호출
@@ -108,7 +95,7 @@ def create_esg_agent():
     # 🔧 Phase 3 개선: Graceful degradation
     llm_config = get_llm_model(raise_on_missing=False)
     if llm_config is None:
-        logger.warning("⚠️ LLM API 키가 설정되지 않았습니다. 데모 모드를 사용하세요.")
+        logger.error("❌ LLM API 키가 설정되지 않았습니다.")
         raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
 
     llm_provider, model_name, api_key = llm_config

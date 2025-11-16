@@ -27,16 +27,10 @@
 
 ## 🎯 Phase 3 업데이트 (2025-11-16)
 
-### ✨ Graceful Degradation 완전 구현
+### ✨ Graceful Degradation 구현
 모든 8개 에이전트에 우아한 성능 저하(Graceful Degradation) 패턴 적용:
 
-#### 1. **데모 모드 지원**
-- `data/demo_data.json`: 샘플 데이터 (삼성전자 전체, 네이버 부분)
-- `data/demo_loader.py`: 데모 데이터 로더 with 싱글톤 패턴
-- 모든 에이전트 로직 함수에 `use_demo: bool = False` 파라미터 추가
-- UI에서 자동으로 데모 모드 감지 및 활성화
-
-#### 2. **한글 에러 메시지 시스템**
+#### 1. **한글 에러 메시지 시스템**
 - `utils/agent_helpers.py`: 공통 헬퍼 함수 모음
   - `format_error_message_korean()`: 예외를 한글 메시지로 변환
   - `create_fallback_message()`: 표준화된 fallback 메시지 생성
@@ -44,27 +38,26 @@
   - `validate_stock_code()`: 종목 코드 검증 (6자리 숫자)
   - `check_api_available()`: API 사용 가능 여부 확인
 
-#### 3. **API 키 관리 개선**
+#### 2. **API 키 관리 개선**
 `config/settings.py` 대폭 개선:
 - `get_llm_model(raise_on_missing=False)`: 옵션 선택 가능
   - `True`: 에러 발생 (기존 동작)
-  - `False`: None 반환 (데모 모드용)
+  - `False`: None 반환 (graceful degradation)
 - `check_minimum_requirements()`: 최소 요구사항 확인
   - 반환: `(has_llm: bool, warnings: list[str])`
 - `get_api_key_status()`: 사용자 친화적 상태 메시지
   - 반환: `{"llm": "✅ 설정됨", "dart": "⚠️ 미설정", ...}`
 - `validate_api_keys()`: 모든 API 키 검증
-- Gemini → OpenAI → Gemini fallback 로직
+- Gemini → OpenAI fallback 로직
 
-#### 4. **UI/UX 혁신적 개선**
-`main.py` 완전히 재설계:
+#### 3. **UI/UX 개선**
+`main.py` 업데이트:
 - **사이드바 API 키 상태**: 실시간으로 어떤 API가 설정되었는지 표시
-- **데모 모드 토글**: LLM API 없을 때 자동으로 데모 모드 제안
+- **API 키 누락 안내**: LLM API 없을 때 명확한 에러 메시지
 - **종목 코드 검증**: 잘못된 입력 시 즉시 한글 피드백
 - **한글 에러 통합**: 모든 에러를 이모지와 함께 한글로 표시
-- **데모 데이터 표시**: 데모 모드에서는 "(데모)" 표시와 함께 샘플 데이터 렌더링
 
-#### 5. **통합 테스트 추가**
+#### 4. **통합 테스트 추가**
 - `tests/test_smoke.py`: 프로젝트 구조 및 import 테스트
   - 8개 에이전트 파일 존재 확인
   - 모든 모듈 import 가능 확인
@@ -73,10 +66,8 @@
   - API 키 없을 때 None 반환 확인
   - 한글 에러 메시지 확인
   - 종목 코드 검증 확인
-  - `@safe_agent_execution` 데코레이터 테스트
 
 ### 🔧 기술적 개선사항
-- **데코레이터 패턴**: `@safe_agent_execution` 구현 (향후 적용)
 - **Fallback 메커니즘**: API 실패 시 명확한 안내와 해결 방법 제시
 - **타입 안전성**: 모든 새 함수에 타입 힌팅 적용
 - **로깅 표준화**: 한글 로그 메시지 일관성 유지
@@ -84,10 +75,10 @@
 
 ### 📊 Phase 3 성과 요약
 - ✅ **8개 에이전트**: 모두 graceful degradation 적용 완료
-- ✅ **데모 모드**: API 키 없이 체험 가능 (2개 종목)
 - ✅ **한글화**: 100% 한글 에러 메시지 및 UI
 - ✅ **테스트**: Smoke + Integration tests 추가
-- ✅ **사용자 경험**: API 상태 투명성, 명확한 안내
+- ✅ **사용자 경험**: API 상태 투명성, 명확한 에러 안내
+- ✅ **실제 데이터 우선**: Mock/샘플 데이터 절대 금지 정책 유지
 
 ## 🏆 **전문가 검증 결과** (v2.0 기준)
 
