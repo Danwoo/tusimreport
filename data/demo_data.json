@@ -1,0 +1,90 @@
+{
+  "demo_mode": true,
+  "description": "API 키 없이 시스템을 체험할 수 있는 샘플 데이터",
+  "last_updated": "2025-11-16",
+  "companies": {
+    "005930": {
+      "company_name": "삼성전자",
+      "stock_code": "005930",
+      "sector": "전기전자",
+      "demo_analysis": {
+        "context": {
+          "agent": "Korean Context Agent",
+          "status": "demo",
+          "summary": "📊 시장 환경 분석 (데모)\n\n국내 증시는 미국 연준의 금리 정책과 반도체 업황 회복 기대감으로 혼조세를 보이고 있습니다. KOSPI는 2,500선 부근에서 등락을 반복하며 방향성을 찾지 못하고 있습니다.\n\n주요 경제 지표:\n- 한국 기준금리: 3.50%\n- 미국 기준금리: 5.25-5.50%\n- 원달러 환율: 1,330원대\n- KOSPI: 2,510pt\n\n반도체 업황은 AI 수요 확대로 회복세가 예상되며, 메모리 반도체 가격도 반등하고 있습니다."
+        },
+        "sentiment": {
+          "agent": "Korean Sentiment Agent",
+          "status": "demo",
+          "summary": "📰 뉴스 여론 분석 (데모)\n\n최근 삼성전자 관련 뉴스는 대체로 긍정적입니다. AI 반도체 개발 및 HBM3E 양산 소식이 주목받고 있으며, 엔비디아와의 협력 강화 가능성도 언급되고 있습니다.\n\n주요 뉴스:\n- ✅ HBM3E 양산 본격화, 엔비디아 공급 기대\n- ✅ AI 반도체 시장 공략 강화\n- ⚠️ 중국 시장 불확실성 지속\n- ⚠️ 파운드리 경쟁 심화\n\n투자자 심리: 긍정 60%, 중립 30%, 부정 10%"
+        },
+        "financial": {
+          "agent": "Korean Financial ReAct Agent",
+          "status": "demo",
+          "summary": "💰 재무 상태 분석 (데모)\n\n삼성전자는 안정적인 재무구조를 유지하고 있으며, 반도체 업황 회복에 따른 실적 개선이 기대됩니다.\n\n주요 재무 지표 (2024년 3분기 기준):\n- 매출액: 67.4조원 (YoY +17.3%)\n- 영업이익: 10.1조원 (YoY +277.4%)\n- 순이익: 8.2조원\n- 부채비율: 32.5%\n- ROE: 12.8%\n- PER: 15.2배\n- PBR: 1.85배\n\n재무 건전성은 우수하며, 현금창출능력도 양호합니다."
+        },
+        "technical": {
+          "agent": "Korean Advanced Technical Agent",
+          "status": "demo",
+          "summary": "📈 기술적 분석 (데모)\n\n삼성전자 주가는 70,000원대에서 지지를 받으며 상승 추세를 이어가고 있습니다.\n\n기술적 지표:\n- 현재가: 72,500원\n- 이동평균선: 20일선(71,200원), 60일선(69,800원) 상회\n- RSI: 58.4 (중립)\n- MACD: 골든크로스 발생\n- 볼린저밴드: 중심선 상단\n\n매매 신호: 단기 상승 모멘텀 유지, 75,000원 돌파 시 추가 상승 가능"
+        },
+        "institutional": {
+          "agent": "Korean Institutional Trading Agent",
+          "status": "demo",
+          "summary": "🏦 기관 수급 분석 (데모)\n\n최근 기관과 외국인의 순매수세가 이어지고 있어 긍정적입니다.\n\n최근 5일간 수급:\n- 외국인: +1,250억원 (순매수)\n- 기관: +850억원 (순매수)\n- 개인: -2,100억원 (순매도)\n\n외국인 보유 비율: 52.3%\n기관 보유 비율: 25.8%\n\n분석: 기관 투자자들의 지속적인 매수세가 주가 지지 역할"
+        },
+        "comparative": {
+          "agent": "Korean Comparative Agent",
+          "status": "demo",
+          "summary": "🔍 상대 가치 분석 (데모)\n\n동종 업계 대비 밸류에이션은 적정 수준입니다.\n\n업계 비교 (반도체/전자):\n- SK하이닉스 PER: 12.5배\n- 삼성전자 PER: 15.2배\n- LG전자 PER: 8.3배\n- 업계 평균 PER: 12.0배\n\n삼성전자는 글로벌 반도체 시장 점유율 1위의 프리미엄이 반영되어 있으며, 종합적인 경쟁력을 고려하면 현재 밸류에이션은 합리적입니다."
+        },
+        "esg": {
+          "agent": "Korean ESG Analysis Agent",
+          "status": "demo",
+          "summary": "🌱 ESG 분석 (데모)\n\n삼성전자는 ESG 경영을 강화하고 있으며, 주요 글로벌 평가기관에서 양호한 등급을 받고 있습니다.\n\nESG 등급:\n- MSCI ESG Rating: A\n- 지속가능경영보고서: 발간\n- 탄소중립 목표: 2050년\n- 재생에너지 전환: 진행 중\n\nE(환경): RE100 참여, 친환경 제품 개발\nS(사회): 근로환경 개선, 공급망 관리\nG(지배구조): 투명 경영, 주주환원 정책"
+        },
+        "community": {
+          "agent": "Korean Community Agent",
+          "status": "demo",
+          "summary": "💬 커뮤니티 분석 (데모)\n\n개인 투자자 커뮤니티에서는 HBM 실적 개선에 대한 기대감이 높습니다.\n\n주요 토론 주제:\n- HBM3E 양산 및 엔비디아 공급\n- AI 반도체 시장 성장 전망\n- 배당 정책 개선 기대\n- 메모리 반도체 가격 상승\n\n투자자 감정: 긍정적 (65%)\n주요 관심사: 단기 실적보다 중장기 AI 시장 성장성\n리스크 우려: 중국 리스크, 파운드리 경쟁"
+        }
+      },
+      "综合_recommendation": {
+        "overall_sentiment": "긍정적",
+        "investment_score": 75,
+        "risk_level": "중간",
+        "timeframe": "중장기",
+        "key_points": [
+          "✅ AI 반도체 수요 증가로 실적 개선 기대",
+          "✅ 안정적인 재무구조와 현금창출력",
+          "✅ 기관/외국인 순매수 지속",
+          "⚠️ 중국 리스크 및 경쟁 심화 주의",
+          "⚠️ 밸류에이션 프리미엄 반영됨"
+        ],
+        "note": "이는 데모 샘플 데이터입니다. 실제 투자 결정은 최신 데이터와 전문가 상담을 통해 신중히 하시기 바랍니다."
+      }
+    },
+    "035420": {
+      "company_name": "네이버",
+      "stock_code": "035420",
+      "sector": "IT서비스",
+      "demo_analysis": {
+        "context": {
+          "agent": "Korean Context Agent",
+          "status": "demo",
+          "summary": "📊 시장 환경 분석 (데모)\n\n국내 IT 서비스 업종은 AI 기술 발전과 디지털 전환 가속화로 성장세를 보이고 있습니다."
+        },
+        "sentiment": {
+          "agent": "Korean Sentiment Agent",
+          "status": "demo",
+          "summary": "📰 뉴스 여론 분석 (데모)\n\n네이버는 AI 검색 '큐:' 출시 및 클라우드 사업 강화로 긍정적인 평가를 받고 있습니다."
+        }
+      }
+    }
+  },
+  "usage_instructions": {
+    "ko": "이 데이터는 API 키 없이 시스템을 체험하기 위한 샘플입니다. 실제 분석을 위해서는 .env 파일에 API 키를 설정하세요.",
+    "demo_stocks": ["005930", "035420"],
+    "full_demo": "005930"
+  }
+}
