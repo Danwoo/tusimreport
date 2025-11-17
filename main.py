@@ -11,6 +11,7 @@ from config.settings import settings, get_api_key_status, check_minimum_requirem
 from utils.helpers import setup_logging
 from data.chart_generator import create_stock_chart
 from utils.agent_helpers import validate_stock_code
+from agents.korean_investment_opinion_agent import generate_investment_opinion
 
 # 로깅 설정 - 파일 로깅 활성화
 logger = setup_logging(settings.log_level, enable_file_logging=True)
