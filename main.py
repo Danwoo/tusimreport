@@ -72,7 +72,7 @@ st.markdown("""
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     @media (max-width: 768px) { .main-title { font-size: 1.8rem; } .input-section { padding: 0.8rem; } }
 
-    /* 🎯 투자 의견 카드 스타일 */
+    /* 🎯 투자 의견 카드 스타일 (Level 3) */
     .investment-opinion-card { background: white; border-radius: 12px; padding: 1.5rem; margin: 1.5rem 0;
                                border: 2px solid #e2e8f0; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
     .opinion-header { text-align: center; padding: 1.5rem; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
@@ -106,6 +106,19 @@ st.markdown("""
     .factor-risk { border-left-color: #dc2626; }
     .factor-icon { font-size: 1.1rem; margin-top: 0.1rem; }
     .factor-text { flex: 1; color: #475569; font-size: 0.9rem; line-height: 1.4; }
+
+    /* 🆕 P1-1: Level 3 추가 스타일 (목표가, 손절가, R/R, 분할매수) */
+    .price-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 1rem 0; }
+    .price-item { background: #f9fafb; padding: 1rem; border-radius: 8px; border: 1px solid #e5e7eb; }
+    .price-label { font-size: 0.8rem; color: #6b7280; margin-bottom: 0.3rem; font-weight: 600; }
+    .price-value { font-size: 1.3rem; font-weight: 700; color: #111827; }
+    .price-value.target { color: #16a34a; }
+    .price-value.stop { color: #dc2626; }
+    .price-value.ratio { color: #2563eb; }
+    .split-buy-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+    .split-buy-table th { background: #f3f4f6; padding: 0.6rem; text-align: left; font-size: 0.85rem; color: #374151; font-weight: 600; border-bottom: 2px solid #e5e7eb; }
+    .split-buy-table td { padding: 0.6rem; font-size: 0.85rem; color: #4b5563; border-bottom: 1px solid #f3f4f6; }
+    .split-buy-table tr:hover { background: #f9fafb; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -249,7 +262,7 @@ def create_result_card(agent_name, config, status="waiting", content="", news_so
 
 def create_investment_opinion_card(opinion_data):
     """
-    투자 의견 카드 생성
+    🔧 P1-1: Level 3 투자 의견 카드 생성 (목표가, 손절가, R/R, 분할매수 포함)
 
     Args:
         opinion_data: generate_investment_opinion() 결과
@@ -259,7 +272,13 @@ def create_investment_opinion_card(opinion_data):
                 "reasoning": str,
                 "key_positives": List[str],
                 "key_risks": List[str],
-                "timeframe": str
+                "timeframe": str,
+                # Level 3 추가
+                "current_price": float,
+                "target_price": float,
+                "stop_loss": float,
+                "risk_reward_ratio": float,
+                "split_buy_strategy": List[Dict]
             }
     """
     opinion = opinion_data.get("opinion", "HOLD")
@@ -268,6 +287,13 @@ def create_investment_opinion_card(opinion_data):
     key_positives = opinion_data.get("key_positives", [])
     key_risks = opinion_data.get("key_risks", [])
     timeframe = opinion_data.get("timeframe", "중기(3-6개월)")
+
+    # 🆕 Level 3 필드
+    current_price = opinion_data.get("current_price", 0)
+    target_price = opinion_data.get("target_price", 0)
+    stop_loss = opinion_data.get("stop_loss", 0)
+    risk_reward_ratio = opinion_data.get("risk_reward_ratio", 0)
+    split_buy_strategy = opinion_data.get("split_buy_strategy", [])
 
     # 의견별 설정 (이모지 제거, 깔끔한 스타일)
     opinion_config = {
@@ -335,6 +361,62 @@ def create_investment_opinion_card(opinion_data):
             <div class="factor-list">
                 {risks_html if risks_html else '<p style="color: #9ca3af; font-size: 0.9rem; margin: 0;">No risks identified.</p>'}
             </div>
+        </div>
+
+        <!-- 🆕 P1-1: Level 3 추가 섹션 -->
+        <div class="opinion-section">
+            <h3 class="section-title">Price Targets & Risk Management</h3>
+            <div class="price-grid">
+                <div class="price-item">
+                    <div class="price-label">Current Price</div>
+                    <div class="price-value">{current_price:,.0f}원</div>
+                </div>
+                <div class="price-item">
+                    <div class="price-label">Target Price</div>
+                    <div class="price-value target">{target_price:,.0f}원</div>
+                    <div style="font-size: 0.75rem; color: #6b7280; margin-top: 0.3rem;">
+                        +{((target_price - current_price) / current_price * 100):.1f}% upside
+                    </div>
+                </div>
+                <div class="price-item">
+                    <div class="price-label">Stop Loss</div>
+                    <div class="price-value stop">{stop_loss:,.0f}원</div>
+                    <div style="font-size: 0.75rem; color: #6b7280; margin-top: 0.3rem;">
+                        {((stop_loss - current_price) / current_price * 100):.1f}% downside
+                    </div>
+                </div>
+                <div class="price-item">
+                    <div class="price-label">Risk/Reward Ratio</div>
+                    <div class="price-value ratio">{risk_reward_ratio:.1f}</div>
+                    <div style="font-size: 0.75rem; color: #6b7280; margin-top: 0.3rem;">
+                        {'Very Good' if risk_reward_ratio >= 2.0 else 'Good' if risk_reward_ratio >= 1.5 else 'Fair' if risk_reward_ratio >= 1.0 else 'Risky'}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="opinion-section">
+            <h3 class="section-title">Split Buy Strategy</h3>
+            <table class="split-buy-table">
+                <thead>
+                    <tr>
+                        <th>Order</th>
+                        <th>Price Range</th>
+                        <th>Weight</th>
+                        <th>Timing</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {"".join([f'''
+                    <tr>
+                        <td style="font-weight: 600;">{item.get("order", "")}</td>
+                        <td>{item.get("price_range", "")}원</td>
+                        <td style="font-weight: 600; color: #2563eb;">{item.get("weight", "")}</td>
+                        <td>{item.get("timing", "")}</td>
+                    </tr>
+                    ''' for item in split_buy_strategy])}
+                </tbody>
+            </table>
         </div>
 
         <div style="margin-top: 1.5rem; padding: 1rem; background: #fef3c7; border-radius: 8px; border-left: 4px solid #f59e0b;">
