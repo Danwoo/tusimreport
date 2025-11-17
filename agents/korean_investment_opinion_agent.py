@@ -168,93 +168,39 @@ def generate_investment_opinion(
 
 
 def _summarize_agent_results(agent_results: Dict[str, Any]) -> str:
-    """8개 에이전트 결과를 텍스트로 요약"""
+    """
+    8개 에이전트 결과를 텍스트로 요약
+
+    agent_results 형식:
+    - Dict[str, str]: 각 키가 에이전트명, 값이 분석 텍스트 (agent_states의 content)
+    - 예: {'context_expert': '...text...', 'sentiment_expert': '...text...'}
+    """
 
     summary_parts = []
 
-    # 1. 시장 환경 (Context)
-    if 'context' in agent_results and agent_results['context']:
-        context = agent_results['context']
-        summary_parts.append(f"""
-🌍 **시장 환경 분석**:
-- KOSPI 지수: {context.get('kospi_index', 'N/A')}
-- 기준금리: {context.get('base_rate', 'N/A')}
-- 시장 전망: {context.get('market_outlook', 'N/A')}
-""")
+    # 에이전트명 매핑
+    agent_labels = {
+        'context_expert': '🌍 **시장 환경 분석**',
+        'sentiment_expert': '📰 **뉴스 여론 분석**',
+        'financial_expert': '💰 **재무 상태 분석**',
+        'advanced_technical_expert': '📈 **기술적 분석**',
+        'institutional_trading_expert': '🏦 **기관 수급 분석**',
+        'comparative_expert': '⚖️ **상대 가치 분석**',
+        'esg_expert': '🌱 **ESG 분석**',
+        'community_expert': '💬 **커뮤니티 투자 심리**'
+    }
 
-    # 2. 뉴스 여론 (Sentiment)
-    if 'sentiment' in agent_results and agent_results['sentiment']:
-        sentiment = agent_results['sentiment']
-        summary_parts.append(f"""
-📰 **뉴스 여론 분석**:
-- 전체 감정: {sentiment.get('overall_sentiment', 'N/A')}
-- 긍정 뉴스: {sentiment.get('positive_count', 0)}개
-- 부정 뉴스: {sentiment.get('negative_count', 0)}개
-- 주요 이슈: {', '.join(sentiment.get('key_topics', [])[:3])}
-""")
+    # 각 에이전트 결과를 순서대로 추가
+    for agent_name in ['context_expert', 'sentiment_expert', 'financial_expert',
+                       'advanced_technical_expert', 'institutional_trading_expert',
+                       'comparative_expert', 'esg_expert', 'community_expert']:
+        if agent_name in agent_results and agent_results[agent_name]:
+            content = agent_results[agent_name]
+            # 텍스트가 너무 길면 앞부분만 (LLM 컨텍스트 제한)
+            if len(content) > 1500:
+                content = content[:1500] + "...(생략)"
 
-    # 3. 재무 상태 (Financial)
-    if 'financial' in agent_results and agent_results['financial']:
-        financial = agent_results['financial']
-        summary_parts.append(f"""
-💰 **재무 상태 분석**:
-- 부채비율: {financial.get('debt_ratio', 'N/A')}
-- ROE: {financial.get('roe', 'N/A')}
-- 영업이익률: {financial.get('operating_margin', 'N/A')}
-- 재무 건전성: {financial.get('financial_health', 'N/A')}
-""")
-
-    # 4. 기술적 분석 (Technical)
-    if 'technical' in agent_results and agent_results['technical']:
-        technical = agent_results['technical']
-        summary_parts.append(f"""
-📈 **기술적 분석**:
-- RSI: {technical.get('rsi', 'N/A')}
-- MACD 시그널: {technical.get('macd_signal', 'N/A')}
-- 볼린저밴드: {technical.get('bollinger_signal', 'N/A')}
-- 추세: {technical.get('trend', 'N/A')}
-""")
-
-    # 5. 기관 수급 (Institutional)
-    if 'institutional' in agent_results and agent_results['institutional']:
-        institutional = agent_results['institutional']
-        summary_parts.append(f"""
-🏦 **기관 수급 분석**:
-- 최근 3일 기관 매매: {institutional.get('recent_trend', 'N/A')}
-- 순매수 금액: {institutional.get('net_buying', 'N/A')}
-- 수급 전망: {institutional.get('supply_outlook', 'N/A')}
-""")
-
-    # 6. 상대 가치 (Comparative)
-    if 'comparative' in agent_results and agent_results['comparative']:
-        comparative = agent_results['comparative']
-        summary_parts.append(f"""
-⚖️ **상대 가치 분석**:
-- PER: {comparative.get('per', 'N/A')} (업계 평균: {comparative.get('sector_avg_per', 'N/A')})
-- PBR: {comparative.get('pbr', 'N/A')} (업계 평균: {comparative.get('sector_avg_pbr', 'N/A')})
-- 밸류에이션: {comparative.get('valuation', 'N/A')}
-""")
-
-    # 7. ESG 분석
-    if 'esg' in agent_results and agent_results['esg']:
-        esg = agent_results['esg']
-        summary_parts.append(f"""
-🌱 **ESG 분석**:
-- ESG 등급: {esg.get('esg_grade', 'N/A')}
-- 지배구조: {esg.get('governance', 'N/A')}
-- 지속가능성: {esg.get('sustainability', 'N/A')}
-""")
-
-    # 8. 커뮤니티 심리 (Community)
-    if 'community' in agent_results and agent_results['community']:
-        community = agent_results['community']
-        summary_parts.append(f"""
-💬 **커뮤니티 투자 심리**:
-- 전체 감정: {community.get('overall_sentiment', 'N/A')}
-- 긍정 게시글: {community.get('positive_count', 0)}개
-- 부정 게시글: {community.get('negative_count', 0)}개
-- 주요 관심사: {', '.join(community.get('key_topics', [])[:3])}
-""")
+            summary_parts.append(f"{agent_labels.get(agent_name, agent_name)}:\n{content}\n")
 
     return "\n".join(summary_parts)
 
