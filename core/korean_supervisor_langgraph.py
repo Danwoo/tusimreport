@@ -24,6 +24,7 @@ from agents.korean_institutional_trading_agent import create_institutional_tradi
 from agents.korean_comparative_agent import create_comparative_agent
 from agents.korean_esg_analysis_agent import create_esg_agent
 from agents.korean_community_agent import create_community_agent
+from agents.korean_global_market_agent import create_global_market_agent  # 🆕 P1-3
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def get_supervisor_llm():
 # ====================
 
 def create_all_agents():
-    """모든 8개의 전문 분석 에이전트를 생성합니다."""
+    """모든 9개의 전문 분석 에이전트를 생성합니다. (🆕 P1-3: global_market_expert 추가)"""
     try:
         agents = {
             "context_expert": create_context_agent(),
@@ -55,6 +56,7 @@ def create_all_agents():
             "comparative_expert": create_comparative_agent(),
             "esg_expert": create_esg_agent(),
             "community_expert": create_community_agent(),
+            "global_market_expert": create_global_market_agent(),  # 🆕 P1-3
         }
 
         logger.info(f"Successfully created {len(agents)} expert agents: {list(agents.keys())}")
@@ -82,7 +84,8 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
                 "institutional_trading_expert": "수급 분석 전문가",
                 "comparative_expert": "상대 가치 전문가",
                 "esg_expert": "ESG 분석 전문가",
-                "community_expert": "커뮤니티 여론 전문가"
+                "community_expert": "커뮤니티 여론 전문가",
+                "global_market_expert": "글로벌 시장 전문가"  # 🆕 P1-3
             }.get(expert_key, expert_key)
 
             expert_analyses_text += f"\n\n=== {expert_name} 분석 ===\n{analysis}\n"
