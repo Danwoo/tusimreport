@@ -23,6 +23,7 @@ from langchain_core.messages import HumanMessage
 from config.settings import get_llm_model
 from data.bok_api_client import get_macro_economic_indicators
 from utils.helpers import convert_numpy_types
+from utils.agent_helpers import create_fallback_message, format_error_message_korean
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ def get_market_and_economic_context_logic(stock_code: str, company_name: str) ->
     """주식 시세, 시장 지수, 주요 거시 경제 지표를 종합적으로 수집하고 분석하는 핵심 로직"""
     try:
         logger.info(f"Fetching market and economic context for {stock_code}")
-        
+
         context_data = {}
         insights = []
 
@@ -82,8 +83,15 @@ def get_market_and_economic_context_logic(stock_code: str, company_name: str) ->
         })
 
     except Exception as e:
-        logger.error(f"Error in get_market_and_economic_context_logic: {str(e)}")
-        return {"error": str(e)}
+        error_msg = format_error_message_korean(e, "시장 환경 분석")
+        logger.error(error_msg)
+        return create_fallback_message(
+            agent_name="Korean Context Agent",
+            company_name=company_name,
+            stock_code=stock_code,
+            reason=error_msg,
+            data_source="FinanceDataReader, PyKRX, BOK ECOS"
+        )
 
 @tool
 def get_market_and_economic_context(stock_code: str, company_name: str) -> Dict[str, Any]:
@@ -95,7 +103,13 @@ context_tools = [get_market_and_economic_context]
 
 def create_context_agent():
     """Market & Economic Context Agent 생성 함수"""
-    llm_provider, llm_model_name, llm_api_key = get_llm_model()
+    # 🔧 Phase 3 개선: Graceful degradation
+    llm_config = get_llm_model(raise_on_missing=False)
+    if llm_config is None:
+        logger.error("❌ LLM API 키가 설정되지 않았습니다.")
+        raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
+
+    llm_provider, llm_model_name, llm_api_key = llm_config
     if llm_provider == "gemini":
         llm = ChatGoogleGenerativeAI(model=llm_model_name, temperature=0.1, google_api_key=llm_api_key)
     else:

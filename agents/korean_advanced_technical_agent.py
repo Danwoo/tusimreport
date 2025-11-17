@@ -20,8 +20,28 @@ from langchain_core.messages import HumanMessage
 
 from config.settings import get_llm_model
 from utils.helpers import convert_numpy_types
+from utils.agent_helpers import create_fallback_message, format_error_message_korean
 
 logger = logging.getLogger(__name__)
+
+
+def get_advanced_technical_analysis_logic(stock_code: str, company_name: str = "Unknown") -> Dict[str, Any]:
+    """고급 기술적 분석 로직"""
+    try:
+        # 실제 기술적 분석 수행
+        return calculate_momentum_indicators_logic(stock_code)
+
+    except Exception as e:
+        error_msg = format_error_message_korean(e, "기술적 분석")
+        logger.error(error_msg)
+        return create_fallback_message(
+            agent_name="Korean Advanced Technical Agent",
+            company_name=company_name,
+            stock_code=stock_code,
+            reason=error_msg,
+            data_source="FinanceDataReader, PyKRX"
+        )
+
 
 def calculate_momentum_indicators_logic(stock_code: str, period: int = 252) -> Dict[str, Any]:
     """모멘텀 지표 계산 로직 (RSI, MACD, 스토캐스틱 등)"""
@@ -63,7 +83,13 @@ advanced_technical_tools = [calculate_momentum_indicators]
 
 def create_advanced_technical_agent():
     """Advanced Technical Agent 생성 함수"""
-    llm_provider, llm_model_name, llm_api_key = get_llm_model()
+    # 🔧 Phase 3 개선: Graceful degradation
+    llm_config = get_llm_model(raise_on_missing=False)
+    if llm_config is None:
+        logger.error("❌ LLM API 키가 설정되지 않았습니다.")
+        raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
+
+    llm_provider, llm_model_name, llm_api_key = llm_config
     if llm_provider == "gemini":
         llm = ChatGoogleGenerativeAI(model=llm_model_name, temperature=0.1, google_api_key=llm_api_key)
     else:

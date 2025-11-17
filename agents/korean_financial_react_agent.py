@@ -27,6 +27,7 @@ from utils.helpers import convert_numpy_types
 from data.dart_api_client import get_comprehensive_company_data
 from data.bok_api_client import get_macro_economic_indicators
 from data.sector_analysis_client import analyze_sector_relative_performance
+from utils.agent_helpers import create_fallback_message, format_error_message_korean
 
 logger = logging.getLogger(__name__)
 
@@ -390,7 +391,13 @@ financial_tools = [
 ]
 
 # LLM 설정 (Gemini 또는 OpenAI)
-provider, model_name, api_key = get_llm_model()
+# 🔧 Phase 3 개선: Graceful degradation
+llm_config = get_llm_model(raise_on_missing=False)
+if llm_config is None:
+    logger.error("❌ LLM API 키가 설정되지 않았습니다.")
+    raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
+
+provider, model_name, api_key = llm_config
 
 if provider == "gemini":
     llm = ChatGoogleGenerativeAI(
@@ -452,8 +459,8 @@ korean_financial_react_agent = create_react_agent(
 
 
 # 편의 함수
-def analyze_korean_stock_financial(stock_code: str, company_name: str = None) -> dict:
-    """Korean Financial Agent 실행 함수"""
+def get_financial_analysis_logic(stock_code: str, company_name: str = None) -> dict:
+    """Korean Financial Agent 실행 로직"""
     try:
         messages = [
             HumanMessage(
@@ -472,10 +479,17 @@ def analyze_korean_stock_financial(stock_code: str, company_name: str = None) ->
         }
 
     except Exception as e:
-        logger.error(f"Error in Korean Financial Agent: {str(e)}")
-        return {
-            "agent": "korean_financial_agent",
-            "error": str(e),
-            "analysis_complete": False,
-            "timestamp": datetime.now().isoformat(),
-        }
+        error_msg = format_error_message_korean(e, "재무 상태 분석")
+        logger.error(error_msg)
+        return create_fallback_message(
+            agent_name="Korean Financial ReAct Agent",
+            company_name=company_name or "Unknown",
+            stock_code=stock_code,
+            reason=error_msg,
+            data_source="DART API, FinanceDataReader"
+        )
+
+
+def analyze_korean_stock_financial(stock_code: str, company_name: str = None) -> dict:
+    """Korean Financial Agent 실행 함수"""
+    return get_financial_analysis_logic(stock_code, company_name)
