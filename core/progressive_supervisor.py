@@ -7,6 +7,8 @@ Progressive Multi-Agent Analysis System
 import logging
 from typing import Dict, Any, List, Generator
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 from core.context_manager import get_context_manager, EnterpriseContextManager
 from core.korean_supervisor_langgraph import create_all_agents, get_supervisor_llm, generate_comprehensive_report
@@ -21,19 +23,32 @@ class ProgressiveAnalysisEngine:
         self.supervisor_llm = get_supervisor_llm()
         self.agents = create_all_agents()
 
-        # Agent 실행 순서 (의존성 고려)
-        self.execution_order = [
-            "context_expert",           # 1단계: 시장환경 (기초 데이터)
-            "sentiment_expert",         # 2단계: 시장심리
-            "financial_expert",         # 3단계: 재무분석
-            "advanced_technical_expert", # 4단계: 기술분석
-            "institutional_trading_expert", # 5단계: 수급분석
-            "comparative_expert",       # 6단계: 상대평가
-            "esg_expert",              # 7단계: ESG분석
-            "community_expert"         # 8단계: 커뮤니티 여론분석
+        # 🔧 P0-4: 병렬 실행 최적화 - 독립적 에이전트 vs 의존적 에이전트 분리
+        # 병렬 실행 가능한 독립적 에이전트 (6개)
+        self.parallel_agents = [
+            "context_expert",           # 시장환경 (독립적)
+            "sentiment_expert",         # 뉴스여론 (독립적)
+            "advanced_technical_expert", # 기술분석 (독립적)
+            "institutional_trading_expert", # 기관수급 (독립적)
+            "esg_expert",              # ESG분석 (독립적)
+            "community_expert"         # 커뮤니티 (독립적)
         ]
 
-        logger.info("Progressive Analysis Engine 초기화 완료")
+        # 순차 실행 필요한 의존적 에이전트 (2개)
+        self.sequential_agents = [
+            "financial_expert",         # 재무분석 (DART API 의존)
+            "comparative_expert"        # 상대평가 (재무 결과 참고 가능)
+        ]
+
+        # 전체 실행 순서 (레거시 호환성 유지)
+        self.execution_order = self.parallel_agents + self.sequential_agents
+
+        # Thread-safe 결과 저장소
+        self.results_lock = threading.Lock()
+
+        logger.info("Progressive Analysis Engine 초기화 완료 (병렬 실행 모드)")
+        logger.info(f"  - 병렬 실행: {len(self.parallel_agents)}개 에이전트")
+        logger.info(f"  - 순차 실행: {len(self.sequential_agents)}개 에이전트")
 
     def execute_agent_with_context_control(
         self,
@@ -209,61 +224,144 @@ class ProgressiveAnalysisEngine:
         stock_code: str,
         company_name: str = None
     ) -> Generator[Dict[str, Any], None, None]:
-        """점진적 분석 실행 - 메모리 효율적 스트리밍"""
+        """🔧 P0-4: 병렬 실행 최적화 - 점진적 분석 실행"""
         try:
-            logger.info(f"점진적 분석 시작: {stock_code} ({company_name})")
+            logger.info(f"=== 병렬 실행 모드 분석 시작 ===")
+            logger.info(f"종목: {stock_code} ({company_name})")
+            logger.info(f"병렬 에이전트: {len(self.parallel_agents)}개")
+            logger.info(f"순차 에이전트: {len(self.sequential_agents)}개")
 
             agent_results = {}  # 🎯 전체 원본 분석 내용 보존
             agent_summaries = {}  # 압축된 요약본 (컨텍스트용)
             completed_agents = 0
             total_agents = len(self.execution_order)
 
-            # 단계별 에이전트 실행
-            for i, agent_name in enumerate(self.execution_order):
-                try:
-                    # 진행률 계산
-                    progress = (i + 0.5) / total_agents
+            # === Phase 1: 병렬 실행 (6개 독립적 에이전트) ===
+            logger.info(f"Phase 1: {len(self.parallel_agents)}개 에이전트 병렬 실행 시작")
 
-                    # 진행 상황 yield
+            # ThreadPoolExecutor로 병렬 실행
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                # Submit all parallel agents
+                future_to_agent = {}
+                for agent_name in self.parallel_agents:
+                    future = executor.submit(
+                        self.execute_agent_with_context_control,
+                        agent_name,
+                        stock_code,
+                        company_name,
+                        {}  # 병렬 에이전트는 서로 독립적이므로 컨텍스트 없음
+                    )
+                    future_to_agent[future] = agent_name
+
+                    # 시작 알림
                     yield {
                         "type": "progress",
                         "agent_name": agent_name,
-                        "progress": progress,
+                        "progress": completed_agents / total_agents,
                         "status": "starting",
-                        "message": f"{agent_name} 분석 시작 중...",
+                        "message": f"{agent_name} 분석 시작 중 (병렬)...",
                         "completed_agents": completed_agents,
                         "total_agents": total_agents
                     }
 
-                    # 에이전트 실행 (이전 요약본 컨텍스트 포함)
+                # Process completed futures as they finish
+                for future in as_completed(future_to_agent):
+                    agent_name = future_to_agent[future]
+                    try:
+                        result = future.result()
+
+                        if result["status"] == "success":
+                            # Thread-safe 결과 저장
+                            with self.results_lock:
+                                agent_results[agent_name] = result["content"]
+                                agent_summaries[agent_name] = result["compressed_content"]
+                                completed_agents += 1
+
+                            # 완료 상태 yield
+                            yield {
+                                "type": "agent_complete",
+                                "agent_name": agent_name,
+                                "progress": completed_agents / total_agents,
+                                "status": "completed",
+                                "message": f"{agent_name} 분석 완료 (병렬)",
+                                "content": self._preserve_completion_signal(result["compressed_content"], 2000),
+                                "token_count": result["token_count"],
+                                "completed_agents": completed_agents,
+                                "total_agents": total_agents
+                            }
+                        else:
+                            # 실패한 경우
+                            logger.warning(f"{agent_name} 실패: {result.get('error')}")
+                            yield {
+                                "type": "agent_error",
+                                "agent_name": agent_name,
+                                "progress": completed_agents / total_agents,
+                                "status": "error",
+                                "message": f"{agent_name} 분석 실패: {result['error']}",
+                                "error": result["error"],
+                                "completed_agents": completed_agents,
+                                "total_agents": total_agents
+                            }
+
+                    except Exception as e:
+                        logger.error(f"에이전트 {agent_name} 실행 중 오류: {str(e)}")
+                        yield {
+                            "type": "agent_error",
+                            "agent_name": agent_name,
+                            "status": "error",
+                            "error": str(e),
+                            "completed_agents": completed_agents,
+                            "total_agents": total_agents
+                        }
+
+            logger.info(f"Phase 1 완료: {completed_agents}/{len(self.parallel_agents)}개 성공")
+
+            # === Phase 2: 순차 실행 (2개 의존적 에이전트) ===
+            logger.info(f"Phase 2: {len(self.sequential_agents)}개 에이전트 순차 실행 시작")
+
+            for agent_name in self.sequential_agents:
+                try:
+                    # 진행 상황 yield
+                    yield {
+                        "type": "progress",
+                        "agent_name": agent_name,
+                        "progress": completed_agents / total_agents,
+                        "status": "starting",
+                        "message": f"{agent_name} 분석 시작 중 (순차)...",
+                        "completed_agents": completed_agents,
+                        "total_agents": total_agents
+                    }
+
+                    # 에이전트 실행 (병렬 에이전트 결과 컨텍스트 포함)
                     result = self.execute_agent_with_context_control(
                         agent_name, stock_code, company_name, agent_summaries
                     )
 
                     if result["status"] == "success":
-                        # 성공한 경우 - 원본과 압축본 모두 저장
-                        agent_results[agent_name] = result["content"]  # 🎯 전체 원본 보존
-                        agent_summaries[agent_name] = result["compressed_content"]  # 컨텍스트용 압축본
+                        # 성공한 경우
+                        agent_results[agent_name] = result["content"]
+                        agent_summaries[agent_name] = result["compressed_content"]
                         completed_agents += 1
 
                         # 완료 상태 yield
                         yield {
                             "type": "agent_complete",
                             "agent_name": agent_name,
-                            "progress": (i + 1) / total_agents,
+                            "progress": completed_agents / total_agents,
                             "status": "completed",
-                            "message": f"{agent_name} 분석 완료",
-                            "content": self._preserve_completion_signal(result["compressed_content"], 2000),  # 완료 신호 보존하면서 제한
+                            "message": f"{agent_name} 분석 완료 (순차)",
+                            "content": self._preserve_completion_signal(result["compressed_content"], 2000),
                             "token_count": result["token_count"],
                             "completed_agents": completed_agents,
                             "total_agents": total_agents
                         }
                     else:
                         # 실패한 경우
+                        logger.warning(f"{agent_name} 실패: {result.get('error')}")
                         yield {
                             "type": "agent_error",
                             "agent_name": agent_name,
-                            "progress": (i + 1) / total_agents,
+                            "progress": completed_agents / total_agents,
                             "status": "error",
                             "message": f"{agent_name} 분석 실패: {result['error']}",
                             "error": result["error"],
@@ -281,6 +379,8 @@ class ProgressiveAnalysisEngine:
                         "completed_agents": completed_agents,
                         "total_agents": total_agents
                     }
+
+            logger.info(f"Phase 2 완료: 총 {completed_agents}/{total_agents}개 에이전트 성공")
 
             # 모든 에이전트 완료 후 최종 보고서 생성
             if completed_agents == total_agents:
