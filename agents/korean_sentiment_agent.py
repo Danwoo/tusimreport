@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """
-Enhanced Korean Sentiment Analysis Agent
-Naver News API + Tavily Search API 듀얼 소스 기반
+Enhanced Korean Sentiment Analysis Agent v2.3
+Naver News API + Tavily Search API 듀얼 소스 기반 (멀티 쿼리 전략)
+
+🆕 v2.3 업데이트 (P2-1-B):
+- Naver News API: 한국 로컬 뉴스 (10개 → 50개) ⬆️ 5배 확장
+- Tavily Search API: 글로벌 뉴스 (10개 → 50개) ⬆️ 5배 확장
+- 총 뉴스 커버리지: 20개 → 100개 (목표: 70-90개 실제 수집)
+- 멀티 쿼리 전략으로 다각도 뉴스 수집 및 중복 제거
 
 Dr. Alex Rivera (Tavily CTO) 기술 지원으로 향상된 감정 분석:
-- Naver News API: 한국 로컬 뉴스 (50개)
-- Tavily Search API: 글로벌 뉴스 + AI 필터링 (10개)
 - 듀얼 소스 통합으로 편향성 감소 및 커버리지 확장
 - LLM 기반 종합 감성 분석 및 토픽 추출
+- 100% 실제 데이터 기반 분석
 """
 
 import logging
@@ -24,6 +29,8 @@ from langchain_core.messages import HumanMessage
 
 from config.settings import get_llm_model, settings
 from data.tavily_api_client import TavilyNewsClient
+from data.multi_query_naver_client import MultiQueryNaverClient
+from data.multi_query_tavily_client import MultiQueryTavilyClient
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +44,11 @@ def get_enhanced_news_sentiment(company_name: str, stock_code: str) -> Dict[str,
     try:
         logger.info(f"Enhanced dual-source news sentiment analysis for {company_name} ({stock_code})")
 
-        # 1. Naver News API 데이터 수집
-        naver_data = _fetch_naver_news(company_name)
+        # 1. Naver News API 데이터 수집 (멀티 쿼리 전략)
+        naver_data = _fetch_naver_news(company_name, stock_code)
 
-        # 2. Tavily Search API 데이터 수집
-        tavily_data = _fetch_tavily_news(company_name)
+        # 2. Tavily Search API 데이터 수집 (멀티 쿼리 전략)
+        tavily_data = _fetch_tavily_news(company_name, stock_code)
 
         # 3. 듀얼 소스 통합 및 LLM 분석
         return _analyze_dual_source_sentiment(company_name, stock_code, naver_data, tavily_data)
@@ -52,8 +59,8 @@ def get_enhanced_news_sentiment(company_name: str, stock_code: str) -> Dict[str,
         return {"error": str(e)}
 
 
-def _fetch_naver_news(company_name: str) -> Dict[str, Any]:
-    """네이버 뉴스 API 데이터 수집"""
+def _fetch_naver_news(company_name: str, stock_code: str) -> Dict[str, Any]:
+    """네이버 뉴스 API 멀티 쿼리 수집 (10개 → 50개)"""
     try:
         client_id = settings.naver_client_id
         client_secret = settings.naver_client_secret
@@ -61,37 +68,60 @@ def _fetch_naver_news(company_name: str) -> Dict[str, Any]:
         if not client_id or not client_secret:
             return {"error": "Naver API 자격 증명이 설정되지 않았습니다.", "items": []}
 
-        # 종목명을 그대로 사용
-        search_query = company_name
+        # 🆕 멀티 쿼리 클라이언트 사용 (P2-1-B)
+        naver_client = MultiQueryNaverClient(client_id, client_secret)
+        news_list = naver_client.fetch_multi_query(
+            company_name=company_name,
+            stock_code=stock_code,
+            target_count=50  # 10개 → 50개
+        )
 
-        url = "https://openapi.naver.com/v1/search/news.json"
-        headers = {
-            "X-Naver-Client-Id": client_id,
-            "X-Naver-Client-Secret": client_secret,
-        }
-        params = {
-            "query": search_query,
-            "display": 10,  # 3자 전문가 추천: 10개로 통일
-            "sort": "sim",
-        }
+        # 기존 형식으로 변환 (하위 호환성)
+        items = [
+            {
+                "title": news["title"],
+                "description": news.get("content", ""),
+                "link": news["url"],
+                "pubDate": news.get("published_at", "")
+            }
+            for news in news_list
+        ]
 
-        response = requests.get(url, headers=headers, params=params, timeout=10)
-        response.raise_for_status()
-        return response.json()
+        return {"items": items}
 
     except Exception as e:
         logger.error(f"Naver News API 오류: {str(e)}")
         return {"error": str(e), "items": []}
 
 
-def _fetch_tavily_news(company_name: str) -> Dict[str, Any]:
-    """Tavily Search API 데이터 수집 (투자 전문가 최적화)"""
+def _fetch_tavily_news(company_name: str, stock_code: str) -> Dict[str, Any]:
+    """Tavily Search API 멀티 쿼리 수집 (10개 → 50개)"""
     try:
-        tavily_client = TavilyNewsClient(settings.tavily_api_key)
-        return tavily_client.search_company_news(
+        if not settings.tavily_api_key:
+            return {"error": "Tavily API 키가 설정되지 않았습니다.", "news_items": []}
+
+        # 🆕 멀티 쿼리 클라이언트 사용 (P2-1-B)
+        tavily_client = MultiQueryTavilyClient(settings.tavily_api_key)
+        news_list = tavily_client.fetch_multi_query(
             company_name=company_name,
-            max_results=10  # 3자 전문가 추천: 10개로 통일
+            stock_code=stock_code,
+            target_count=50  # 10개 → 50개
         )
+
+        # 기존 형식으로 변환 (하위 호환성)
+        news_items = [
+            {
+                "title": news["title"],
+                "content": news.get("content", ""),
+                "url": news["url"],
+                "score": news.get("score", 0),
+                "source": news.get("source", "unknown")
+            }
+            for news in news_list
+        ]
+
+        return {"news_items": news_items}
+
     except Exception as e:
         logger.error(f"Tavily Search API 오류: {str(e)}")
         return {"error": str(e), "news_items": []}
@@ -111,12 +141,12 @@ def _analyze_dual_source_sentiment(company_name: str, stock_code: str, naver_dat
                 model=llm_model_name, temperature=0.0, api_key=llm_api_key
             )
 
-        # 3자 전문가 추천: 균형잡힌 분석 데이터 (각 10개씩)
+        # 🆕 v2.3: 멀티 쿼리 전략으로 확장된 데이터 (각 최대 50개)
         naver_texts = []
         if naver_data.get("items"):
             naver_texts = [
                 f"[Naver] {item['title']} - {item['description']}"
-                for item in naver_data["items"]  # 10개 전체
+                for item in naver_data["items"]  # 최대 50개
             ]
 
         # Tavily 뉴스 텍스트 준비
@@ -124,7 +154,7 @@ def _analyze_dual_source_sentiment(company_name: str, stock_code: str, naver_dat
         if tavily_data.get("news_items"):
             tavily_texts = [
                 f"[Tavily] {item['title']} - {item['content'][:200]}"
-                for item in tavily_data["news_items"]  # 10개 전체
+                for item in tavily_data["news_items"]  # 최대 50개
             ]
 
         # 통합 뉴스 텍스트
@@ -168,10 +198,10 @@ def _analyze_dual_source_sentiment(company_name: str, stock_code: str, naver_dat
                 key, value = line.split(":", 1)
                 parsed_result[key.strip()] = value.strip()
 
-        # 3자 전문가 추천: 완전한 뉴스 소스 투명성 (총 20개)
+        # 🆕 v2.3: 완전한 뉴스 소스 투명성 (총 100개 목표, 실제 70-90개)
         news_sources = []
 
-        # 네이버 뉴스 소스 (10개 - 완전 공개)
+        # 네이버 뉴스 소스 (최대 50개 - 완전 공개)
         if naver_data.get("items"):
             for item in naver_data["items"]:
                 news_sources.append({
@@ -182,7 +212,7 @@ def _analyze_dual_source_sentiment(company_name: str, stock_code: str, naver_dat
                     "type": "naver"
                 })
 
-        # Tavily 뉴스 소스 (10개 - 완전 공개)
+        # Tavily 뉴스 소스 (최대 50개 - 완전 공개)
         if tavily_data.get("news_items"):
             for item in tavily_data["news_items"]:
                 # Dr. Rivera 추천: 상세한 출처 정보
