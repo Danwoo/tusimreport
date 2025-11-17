@@ -55,40 +55,37 @@ class KoreanNewsRSSClient:
 
         Note: 실제 테스트하면서 작동하는 URL만 유지
         """
-        # ✅ 작동 확인된 RSS 피드들 (공식 RSS 제공)
+        # 🎯 Option A: Google News RSS (봇 친화적, 무료)
+        # Note: Google News는 검색 쿼리 기반이므로 동적 URL 생성 필요
         self.rss_feeds = {
-            # 연합뉴스 (공식 RSS)
-            "yonhap": {
-                "url": "https://www.yna.co.kr/RSS/headline.xml",
-                "name": "연합뉴스",
-                "tested": False
-            },
-            # 이데일리 (공식 RSS)
-            "edaily": {
-                "url": "http://www.edaily.co.kr/rss/edaily_news.xml",
-                "name": "이데일리",
-                "tested": False
-            },
-            # 뉴스핌 (공식 RSS)
-            "newspim": {
-                "url": "http://www.newspim.com/news/rss/",
-                "name": "뉴스핌",
-                "tested": False
-            },
-            # 뉴시스 (공식 RSS)
-            "newsis": {
-                "url": "http://www.newsis.com/RSS/allnewstitle.xml",
-                "name": "뉴시스",
-                "tested": False
+            # Google News (봇 친화적!)
+            "google_news": {
+                "url_template": "https://news.google.com/rss/search?q={keyword}&hl=ko&gl=KR&ceid=KR:ko",
+                "name": "Google News",
+                "tested": False,
+                "dynamic": True  # 키워드 기반 동적 URL
             },
         }
 
-    def test_rss_feed(self, feed_key: str) -> bool:
+        # ❌ 실패한 RSS 피드들 (참고용, 비활성화)
+        self.failed_feeds = {
+            "yonhap": "403 Forbidden",
+            "edaily": "403 Forbidden",
+            "newspim": "403 Forbidden",
+            "newsis": "403 Forbidden",
+            "hankyung": "403 Forbidden",
+            "maeil": "403 Forbidden",
+            "seoul": "403 Forbidden",
+            "moneytoday": "403 Forbidden"
+        }
+
+    def test_rss_feed(self, feed_key: str, test_keyword: str = "삼성전자") -> bool:
         """
         RSS 피드 테스트 (실제 접속 가능한지 확인)
 
         Args:
-            feed_key: rss_feeds의 키 (예: "hankyung")
+            feed_key: rss_feeds의 키 (예: "google_news")
+            test_keyword: 테스트용 키워드 (동적 URL용)
 
         Returns:
             성공 시 True, 실패 시 False
@@ -99,13 +96,20 @@ class KoreanNewsRSSClient:
                 logger.error(f"❌ 알 수 없는 피드: {feed_key}")
                 return False
 
-            logger.info(f"🧪 테스트 시작: {feed_info['name']} ({feed_info['url']})")
+            # 동적 URL 생성 (Google News 등)
+            if feed_info.get('dynamic', False):
+                url = feed_info['url_template'].format(keyword=test_keyword)
+                logger.info(f"🧪 테스트 시작: {feed_info['name']} (키워드: {test_keyword})")
+                logger.info(f"   URL: {url}")
+            else:
+                url = feed_info['url']
+                logger.info(f"🧪 테스트 시작: {feed_info['name']} ({url})")
 
             # RSS 피드 다운로드 (User-Agent 추가 - 봇 차단 우회)
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
-            response = requests.get(feed_info['url'], headers=headers, timeout=10, verify=False)
+            response = requests.get(url, headers=headers, timeout=10, verify=False)
             response.raise_for_status()
 
             # XML 파싱
@@ -190,11 +194,17 @@ class KoreanNewsRSSClient:
 
             logger.info(f"📰 뉴스 수집 시작: {feed_info['name']} (키워드: {keyword})")
 
+            # 동적 URL 생성 (Google News 등)
+            if feed_info.get('dynamic', False):
+                url = feed_info['url_template'].format(keyword=keyword)
+            else:
+                url = feed_info['url']
+
             # RSS 피드 다운로드 (User-Agent 추가)
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
-            response = requests.get(feed_info['url'], headers=headers, timeout=10, verify=False)
+            response = requests.get(url, headers=headers, timeout=10, verify=False)
             response.raise_for_status()
 
             # XML 파싱
