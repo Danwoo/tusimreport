@@ -259,7 +259,7 @@ class ProgressiveAnalysisEngine:
                         "agent_name": agent_name,
                         "progress": completed_agents / total_agents,
                         "status": "starting",
-                        "message": f"{agent_name} 분석 시작 중 (병렬)...",
+                        "message": f"{agent_name} 분석 시작 중...",
                         "completed_agents": completed_agents,
                         "total_agents": total_agents
                     }
@@ -283,7 +283,7 @@ class ProgressiveAnalysisEngine:
                                 "agent_name": agent_name,
                                 "progress": completed_agents / total_agents,
                                 "status": "completed",
-                                "message": f"{agent_name} 분석 완료 (병렬)",
+                                "message": f"{agent_name} 분석 완료",
                                 "content": self._preserve_completion_signal(result["compressed_content"], 2000),
                                 "token_count": result["token_count"],
                                 "completed_agents": completed_agents,
@@ -327,7 +327,7 @@ class ProgressiveAnalysisEngine:
                         "agent_name": agent_name,
                         "progress": completed_agents / total_agents,
                         "status": "starting",
-                        "message": f"{agent_name} 분석 시작 중 (순차)...",
+                        "message": f"{agent_name} 분석 시작 중...",
                         "completed_agents": completed_agents,
                         "total_agents": total_agents
                     }
@@ -349,7 +349,7 @@ class ProgressiveAnalysisEngine:
                             "agent_name": agent_name,
                             "progress": completed_agents / total_agents,
                             "status": "completed",
-                            "message": f"{agent_name} 분석 완료 (순차)",
+                            "message": f"{agent_name} 분석 완료",
                             "content": self._preserve_completion_signal(result["compressed_content"], 2000),
                             "token_count": result["token_count"],
                             "completed_agents": completed_agents,
