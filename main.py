@@ -71,6 +71,41 @@ st.markdown("""
                       white-space: pre-wrap; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     @media (max-width: 768px) { .main-title { font-size: 1.8rem; } .input-section { padding: 0.8rem; } }
+
+    /* 🎯 투자 의견 카드 스타일 */
+    .investment-opinion-card { background: white; border-radius: 12px; padding: 1.5rem; margin: 1.5rem 0;
+                               border: 2px solid #e2e8f0; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+    .opinion-header { text-align: center; padding: 1.5rem; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+                      border-radius: 8px; margin-bottom: 1.5rem; }
+    .opinion-title { font-size: 1.3rem; font-weight: 700; color: #334155; margin: 0 0 1rem 0; }
+    .opinion-main { font-size: 2rem; font-weight: 800; margin: 0.5rem 0; display: flex; align-items: center;
+                    justify-content: center; gap: 0.8rem; }
+    .opinion-buy { color: #16a34a; }
+    .opinion-hold { color: #ea580c; }
+    .opinion-sell { color: #dc2626; }
+    .confidence-section { margin: 1rem 0; }
+    .confidence-label { font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem; display: flex;
+                        justify-content: space-between; align-items: center; }
+    .confidence-bar { width: 100%; height: 24px; background: #f1f5f9; border-radius: 12px; overflow: hidden; }
+    .confidence-fill { height: 100%; border-radius: 12px; transition: width 0.5s ease; display: flex;
+                       align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 0.85rem; }
+    .confidence-high { background: linear-gradient(90deg, #16a34a, #22c55e); }
+    .confidence-medium { background: linear-gradient(90deg, #2563eb, #3b82f6); }
+    .confidence-low { background: linear-gradient(90deg, #ea580c, #f97316); }
+    .confidence-very-low { background: linear-gradient(90deg, #dc2626, #ef4444); }
+    .timeframe-badge { display: inline-block; padding: 0.4rem 1rem; background: #ede9fe; color: #7c3aed;
+                       border-radius: 20px; font-size: 0.85rem; font-weight: 600; margin-top: 0.5rem; }
+    .opinion-section { margin: 1.5rem 0; padding: 1rem; background: #fafafa; border-radius: 8px; }
+    .section-title { font-size: 1rem; font-weight: 600; color: #334155; margin: 0 0 0.8rem 0; display: flex;
+                     align-items: center; gap: 0.5rem; }
+    .reasoning-text { line-height: 1.6; color: #475569; font-size: 0.95rem; white-space: pre-wrap; }
+    .factor-list { list-style: none; padding: 0; margin: 0.5rem 0 0 0; }
+    .factor-item { padding: 0.6rem; margin: 0.4rem 0; background: white; border-radius: 6px;
+                   border-left: 3px solid; display: flex; align-items: flex-start; gap: 0.6rem; }
+    .factor-positive { border-left-color: #16a34a; }
+    .factor-risk { border-left-color: #dc2626; }
+    .factor-icon { font-size: 1.1rem; margin-top: 0.1rem; }
+    .factor-text { flex: 1; color: #475569; font-size: 0.9rem; line-height: 1.4; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -211,6 +246,116 @@ def create_result_card(agent_name, config, status="waiting", content="", news_so
         </div>
         <div class="result-content">{content}{news_section}</div>
     </div>"""
+
+def create_investment_opinion_card(opinion_data):
+    """
+    투자 의견 카드 생성
+
+    Args:
+        opinion_data: generate_investment_opinion() 결과
+            {
+                "opinion": "BUY" | "HOLD" | "SELL",
+                "confidence": int (0-100),
+                "reasoning": str,
+                "key_positives": List[str],
+                "key_risks": List[str],
+                "timeframe": str
+            }
+    """
+    opinion = opinion_data.get("opinion", "HOLD")
+    confidence = opinion_data.get("confidence", 50)
+    reasoning = opinion_data.get("reasoning", "")
+    key_positives = opinion_data.get("key_positives", [])
+    key_risks = opinion_data.get("key_risks", [])
+    timeframe = opinion_data.get("timeframe", "중기(3-6개월)")
+
+    # 의견별 아이콘 및 색상
+    opinion_config = {
+        "BUY": {"icon": "📈", "text": "BUY (매수)", "class": "opinion-buy"},
+        "HOLD": {"icon": "⏸️", "text": "HOLD (보유)", "class": "opinion-hold"},
+        "SELL": {"icon": "📉", "text": "SELL (매도)", "class": "opinion-sell"}
+    }
+    config = opinion_config.get(opinion, opinion_config["HOLD"])
+
+    # 신뢰도 색상 및 클래스
+    if confidence >= 80:
+        confidence_class = "confidence-high"
+    elif confidence >= 60:
+        confidence_class = "confidence-medium"
+    elif confidence >= 40:
+        confidence_class = "confidence-low"
+    else:
+        confidence_class = "confidence-very-low"
+
+    # 긍정 요인 HTML
+    positives_html = ""
+    for positive in key_positives[:3]:  # 최대 3개
+        positives_html += f"""
+            <div class="factor-item factor-positive">
+                <span class="factor-icon">✅</span>
+                <span class="factor-text">{positive}</span>
+            </div>
+        """
+
+    # 리스크 HTML
+    risks_html = ""
+    for risk in key_risks[:3]:  # 최대 3개
+        risks_html += f"""
+            <div class="factor-item factor-risk">
+                <span class="factor-icon">⚠️</span>
+                <span class="factor-text">{risk}</span>
+            </div>
+        """
+
+    return f"""
+    <div class="investment-opinion-card">
+        <div class="opinion-header">
+            <h2 class="opinion-title">🎯 AI 종합 투자 의견</h2>
+            <div class="opinion-main {config['class']}">
+                <span>{config['icon']}</span>
+                <span>{config['text']}</span>
+            </div>
+            <div class="confidence-section">
+                <div class="confidence-label">
+                    <span>📊 신뢰도</span>
+                    <span style="font-weight: 700; color: #334155;">{confidence}%</span>
+                </div>
+                <div class="confidence-bar">
+                    <div class="confidence-fill {confidence_class}" style="width: {confidence}%;">
+                        {confidence}%
+                    </div>
+                </div>
+            </div>
+            <span class="timeframe-badge">⏱️ 투자 기간: {timeframe}</span>
+        </div>
+
+        <div class="opinion-section">
+            <h3 class="section-title">📝 투자 근거</h3>
+            <div class="reasoning-text">{reasoning}</div>
+        </div>
+
+        <div class="opinion-section">
+            <h3 class="section-title">✅ 긍정 요인</h3>
+            <div class="factor-list">
+                {positives_html if positives_html else '<p style="color: #9ca3af; font-size: 0.9rem; margin: 0;">분석된 긍정 요인이 없습니다.</p>'}
+            </div>
+        </div>
+
+        <div class="opinion-section">
+            <h3 class="section-title">⚠️ 주요 리스크</h3>
+            <div class="factor-list">
+                {risks_html if risks_html else '<p style="color: #9ca3af; font-size: 0.9rem; margin: 0;">분석된 리스크가 없습니다.</p>'}
+            </div>
+        </div>
+
+        <div style="margin-top: 1.5rem; padding: 1rem; background: #fef3c7; border-radius: 8px; border-left: 4px solid #f59e0b;">
+            <p style="margin: 0; color: #92400e; font-size: 0.85rem; line-height: 1.5;">
+                ⚠️ <strong>투자 유의사항:</strong> 본 의견은 AI가 8개 전문 에이전트의 분석 결과를 종합하여 생성한 참고 자료이며,
+                투자 권유가 아닙니다. 최종 투자 결정은 본인의 판단과 책임하에 이루어져야 합니다.
+            </p>
+        </div>
+    </div>
+    """
 
 def run_analysis(symbol, company_name):
     """분석 실행"""
@@ -353,6 +498,39 @@ def run_analysis(symbol, company_name):
 
                                 update_progress(completed_count, len(agent_names))
                                 logger.info(f"===== {config['name']} ({agent_name}) 분석 완료 =====")
+
+        # 🎯 P0-1: AI 종합 투자 의견 생성 (8개 에이전트 분석 완료 후)
+        if completed_count >= 5:  # 5개 이상 완료 시
+            logger.info("===== AI 투자 의견 생성 시작 =====")
+            with st.spinner("🤖 AI가 투자 의견을 생성하고 있습니다..."):
+                try:
+                    # agent_states에서 content 추출
+                    agent_results = {}
+                    for agent_name in agent_names:
+                        if agent_states[agent_name]["status"] == "completed":
+                            agent_results[agent_name] = agent_states[agent_name]["content"]
+
+                    # 투자 의견 생성
+                    opinion_data = generate_investment_opinion.invoke({
+                        'company_name': company_name,
+                        'stock_code': symbol,
+                        'agent_results': agent_results
+                    })
+
+                    # 투자 의견 카드 렌더링 (8개 에이전트 카드 바로 아래)
+                    if opinion_data and not opinion_data.get('error'):
+                        st.markdown(create_investment_opinion_card(opinion_data), unsafe_allow_html=True)
+                        logger.info(f"투자 의견 생성 완료: {opinion_data.get('opinion')} (신뢰도: {opinion_data.get('confidence')}%)")
+
+                        # session_state에 저장 (채팅용)
+                        st.session_state['investment_opinion'] = opinion_data
+                    else:
+                        logger.warning("투자 의견 생성 실패 또는 에러 발생")
+                        st.warning("⚠️ AI 투자 의견 생성 중 오류가 발생했습니다. 8개 에이전트 분석 결과를 참고해주세요.")
+
+                except Exception as e:
+                    logger.error(f"투자 의견 생성 중 오류: {str(e)}", exc_info=True)
+                    st.error(f"💡 투자 의견 생성 오류: {str(e)}")
 
         # 최종 보고서 표시
         if final_report and completed_count >= 5:  # 5개 이상 완료시
