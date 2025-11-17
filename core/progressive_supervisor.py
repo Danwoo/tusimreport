@@ -23,15 +23,16 @@ class ProgressiveAnalysisEngine:
         self.supervisor_llm = get_supervisor_llm()
         self.agents = create_all_agents()
 
-        # 🔧 P0-4: 병렬 실행 최적화 - 독립적 에이전트 vs 의존적 에이전트 분리
-        # 병렬 실행 가능한 독립적 에이전트 (6개)
+        # 🔧 P0-4 & P1-3: 병렬 실행 최적화 - 독립적 에이전트 vs 의존적 에이전트 분리
+        # 병렬 실행 가능한 독립적 에이전트 (7개) 🆕 P1-3: global_market_expert 추가
         self.parallel_agents = [
             "context_expert",           # 시장환경 (독립적)
             "sentiment_expert",         # 뉴스여론 (독립적)
             "advanced_technical_expert", # 기술분석 (독립적)
             "institutional_trading_expert", # 기관수급 (독립적)
             "esg_expert",              # ESG분석 (독립적)
-            "community_expert"         # 커뮤니티 (독립적)
+            "community_expert",        # 커뮤니티 (독립적)
+            "global_market_expert"     # 글로벌시장 (독립적) 🆕 P1-3
         ]
 
         # 순차 실행 필요한 의존적 에이전트 (2개)
@@ -46,8 +47,8 @@ class ProgressiveAnalysisEngine:
         # Thread-safe 결과 저장소
         self.results_lock = threading.Lock()
 
-        logger.info("Progressive Analysis Engine 초기화 완료 (병렬 실행 모드)")
-        logger.info(f"  - 병렬 실행: {len(self.parallel_agents)}개 에이전트")
+        logger.info("Progressive Analysis Engine 초기화 완료 (병렬 실행 모드) 🆕 P1-3: 9개 에이전트로 확장")
+        logger.info(f"  - 병렬 실행: {len(self.parallel_agents)}개 에이전트 (global_market 추가)")
         logger.info(f"  - 순차 실행: {len(self.sequential_agents)}개 에이전트")
 
     def execute_agent_with_context_control(
