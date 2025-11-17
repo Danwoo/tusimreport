@@ -16,21 +16,22 @@ from langchain_core.messages import HumanMessage
 
 from config.settings import get_llm_model
 from utils.helpers import convert_numpy_types
+from utils.agent_helpers import create_fallback_message, format_error_message_korean
 
 logger = logging.getLogger(__name__)
 
-def get_investor_trading_analysis_logic(stock_code: str, period_days: int = 20) -> Dict[str, Any]:
+def get_investor_trading_analysis_logic(stock_code: str, company_name: str = "Unknown", period_days: int = 20) -> Dict[str, Any]:
     """투자자별 매매 동향 분석 로직"""
     try:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=period_days + 10)
         start_str = start_date.strftime('%Y%m%d')
         end_str = end_date.strftime('%Y%m%d')
-        
+
         trading_value = stock.get_market_trading_value_by_investor(start_str, end_str, stock_code)
         if trading_value.empty:
             return {"error": f"No trading value data for {stock_code}"}
-        
+
         analysis_data = {}
         if '순매수' in trading_value.columns:
             latest_net = trading_value['순매수']
@@ -50,19 +51,33 @@ def get_investor_trading_analysis_logic(stock_code: str, period_days: int = 20) 
             "data_source": "PyKRX"
         })
     except Exception as e:
-        return {"error": str(e)}
+        error_msg = format_error_message_korean(e, "기관 수급 분석")
+        logger.error(error_msg)
+        return create_fallback_message(
+            agent_name="Korean Institutional Trading Agent",
+            company_name=company_name,
+            stock_code=stock_code,
+            reason=error_msg,
+            data_source="PyKRX"
+        )
 
 @tool
 def get_investor_trading_analysis(stock_code: str, period_days: int = 20) -> Dict[str, Any]:
     """투자자별 매매 동향 분석 (기관/개인/외국인)"""
-    return get_investor_trading_analysis_logic(stock_code, period_days)
+    return get_investor_trading_analysis_logic(stock_code, "Unknown", period_days)
 
 # 도구 목록
 institutional_trading_tools = [get_investor_trading_analysis]
 
 def create_institutional_trading_agent():
     """Institutional Trading Agent 생성 함수"""
-    llm_provider, llm_model_name, llm_api_key = get_llm_model()
+    # 🔧 Phase 3 개선: Graceful degradation
+    llm_config = get_llm_model(raise_on_missing=False)
+    if llm_config is None:
+        logger.error("❌ LLM API 키가 설정되지 않았습니다.")
+        raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
+
+    llm_provider, llm_model_name, llm_api_key = llm_config
     if llm_provider == "gemini":
         llm = ChatGoogleGenerativeAI(model=llm_model_name, temperature=0.1, google_api_key=llm_api_key)
     else:
