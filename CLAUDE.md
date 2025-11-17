@@ -875,56 +875,331 @@ async def send_price_alert(user_id: int, stock: str, target_price: int):
 
 ---
 
-## 📊 Stage 3: 프리미엄 서비스 (v2.5 - 예상 2개월)
+## 📊 Stage 3: 데이터 수집 & LLM 해석 고도화 (v2.5 - 예상 1개월)
 
-> **목표**: 수익화 모델 실현
+> **목표**: AI 분석의 깊이와 정확도를 압도적으로 높여 차별화
+>
+> **핵심 차별점**: 네이버 증권, 키움 HTS는 데이터 나열만, tusimreport는 **AI 종합 해석 + 투자 의견**
 
 ### 🎯 North Star Metrics
+- **뉴스 커버리지**: 100+ 뉴스/일 (실시간 수집)
+- **커뮤니티 커버리지**: 200+ 게시글/일 (실시간 크롤링)
+- **분석 정확도**: 투자 의견 신뢰도 85% 이상
+- **실시간성**: 중요 뉴스 발생 5분 내 알림
 - **MAU**: 1,000명
-- **Paid Users**: 50명 (전환율 5%)
-- **MRR**: $500 (월 구독 수익)
-- **D30 Retention**: 50% 이상
+- **D30 Retention**: 60% 이상
 
 ### 🏆 Stage 3 핵심 기능
 
-#### **P2-1: 포트폴리오 관리**
+#### **P2-1: 뉴스 소스 대폭 확장** (7일)
 
-**기능:**
-- 보유 종목 등록 및 수익률 추적
-- 포트폴리오 리밸런싱 제안
-- 섹터별 분산 투자 분석
-- AI 기반 포트폴리오 최적화 (Modern Portfolio Theory)
+**현재 한계**:
+- Naver News (10개) + Tavily (10개) = 20개만
+- 주요 경제지 뉴스 누락 가능성
 
-#### **P2-2: 글로벌 시장 확장**
+**목표**: 50-100개 뉴스 통합 분석 (실시간)
 
-**추가 시장:**
-- 미국 주식 (S&P 500, NASDAQ)
-- 중국 주식 (A주, H주)
-- 일본 주식 (닛케이 225)
+**추가 실시간 뉴스 소스** (10개 이상):
+- **주요 경제지**: 한국경제, 매일경제, 서울경제, 머니투데이 (RSS 실시간 수집)
+- **종합 일간지**: 조선일보, 중앙일보, 동아일보 경제섹션 (RSS 실시간)
+- **전문 금융 매체**: 이데일리, 뉴스핌, 파이낸셜뉴스 (RSS 실시간)
+- **통신사**: 연합뉴스, 뉴시스 (Open API 실시간)
+- **산업 전문지**: 전자신문, 디지털타임스, 아시아경제 (RSS 실시간)
 
-**데이터 소스:**
-- Alpha Vantage (미국)
-- Yahoo Finance (글로벌)
+**구현 상세**:
+```python
+# data/multi_news_client.py
+class MultiNewsClient:
+    """통합 뉴스 실시간 수집 클라이언트"""
 
-#### **P2-3: 프리미엄 기능 (유료 전환)**
+    def __init__(self):
+        self.sources = {
+            'naver': NaverAPIClient(),            # Open API
+            'hankyung': HankyungRSSClient(),      # RSS 실시간
+            'maeil': MaeilRSSClient(),            # RSS 실시간
+            'yonhap': YonhapAPIClient(),          # Open API 실시간
+            'newspim': NewspimRSSClient(),        # RSS 실시간
+            # ... 10개 이상 실시간 소스
+        }
 
-**Free Tier:**
-- 일 3회 분석 제한
-- Level 2 투자 의견만
-- 채팅 20회/일 제한
+    async def fetch_all_news_realtime(
+        self,
+        keyword: str,
+        days: int = 7
+    ) -> List[Dict[str, Any]]:
+        """
+        모든 소스에서 뉴스 실시간 병렬 수집
 
-**Premium Tier ($9.99/월):**
-- 무제한 분석
-- Level 3 투자 의견 (목표가, 손절가)
-- 무제한 채팅
-- 실시간 알림
-- 포트폴리오 관리
-- 글로벌 시장 분석
+        Returns:
+            [
+                {
+                    "title": "...",
+                    "content": "...",
+                    "url": "...",
+                    "published_at": "2025-11-17T10:30:00",
+                    "source": "한국경제",
+                    "sentiment": "positive" | "neutral" | "negative"
+                },
+                ...
+            ]
+        """
+        # 병렬 실시간 수집
+        tasks = [source.fetch(keyword, days) for source in self.sources.values()]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-**Enterprise Tier (증권사 B2B, $999/월):**
-- API 제공
-- 화이트라벨 솔루션
-- 커스터마이징
+        all_news = []
+        for result in results:
+            if isinstance(result, list):
+                all_news.extend(result)
+
+        # 중복 제거 (URL 기반)
+        seen_urls = set()
+        unique_news = []
+        for news in all_news:
+            if news['url'] not in seen_urls:
+                seen_urls.add(news['url'])
+                unique_news.append(news)
+
+        # 최신순 정렬
+        unique_news.sort(key=lambda x: x['published_at'], reverse=True)
+
+        return unique_news[:100]  # 최대 100개
+```
+
+**데이터 특징**:
+- ✅ **100% 실시간 데이터**: RSS/API를 통한 실시간 수집
+- ✅ **하드코딩 전무**: 모든 뉴스는 외부 API/RSS에서 실시간 가져옴
+- ✅ **투명성**: 모든 뉴스 소스 URL 공개
+
+#### **P2-2: 커뮤니티 소스 대폭 확장** (10일)
+
+**현재 한계**:
+- Paxnet 종목토론만 (10개 게시글)
+- 개인 투자자 의견 다양성 부족
+
+**목표**: 5개 커뮤니티 통합, 200+ 게시글 실시간 크롤링
+
+**추가 실시간 커뮤니티 소스** (5개):
+- **네이버 카페**: 주식 관련 대형 카페 (Selenium 실시간 크롤링)
+- **디시인사이드**: 주식 갤러리 (Selenium 실시간 크롤링)
+- **알파스퀘어**: 전문 투자자 커뮤니티 (API/크롤링 실시간)
+- **38커뮤니케이션**: 종목 토론방 (Selenium 실시간 크롤링)
+- **뽐뿌**: 주식 게시판 (Selenium 실시간 크롤링)
+
+**구현 상세**:
+```python
+# data/multi_community_client.py
+class MultiCommunityClient:
+    """통합 커뮤니티 실시간 크롤링 클라이언트"""
+
+    def __init__(self):
+        self.crawlers = {
+            'paxnet': PaxnetCrawler(),
+            'naver_cafe': NaverCafeCrawler(),
+            'dcinside': DCInsideCrawler(),
+            'alphasquare': AlphaSquareCrawler(),
+            'comm38': Comm38Crawler(),
+        }
+
+    async def fetch_all_posts_realtime(
+        self,
+        stock_code: str,
+        company_name: str,
+        days: int = 7
+    ) -> List[Dict[str, Any]]:
+        """
+        모든 커뮤니티에서 게시글 실시간 병렬 크롤링
+
+        Returns:
+            [
+                {
+                    "title": "...",
+                    "content": "...",
+                    "author": "user123",
+                    "posted_at": "2025-11-17T14:20:00",
+                    "source": "네이버 카페",
+                    "url": "...",
+                    "sentiment": "positive" | "neutral" | "negative",
+                    "comments_count": 15
+                },
+                ...
+            ]
+        """
+        # Selenium headless 모드로 병렬 크롤링
+        tasks = [
+            crawler.crawl(stock_code, company_name, days)
+            for crawler in self.crawlers.values()
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        all_posts = []
+        for result in results:
+            if isinstance(result, list):
+                all_posts.extend(result)
+
+        # 최신순 정렬
+        all_posts.sort(key=lambda x: x['posted_at'], reverse=True)
+
+        return all_posts[:200]  # 최대 200개
+```
+
+**데이터 특징**:
+- ✅ **100% 실시간 크롤링**: Selenium을 통한 실시간 수집
+- ✅ **하드코딩 전무**: 모든 게시글은 실시간 웹에서 크롤링
+- ✅ **투명성**: 모든 게시글 URL 공개
+
+#### **P2-3: LLM 해석 엔진 고도화** (10일)
+
+**현재 한계**:
+- 단순 감정 분석 (긍정/부정/중립)만
+- 시계열 변화, 토픽, 영향력 분석 부재
+
+**목표**: 다차원 AI 해석
+
+**고급 LLM 분석 기능**:
+
+1. **시계열 감정 분석** (Temporal Sentiment Analysis)
+   - 7일간 감정 변화 추이 추적
+   - 예: "3일 전 부정 → 현재 긍정 전환" (호재 발생 감지)
+
+2. **토픽 모델링** (Topic Modeling)
+   - BERTopic으로 주요 이슈 자동 추출
+   - 예: "신제품 출시" (45%), "실적 발표" (30%), "M&A 루머" (25%)
+
+3. **영향력 분석** (Influence Analysis)
+   - 어떤 뉴스/게시글이 주가에 가장 영향 컸는지 분석
+   - 예: "삼성전자 HBM3E 공급 확정 뉴스 → 주가 5% 상승 상관관계"
+
+4. **컨센서스 갭 분석** (Consensus vs Community Gap)
+   - 기관 의견 vs 개인 투자자 의견 차이 정량화
+   - 예: "애널리스트는 HOLD, 커뮤니티는 적극 BUY → 의견 차이 65%"
+
+**구현 상세**:
+```python
+# agents/korean_advanced_interpretation_agent.py
+@tool
+def advanced_llm_interpretation(
+    company_name: str,
+    stock_code: str,
+    news_data: List[Dict[str, Any]],      # 실시간 뉴스
+    community_data: List[Dict[str, Any]]  # 실시간 커뮤니티
+) -> Dict[str, Any]:
+    """
+    고급 LLM 해석 (실시간 데이터 기반)
+
+    Returns:
+        {
+            "temporal_sentiment": {
+                "trend": "improving" | "stable" | "worsening",
+                "timeline": [
+                    {"date": "2025-11-10", "score": 0.45},
+                    {"date": "2025-11-13", "score": 0.65},
+                    {"date": "2025-11-17", "score": 0.78}
+                ],
+                "analysis": "3일 전 부정적 → 현재 긍정 전환, 신제품 발표 영향"
+            },
+            "key_topics": [
+                {
+                    "topic": "신제품 출시",
+                    "weight": 0.45,
+                    "sentiment": "positive",
+                    "related_news_count": 25
+                },
+                {
+                    "topic": "실적 우려",
+                    "weight": 0.30,
+                    "sentiment": "negative",
+                    "related_news_count": 12
+                },
+            ],
+            "influence_analysis": [
+                {
+                    "source_title": "한국경제 - HBM3E 공급 확정",
+                    "source_url": "https://...",
+                    "published_at": "2025-11-15T09:00:00",
+                    "impact_score": 0.85,
+                    "price_correlation": 0.72,
+                    "explanation": "발표 직후 주가 5% 상승, 거래량 300% 증가"
+                }
+            ],
+            "consensus_gap": {
+                "institutional_view": "HOLD",
+                "community_view": "BUY",
+                "divergence_score": 0.65,
+                "explanation": "기관은 밸류에이션 부담 우려, 개인은 성장성 기대"
+            }
+        }
+    """
+    # LLM 기반 실시간 분석
+    # 모든 데이터는 실시간 수집된 뉴스/커뮤니티에서 추출
+    # 하드코딩 전무
+```
+
+#### **P2-4: 실시간 모니터링 시스템** (4일)
+
+**기능**:
+- 5분마다 최신 뉴스/커뮤니티 자동 체크
+- 중요 뉴스 발생 시 자동 재분석 트리거
+- 사용자에게 실시간 푸시 알림
+
+**구현 상세**:
+```python
+# core/real_time_monitor.py
+class RealTimeMonitor:
+    """실시간 뉴스/커뮤니티 모니터링 시스템"""
+
+    def __init__(self):
+        self.news_client = MultiNewsClient()
+        self.community_client = MultiCommunityClient()
+        self.llm = get_llm_model()
+
+    async def monitor_loop(self, stock_codes: List[str]):
+        """5분마다 실시간 모니터링"""
+        while True:
+            for stock_code in stock_codes:
+                # 최신 뉴스 실시간 체크
+                new_news = await self.news_client.fetch_latest(
+                    stock_code,
+                    minutes=5  # 최근 5분
+                )
+
+                # 중요도 판단 (LLM)
+                if new_news and self.is_important(new_news):
+                    logger.info(f"중요 뉴스 발생: {stock_code}")
+
+                    # 자동 재분석 트리거
+                    await self.trigger_reanalysis(stock_code)
+
+                    # 사용자 실시간 알림
+                    await self.send_notification(stock_code, new_news)
+
+            await asyncio.sleep(300)  # 5분 대기
+
+    def is_important(self, news: Dict[str, Any]) -> bool:
+        """중요 뉴스 판단 (LLM 기반)"""
+        # 실적 발표, M&A, 신제품 출시 등 중요 키워드 감지
+        # LLM이 뉴스 내용 분석하여 impact_score 산출
+        return news.get('impact_score', 0) > 0.7
+```
+
+**데이터 특징**:
+- ✅ **100% 실시간 모니터링**: 5분마다 자동 체크
+- ✅ **자동 재분석**: 중요 뉴스 발생 시 즉시 8개 에이전트 재실행
+- ✅ **실시간 알림**: Telegram/이메일로 즉시 알림
+
+---
+
+### 🎯 **Stage 3 차별점 요약**
+
+| 항목 | 네이버 증권 | 키움 HTS | tusimreport Stage 3 |
+|------|------------|---------|---------------------|
+| 뉴스 커버리지 | 10-20개 | 20-30개 | **100개** (10개 소스 실시간) |
+| 커뮤니티 분석 | ❌ 없음 | ❌ 없음 | **✅ 200+ 게시글** (5개 소스 실시간) |
+| AI 해석 | ❌ 나열만 | ❌ 나열만 | **✅ 시계열/토픽/영향력/갭 분석** |
+| 실시간 모니터링 | ❌ 수동 | ❌ 수동 | **✅ 5분마다 자동 체크 + 알림** |
+| 투자 의견 | ❌ 없음 | ❌ 없음 | **✅ BUY/HOLD/SELL + 신뢰도** |
+
+**핵심 차별점**: "데이터 나열 플랫폼" → "AI 해석 + 투자 의견 서비스"
 
 ---
 
@@ -935,18 +1210,22 @@ async def send_price_alert(user_id: int, stock: str, target_price: int):
 - ✅ D7 Retention > 30%
 - ✅ 투자 의견 신뢰도 자체 평가 > 70%
 - ✅ 분석 시간 < 1분
+- ✅ 채팅 사용률 > 60%
 
 ### Stage 2 (1개월 내)
 - ✅ DAU 100명 달성
 - ✅ D7 Retention > 40%
 - ✅ 평균 세션 시간 > 8분
 - ✅ NPS > 30
+- ✅ 투자 의견 신뢰도 > 80%
 
-### Stage 3 (2개월 내)
+### Stage 3 (1개월 내)
+- ✅ 뉴스 커버리지 100+ 뉴스/일 (실시간 수집)
+- ✅ 커뮤니티 커버리지 200+ 게시글/일 (실시간 크롤링)
+- ✅ 투자 의견 신뢰도 > 85%
+- ✅ 실시간 모니터링: 중요 뉴스 5분 내 알림
 - ✅ MAU 1,000명
-- ✅ 첫 유료 전환 달성 (50명)
-- ✅ MRR $500
-- ✅ 증권사 B2B 파트너 1곳 확보
+- ✅ D30 Retention > 60%
 
 ---
 
@@ -960,15 +1239,16 @@ async def send_price_alert(user_id: int, stock: str, target_price: int):
 | **P0-4** | 병렬 실행 최적화 | 🔥🔥 높음 | 상 | 5일 |
 | **P1-1** | Level 3 투자 의견 | 🔥🔥 높음 | 중 | 5일 |
 | **P1-2** | 종목 비교 도구 | 🔥 중간 | 중 | 4일 |
-| **P1-3** | 실시간 데이터 | 🔥🔥 높음 | 상 | 7일 |
+| **P1-3** | 실시간 데이터 통합 | 🔥🔥 높음 | 상 | 7일 |
 | **P1-4** | 알림 기능 | 🔥 중간 | 중 | 3일 |
-| **P2-1** | 포트폴리오 관리 | 🔥🔥🔥 매우 높음 | 상 | 10일 |
-| **P2-2** | 글로벌 시장 | 🔥 중간 | 상 | 14일 |
-| **P2-3** | 프리미엄 모델 | 🔥🔥🔥 매우 높음 | 중 | 7일 |
+| **P2-1** | 뉴스 소스 대폭 확장 (실시간) | 🔥🔥🔥 매우 높음 | 중 | 7일 |
+| **P2-2** | 커뮤니티 소스 확장 (실시간) | 🔥🔥🔥 매우 높음 | 상 | 10일 |
+| **P2-3** | LLM 해석 엔진 고도화 | 🔥🔥🔥 매우 높음 | 상 | 10일 |
+| **P2-4** | 실시간 모니터링 시스템 | 🔥🔥 높음 | 중 | 4일 |
 
 **Stage 1 총 예상 시간**: 11일 (약 2주)
 **Stage 2 총 예상 시간**: 19일 (약 1개월)
-**Stage 3 총 예상 시간**: 31일 (약 2개월)
+**Stage 3 총 예상 시간**: 31일 (약 1개월)
 
 ---
 
