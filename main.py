@@ -521,23 +521,9 @@ def run_analysis(symbol, company_name):
                     logger.error(f"투자 의견 생성 중 오류: {str(e)}", exc_info=True)
                     st.error(f"💡 투자 의견 생성 오류: {str(e)}")
 
-        # 최종 보고서 표시
+        # 🔧 P0-2: 최종 보고서를 session_state에 저장 (Tab에서 표시)
         if final_report and completed_count >= 5:  # 5개 이상 완료시
-            st.markdown(f"""
-            <div class="final-report">
-                <h2 class="report-title">🎯 종합 투자 분석 보고서</h2>
-                <div class="report-content">{final_report}</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # 다운로드
-            st.download_button(
-                label="📋 보고서 다운로드",
-                data=final_report,
-                file_name=f"{symbol}_{company_name}_analysis_report.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
+            st.session_state['final_report'] = final_report
         elif completed_count < 7:
             st.warning(f"⚠️ 일부 분석이 완료되지 않았습니다 ({completed_count}/7)")
 
@@ -557,6 +543,11 @@ def run_analysis(symbol, company_name):
             if chat_session:
                 st.session_state['chat_session'] = chat_session
                 logger.info("Chat session created successfully")
+
+            # 🔧 P0-2: 분석 완료 후 rerun하여 Tab UI 표시
+            st.success("✅ 분석이 완료되었습니다! 탭에서 결과를 확인하세요.")
+            time.sleep(1)  # 메시지 표시를 위한 짧은 대기
+            st.rerun()
 
         # 로깅
         logger.info(f"================== 주식 분석 완료 ==================")
@@ -659,92 +650,159 @@ def main():
     with st.expander("ℹ️ 시스템 정보"):
         st.markdown("**🤖 AI 전문가 구성 (8인):**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석 💬 커뮤니티분석\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News • Paxnet")
 
-    # 🔧 Phase 4: 대화형 AI 채팅 인터페이스
+    # 🔧 P0-2: Tab UI 구조 - 분석 결과 vs AI 대화 분리
     if st.session_state.get('analysis_completed') and st.session_state.get('chat_session'):
         st.markdown("---")
-        st.markdown("## 💬 AI와 대화하기")
 
-        analysis_company = st.session_state.get('analysis_company', '종목')
-        st.info(f"✨ **{analysis_company}** 분석 결과에 대해 궁금한 점을 물어보세요!")
+        # 종목 정보
+        symbol = st.session_state.get('analysis_symbol', '')
+        company_name = st.session_state.get('analysis_company', '종목')
 
-        # 🔧 Phase 4.1: 예시 질문 버튼
-        st.markdown("**💡 빠른 질문:**")
-        col1, col2, col3, col4 = st.columns(4)
-        example_questions = [
-            "재무 상태가 괜찮아?",
-            "지금 사도 될까?",
-            "가장 큰 리스크는 뭐야?",
-            "긍정적인 요인은?"
-        ]
+        # Tab 헤더
+        st.markdown(f"<h2 style='color: #334155; text-align: center; margin: 1rem 0;'>📊 {symbol} {company_name} - 분석 결과</h2>", unsafe_allow_html=True)
 
-        # 예시 질문 클릭 시 처리를 위한 session_state
-        if 'pending_question' not in st.session_state:
-            st.session_state['pending_question'] = None
+        # Tab 생성
+        tab1, tab2 = st.tabs(["📊 분석 결과", "💬 AI 대화"])
 
-        with col1:
-            if st.button(example_questions[0], key="q1", use_container_width=True):
-                st.session_state['pending_question'] = example_questions[0]
-        with col2:
-            if st.button(example_questions[1], key="q2", use_container_width=True):
-                st.session_state['pending_question'] = example_questions[1]
-        with col3:
-            if st.button(example_questions[2], key="q3", use_container_width=True):
-                st.session_state['pending_question'] = example_questions[2]
-        with col4:
-            if st.button(example_questions[3], key="q4", use_container_width=True):
-                st.session_state['pending_question'] = example_questions[3]
+        # Tab 1: 분석 결과
+        with tab1:
+            agent_states = st.session_state.get('analysis_agents', {})
+            agent_names = ["context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert", "institutional_trading_expert", "comparative_expert", "esg_expert", "community_expert"]
 
-        chat_session = st.session_state['chat_session']
+            # 차트 표시
+            if f"chart_{symbol}" in st.session_state:
+                st.markdown("### 📈 기술적 차트 분석")
+                chart_html = f'<img src="data:image/png;base64,{st.session_state[f"chart_{symbol}"]}" style="width: 100%; max-width: 800px; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">'
+                st.markdown(chart_html, unsafe_allow_html=True)
+                st.markdown("---")
 
-        # 대화 히스토리 초기화 (세션 상태에 저장)
-        if 'chat_history' not in st.session_state:
-            st.session_state['chat_history'] = []
+            # 8개 에이전트 결과 카드
+            for agent_name in agent_names:
+                if agent_name in agent_states and agent_states[agent_name]["status"] == "completed":
+                    config = get_agent_config(agent_name)
+                    content = agent_states[agent_name]["content"]
 
-        # 기존 대화 표시
-        for message in st.session_state['chat_history']:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+                    # 뉴스/커뮤니티 소스
+                    card_news_sources = None
+                    if agent_name == "sentiment_expert":
+                        card_news_sources = st.session_state.get(f"news_sources_{symbol}", [])
+                    elif agent_name == "community_expert":
+                        card_news_sources = st.session_state.get(f"community_sources_{symbol}", [])
 
-        # 🔧 Phase 4.1: 예시 질문 버튼 클릭 시 처리
-        if st.session_state['pending_question']:
-            prompt = st.session_state['pending_question']
-            st.session_state['pending_question'] = None  # 초기화
+                    st.markdown(create_result_card(agent_name, config, "completed", content, card_news_sources), unsafe_allow_html=True)
 
-            # 사용자 메시지 표시 및 저장
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            st.session_state['chat_history'].append({"role": "user", "content": prompt})
+            # 투자 의견 카드
+            if 'investment_opinion' in st.session_state:
+                opinion_data = st.session_state['investment_opinion']
+                st.markdown(create_investment_opinion_card(opinion_data), unsafe_allow_html=True)
 
-            # AI 응답 생성
-            with st.chat_message("assistant"):
-                with st.spinner("🤔 생각 중..."):
-                    response = chat_session.ask(prompt)
-                    st.markdown(response)
+            # 최종 보고서
+            if 'final_report' in st.session_state:
+                final_report = st.session_state['final_report']
+                st.markdown(f"""
+                <div class="final-report">
+                    <h2 class="report-title">🎯 종합 투자 분석 보고서</h2>
+                    <div class="report-content">{final_report}</div>
+                </div>
+                """, unsafe_allow_html=True)
 
-            st.session_state['chat_history'].append({"role": "assistant", "content": response})
+                # 다운로드
+                st.download_button(
+                    label="📋 보고서 다운로드",
+                    data=final_report,
+                    file_name=f"{symbol}_{company_name}_analysis_report.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
 
-        # 채팅 입력
-        if prompt := st.chat_input("질문을 입력하세요..."):
-            # 사용자 메시지 표시 및 저장
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            st.session_state['chat_history'].append({"role": "user", "content": prompt})
+        # Tab 2: AI 대화
+        with tab2:
+            st.markdown("### 💬 AI와 대화하기")
+            st.info(f"✨ **{company_name}** 분석 결과에 대해 궁금한 점을 물어보세요!")
 
-            # AI 응답 생성
-            with st.chat_message("assistant"):
-                with st.spinner("🤔 생각 중..."):
-                    response = chat_session.ask(prompt)
-                    st.markdown(response)
+            # 예시 질문 버튼
+            st.markdown("**💡 빠른 질문:**")
+            col1, col2, col3, col4 = st.columns(4)
+            example_questions = [
+                "재무 상태가 괜찮아?",
+                "지금 사도 될까?",
+                "가장 큰 리스크는 뭐야?",
+                "긍정적인 요인은?"
+            ]
 
-            st.session_state['chat_history'].append({"role": "assistant", "content": response})
+            # 예시 질문 클릭 시 처리를 위한 session_state
+            if 'pending_question' not in st.session_state:
+                st.session_state['pending_question'] = None
 
-        # 대화 초기화 버튼
-        col_clear, col_space = st.columns([1, 3])
-        with col_clear:
-            if st.button("🔄 대화 내역 지우기", key="clear_chat", use_container_width=True):
+            with col1:
+                if st.button(example_questions[0], key="q1", use_container_width=True):
+                    st.session_state['pending_question'] = example_questions[0]
+                    st.rerun()
+            with col2:
+                if st.button(example_questions[1], key="q2", use_container_width=True):
+                    st.session_state['pending_question'] = example_questions[1]
+                    st.rerun()
+            with col3:
+                if st.button(example_questions[2], key="q3", use_container_width=True):
+                    st.session_state['pending_question'] = example_questions[2]
+                    st.rerun()
+            with col4:
+                if st.button(example_questions[3], key="q4", use_container_width=True):
+                    st.session_state['pending_question'] = example_questions[3]
+                    st.rerun()
+
+            chat_session = st.session_state['chat_session']
+
+            # 대화 히스토리 초기화 (세션 상태에 저장)
+            if 'chat_history' not in st.session_state:
                 st.session_state['chat_history'] = []
-                chat_session.clear_history()
-                st.success("✅ 대화 내역이 초기화되었습니다!")
+
+            # 기존 대화 표시
+            for message in st.session_state['chat_history']:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+
+            # 예시 질문 버튼 클릭 시 처리
+            if st.session_state['pending_question']:
+                prompt = st.session_state['pending_question']
+                st.session_state['pending_question'] = None  # 초기화
+
+                # 사용자 메시지 표시 및 저장
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+                st.session_state['chat_history'].append({"role": "user", "content": prompt})
+
+                # AI 응답 생성
+                with st.chat_message("assistant"):
+                    with st.spinner("🤔 생각 중..."):
+                        response = chat_session.ask(prompt)
+                        st.markdown(response)
+
+                st.session_state['chat_history'].append({"role": "assistant", "content": response})
+
+            # 채팅 입력
+            if prompt := st.chat_input("질문을 입력하세요...", key="chat_input_tab2"):
+                # 사용자 메시지 표시 및 저장
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+                st.session_state['chat_history'].append({"role": "user", "content": prompt})
+
+                # AI 응답 생성
+                with st.chat_message("assistant"):
+                    with st.spinner("🤔 생각 중..."):
+                        response = chat_session.ask(prompt)
+                        st.markdown(response)
+
+                st.session_state['chat_history'].append({"role": "assistant", "content": response})
+                st.rerun()
+
+            # 대화 초기화 버튼
+            col_clear, col_space = st.columns([1, 3])
+            with col_clear:
+                if st.button("🔄 대화 내역 지우기", key="clear_chat", use_container_width=True):
+                    st.session_state['chat_history'] = []
+                    chat_session.clear_history()
+                    st.rerun()
 
 if __name__ == "__main__":
     main()
