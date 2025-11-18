@@ -9,6 +9,8 @@ from core.korean_supervisor_langgraph import stream_korean_stock_analysis
 from config.settings import settings
 from utils.helpers import setup_logging
 from data.chart_generator import create_stock_chart
+from data.portfolio_tracker import PortfolioTracker  # Phase 4
+from data.opinion_change_detector import OpinionChangeDetector  # Phase 4
 
 # 로깅 설정 - 파일 로깅 활성화
 logger = setup_logging(settings.log_level, enable_file_logging=True)
@@ -18,7 +20,7 @@ st.set_page_config(
     page_title="📊 AI Stock Analyzer",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",  # Phase 4: 포트폴리오 관리를 위해 사이드바 기본 열기
 )
 
 # 간소화된 스타일
@@ -66,6 +68,23 @@ st.markdown("""
     .report-content { background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 6px;
                       backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.2); line-height: 1.5;
                       white-space: pre-wrap; }
+    /* Phase 4: 투자 의견 변경 알림 스타일 */
+    .opinion-change-alert { border-radius: 12px; padding: 1.5rem; margin: 1.5rem 0;
+                            box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-left: 6px solid; }
+    .alert-high { background: #fee2e2; border-color: #ef4444; }
+    .alert-medium { background: #fed7aa; border-color: #f97316; }
+    .alert-low { background: #dbeafe; border-color: #3b82f6; }
+    .alert-title { font-size: 1.3rem; font-weight: 700; margin: 0 0 1rem 0; }
+    .alert-content { font-size: 0.95rem; line-height: 1.6; }
+    .change-item { padding: 0.5rem 0; border-bottom: 1px solid rgba(0,0,0,0.1); }
+    .change-item:last-child { border-bottom: none; }
+    /* Phase 4: 포트폴리오 스타일 */
+    .portfolio-card { background: white; border-radius: 8px; padding: 1rem; margin: 0.5rem 0;
+                      border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .portfolio-header { font-size: 1rem; font-weight: 600; color: #334155; margin-bottom: 0.5rem; }
+    .portfolio-value { font-size: 1.5rem; font-weight: 700; margin: 0.3rem 0; }
+    .portfolio-positive { color: #22c55e; }
+    .portfolio-negative { color: #ef4444; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     @media (max-width: 768px) { .main-title { font-size: 1.8rem; } .input-section { padding: 0.8rem; } }
 </style>
@@ -352,6 +371,47 @@ def run_analysis(symbol, company_name):
                                 update_progress(completed_count, len(agent_names))
                                 logger.info(f"===== {config['name']} ({agent_name}) 분석 완료 =====")
 
+        # Phase 4: 투자 의견 변경 감지 및 알림
+        if investment_opinion_data and "error" not in investment_opinion_data:
+            opinion_detector = OpinionChangeDetector()
+
+            # 새로운 투자 의견 기록
+            new_opinion_record = {
+                "timestamp": datetime.now().isoformat(),
+                "decision": investment_opinion_data.get('investment_opinion', {}).get('decision', 'N/A'),
+                "confidence": investment_opinion_data.get('investment_opinion', {}).get('confidence', 0),
+                "target_price_3m": investment_opinion_data.get('target_prices', {}).get('3_months', {}).get('price', 0),
+                "current_price": investment_opinion_data.get('current_price', 0)
+            }
+
+            # 변경 감지
+            changes = opinion_detector.detect_and_alert(symbol, new_opinion_record)
+
+            # 변경 사항이 있으면 알림 표시
+            if changes.get('has_changes'):
+                severity = changes.get('severity', 'LOW')
+                alert_class = f"alert-{severity.lower()}"
+                severity_emoji = {
+                    "HIGH": "🚨",
+                    "MEDIUM": "⚠️",
+                    "LOW": "ℹ️"
+                }.get(severity, "ℹ️")
+
+                severity_text = {
+                    "HIGH": "긴급",
+                    "MEDIUM": "중요",
+                    "LOW": "참고"
+                }.get(severity, "참고")
+
+                st.markdown(f"""
+                <div class="opinion-change-alert {alert_class}">
+                    <div class="alert-title">{severity_emoji} {severity_text}: 투자 의견 변경 감지</div>
+                    <div class="alert-content">
+                        {changes.get('alert_message', '')}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
         # Phase 1: 투자 의견 표시 (3초 요약 - 최우선 표시)
         if investment_opinion_data and "error" not in investment_opinion_data:
             opinion = investment_opinion_data.get('investment_opinion', {})
@@ -453,11 +513,84 @@ def run_analysis(symbol, company_name):
         st.error(f"분석 프로세스 오류: {e}")
 
 def main():
-    # 메인 헤더
+    # ========== Phase 4: 사이드바 - 포트폴리오 관리 ==========
+    with st.sidebar:
+        st.title("💼 포트폴리오 관리")
+        st.markdown("---")
+
+        # 포트폴리오 트래커 초기화
+        portfolio_tracker = PortfolioTracker()
+
+        # 포트폴리오 요약 표시
+        st.subheader("📊 포트폴리오 요약")
+        summary = portfolio_tracker.get_portfolio_summary()
+
+        if summary['total_holdings'] > 0:
+            total_return_pct = summary['total_return_pct']
+            return_color = "portfolio-positive" if total_return_pct >= 0 else "portfolio-negative"
+
+            st.markdown(f"""
+            <div class="portfolio-card">
+                <div class="portfolio-header">총 평가액</div>
+                <div class="portfolio-value">{summary['total_value']:,}원</div>
+            </div>
+            <div class="portfolio-card">
+                <div class="portfolio-header">총 손익</div>
+                <div class="portfolio-value {return_color}">{summary['total_profit']:+,}원 ({total_return_pct:+.2f}%)</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("### 📋 보유 종목")
+            for holding in summary['holdings_detail']:
+                return_pct = holding['return_pct']
+                color = "🟢" if return_pct >= 0 else "🔴"
+                st.markdown(f"""
+                **{color} {holding['company_name']}** ({holding['stock_code']})
+                {holding['shares']}주 • 평단가 {holding['avg_price']:,}원
+                현재가 {holding['current_price']:,}원 • 수익률 {return_pct:+.2f}%
+                """)
+
+            # 리밸런싱 제안
+            st.markdown("---")
+            st.subheader("⚖️ 리밸런싱 제안")
+            rebalancing = portfolio_tracker.suggest_rebalancing()
+
+            if rebalancing['suggestions']:
+                for suggestion in rebalancing['suggestions']:
+                    action = suggestion['action']
+                    action_emoji = "🔼" if action == "BUY" else "🔽"
+                    st.markdown(f"{action_emoji} **{suggestion['company_name']}**: {suggestion['amount_krw']:,}원 {action}")
+            else:
+                st.success("✅ 포트폴리오가 균형잡혀 있습니다!")
+        else:
+            st.info("포트폴리오가 비어있습니다. 아래에서 종목을 추가해주세요.")
+
+        # 종목 추가 폼
+        st.markdown("---")
+        st.subheader("➕ 종목 추가")
+        with st.form("add_holding_form"):
+            add_code = st.text_input("종목코드", placeholder="예: 005930")
+            add_name = st.text_input("회사명", placeholder="예: 삼성전자")
+            add_shares = st.number_input("보유 주식수", min_value=1, value=1)
+            add_price = st.number_input("평균 매수가", min_value=0, value=0)
+            add_date = st.date_input("매수 날짜")
+
+            if st.form_submit_button("종목 추가", use_container_width=True):
+                if add_code and add_name and add_price > 0:
+                    portfolio_tracker.add_holding(
+                        add_code, add_name, add_shares, add_price,
+                        add_date.strftime('%Y-%m-%d')
+                    )
+                    st.success(f"✅ {add_name} 추가 완료!")
+                    st.rerun()
+                else:
+                    st.error("모든 필드를 입력해주세요!")
+
+    # ========== 메인 헤더 ==========
     st.markdown("""
     <div class="main-header">
-        <h1 class="main-title">📊 AI Stock Analyzer v2.3 + Phase 1 + Phase 3 + Phase 5</h1>
-        <p class="main-subtitle">🎯 BUY/HOLD/SELL 투자 의견 • 📊 DCF + Multiples 정량 분석 • 🔮 고급 차트 분석 (일목균형표, AI 패턴)</p>
+        <h1 class="main-title">📊 AI Stock Analyzer v2.3 + Phase 1 + Phase 3 + Phase 4 + Phase 5</h1>
+        <p class="main-subtitle">🎯 BUY/HOLD/SELL 투자 의견 • 📊 DCF + Multiples 정량 분석 • 💼 포트폴리오 추적 • 🔮 고급 차트 분석</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -519,7 +652,36 @@ def main():
 
     # 시스템 정보
     with st.expander("ℹ️ 시스템 정보"):
-        st.markdown("**🤖 AI 전문가 구성 (10개):**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석 💬 커뮤니티 📊 정량분석 🔮 고급차트\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News\n\n**🆕 Phase 5:** 일목균형표 • 피보나치 되돌림 • 거래량 프로파일 • AI 패턴 인식 (Head & Shoulders, Double Top/Bottom)")
+        st.markdown("""
+        **🤖 AI 전문가 구성 (10개):**
+        🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석 💬 커뮤니티 📊 정량분석 🔮 고급차트
+
+        **📊 데이터 소스:**
+        FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News
+
+        **✨ Phase 1 (투자 의견):**
+        • BUY/HOLD/SELL 명확한 투자 의견
+        • 신뢰도 점수 및 Risk/Reward 비율
+        • 3개월 목표가 및 손절가 제시
+
+        **📊 Phase 3 (정량 분석):**
+        • DCF (현금흐름할인) 밸류에이션
+        • Multiples (PER, PBR, PSR, EV/EBITDA) 분석
+        • 전문가 87.5% 요구 기능
+
+        **💼 Phase 4 (재방문율 향상):**
+        • 포트폴리오 추적: 실시간 평가액 및 손익률
+        • 리밸런싱 제안: 목표 비중 달성 가이드
+        • 투자 의견 변경 알림: 4가지 변경 감지 (의견, 신뢰도, 목표가, 주가)
+        • 사용자 요구: 포트폴리오 47%, 알림 50%
+
+        **🔮 Phase 5 (기술적 투자자):**
+        • 일목균형표 (Ichimoku Cloud) 분석
+        • 피보나치 되돌림 (Fibonacci Retracement)
+        • 거래량 프로파일 (Volume Profile)
+        • AI 패턴 인식 (Head & Shoulders, Double Top/Bottom)
+        • 사용자 요구: 43% (13명)
+        """)
 
 if __name__ == "__main__":
     main()
