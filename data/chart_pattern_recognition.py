@@ -279,7 +279,7 @@ class ChartPatternRecognition:
             neckline_level = neckline[1]
 
             # 현재가
-            current_price = float(self.df['Close').iloc[-1])
+            current_price = float(self.df['Close'].iloc[-1])
 
             # 패턴 완성 여부
             pattern_complete = current_price > neckline_level
