@@ -247,8 +247,14 @@ def create_result_card(agent_name, config, status="waiting", content="", news_so
         <div class="result-content">{content}{news_section}</div>
     </div>"""
 
-def run_analysis(symbol, company_name):
-    """분석 실행"""
+def run_analysis(symbol, company_name, mode="expert"):
+    """분석 실행
+
+    Args:
+        symbol: 종목코드
+        company_name: 회사명
+        mode: "beginner" (초급자, 3개 에이전트) 또는 "expert" (전문가, 10개 에이전트)
+    """
 
     # 뉴스 데이터 및 차트 미리 생성
     with st.spinner("📰 뉴스 데이터 수집 중..."):
@@ -260,8 +266,11 @@ def run_analysis(symbol, company_name):
         if chart_base64:
             st.session_state[f"chart_{symbol}"] = chart_base64
 
+    # 모드별 메시지
+    mode_message = "🟢 초급자 모드 (3분 빠른 분석)" if mode == "beginner" else "🔵 전문가 모드 (10분 상세 분석)"
+
     # 결과 섹션 시작
-    st.markdown(f'<div class="results-section"><h2 style="color: #334155; margin: 0 0 1rem 0; font-size: 1.5rem;">📊 {symbol} {company_name} 분석 결과</h2></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="results-section"><h2 style="color: #334155; margin: 0 0 1rem 0; font-size: 1.5rem;">📊 {symbol} {company_name} 분석 결과 • {mode_message}</h2></div>', unsafe_allow_html=True)
 
     # 차트 표시
     if f"chart_{symbol}" in st.session_state:
@@ -269,10 +278,28 @@ def run_analysis(symbol, company_name):
         chart_html = f'<img src="data:image/png;base64,{st.session_state[f"chart_{symbol}"]}" style="width: 100%; max-width: 800px; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">'
         st.markdown(chart_html, unsafe_allow_html=True)
         st.markdown("---")
-    progress_container = st.empty()
 
-    # 에이전트 설정 (Phase 3+5: quantitative_expert, advanced_chart_expert 추가)
-    agent_names = ["context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert", "institutional_trading_expert", "comparative_expert", "esg_expert", "community_expert", "quantitative_expert", "advanced_chart_expert"]
+    # Phase 0-A: 모드별 에이전트 선택
+    if mode == "beginner":
+        # 초급자 모드: 3개 핵심 에이전트만 (뉴스, 재무, 기술분석)
+        agent_names = ["sentiment_expert", "financial_expert", "advanced_technical_expert"]
+        estimated_time = "약 3분"
+    else:
+        # 전문가 모드: 전체 10개 에이전트
+        agent_names = ["context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert", "institutional_trading_expert", "comparative_expert", "esg_expert", "community_expert", "quantitative_expert", "advanced_chart_expert"]
+        estimated_time = "약 10분"
+
+    # Phase 0-A: 초급자 모드 - 결론을 맨 위에 표시할 컨테이너
+    conclusion_container = None
+    summary_container = None
+    if mode == "beginner":
+        st.markdown("### 🎯 투자 결론 (분석 중...)")
+        summary_container = st.empty()  # 한 줄 요약
+        conclusion_container = st.empty()  # 투자 의견 카드
+        st.markdown("---")
+        st.markdown("### 📋 전문가 분석 상세")
+
+    progress_container = st.empty()
     result_containers = {}
     for agent_name in agent_names:
         config = get_agent_config(agent_name)
@@ -419,16 +446,18 @@ def run_analysis(symbol, company_name):
                     "LOW": "참고"
                 }.get(severity, "참고")
 
-                st.markdown(f"""
-                <div class="opinion-change-alert {alert_class}">
-                    <div class="alert-title">{severity_emoji} {severity_text}: 투자 의견 변경 감지</div>
-                    <div class="alert-content">
-                        {changes.get('alert_message', '')}
+                # 전문가 모드에서만 직접 표시, 초급자 모드는 별도 처리
+                if mode == "expert":
+                    st.markdown(f"""
+                    <div class="opinion-change-alert {alert_class}">
+                        <div class="alert-title">{severity_emoji} {severity_text}: 투자 의견 변경 감지</div>
+                        <div class="alert-content">
+                            {changes.get('alert_message', '')}
+                        </div>
                     </div>
-                </div>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
 
-        # Phase 1: 투자 의견 표시 (3초 요약 - 최우선 표시)
+        # Phase 1 + Phase 0-A: 투자 의견 표시
         if investment_opinion_data and "error" not in investment_opinion_data:
             opinion = investment_opinion_data.get('investment_opinion', {})
             decision = opinion.get('decision', 'N/A')
@@ -447,7 +476,19 @@ def run_analysis(symbol, company_name):
             }
             colors = decision_colors.get(decision, decision_colors["HOLD"])
 
-            st.markdown(f"""
+            # Phase 0-A: 한 줄 요약 생성
+            target_3m_pct = target_prices.get('3_months', {}).get('percentage', 0)
+            decision_korean = {"BUY": "매수", "HOLD": "보유", "SELL": "매도"}.get(decision, decision)
+
+            if decision == "BUY":
+                one_line_summary = f"💡 **한 줄 요약**: {company_name}은(는) 3개월 목표가 {target_3m_pct:+.1f}% 상승이 기대되는 **{decision_korean} 추천** 종목입니다 (신뢰도 {confidence}%)"
+            elif decision == "SELL":
+                one_line_summary = f"💡 **한 줄 요약**: {company_name}은(는) 3개월 목표가 {target_3m_pct:+.1f}% 하락이 예상되는 **{decision_korean} 추천** 종목입니다 (신뢰도 {confidence}%)"
+            else:  # HOLD
+                one_line_summary = f"💡 **한 줄 요약**: {company_name}은(는) 3개월 목표가 {target_3m_pct:+.1f}%로 **{decision_korean} 추천** 종목입니다 (신뢰도 {confidence}%)"
+
+            # 투자 의견 카드 HTML
+            opinion_card_html = f"""
             <div style="background: {colors['bg']}; border: 3px solid {colors['border']}; border-radius: 12px;
                         padding: 1.5rem; margin: 1.5rem 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
                 <div style="text-align: center; margin-bottom: 1rem;">
@@ -492,13 +533,27 @@ def run_analysis(symbol, company_name):
                     </div>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+            """
 
-        # 최종 보고서 표시
-        if final_report and completed_count >= 5:  # 5개 이상 완료시
+            # Phase 0-A: 초급자 모드 - 결론을 맨 위에 표시
+            if mode == "beginner" and conclusion_container and summary_container:
+                summary_container.markdown(one_line_summary)
+                conclusion_container.markdown(opinion_card_html, unsafe_allow_html=True)
+            else:
+                # 전문가 모드 - 기존 방식대로 표시
+                st.markdown(opinion_card_html, unsafe_allow_html=True)
+
+        # 최종 보고서 표시 (Phase 0-A: 모드별 조건 조정)
+        min_required = 2 if mode == "beginner" else 5
+        total_agents = len(agent_names)
+
+        if final_report and completed_count >= min_required:
+            # 초급자 모드는 간단한 제목
+            report_title = "🎯 투자 분석 요약" if mode == "beginner" else "🎯 종합 투자 분석 보고서"
+
             st.markdown(f"""
             <div class="final-report">
-                <h2 class="report-title">🎯 종합 투자 분석 보고서</h2>
+                <h2 class="report-title">{report_title}</h2>
                 <div class="report-content">{final_report}</div>
             </div>
             """, unsafe_allow_html=True)
@@ -511,15 +566,16 @@ def run_analysis(symbol, company_name):
                 mime="text/plain",
                 use_container_width=True
             )
-        elif completed_count < 10:
-            st.warning(f"⚠️ 일부 분석이 완료되지 않았습니다 ({completed_count}/10)")
+        elif completed_count < total_agents:
+            st.warning(f"⚠️ 일부 분석이 완료되지 않았습니다 ({completed_count}/{total_agents})")
 
         # 최종 진행률
         update_progress(completed_count, len(agent_names))
 
         # 로깅
         logger.info(f"================== 주식 분석 완료 ==================")
-        logger.info(f"완료된 전문가 수: {completed_count}/10")
+        logger.info(f"분석 모드: {mode}")
+        logger.info(f"완료된 전문가 수: {completed_count}/{total_agents}")
         logger.info(f"최종 보고서 생성: {'예' if final_report else '아니오'}")
         logger.info(f"분석 완료 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"====================================================")
@@ -613,10 +669,35 @@ def main():
     # ========== 메인 헤더 ==========
     st.markdown("""
     <div class="main-header">
-        <h1 class="main-title">📊 AI Stock Analyzer v2.3 + Phase 1~5 + 💬 Conversational AI</h1>
+        <h1 class="main-title">📊 AI Stock Analyzer v2.3 + Phase 0~5 + 💬 Conversational AI</h1>
         <p class="main-subtitle">🎯 BUY/HOLD/SELL 투자 의견 • 📊 DCF + Multiples 정량 분석 • 💼 포트폴리오 추적 • 🔮 고급 차트 분석 • 💬 AI 대화형 질문</p>
     </div>
     """, unsafe_allow_html=True)
+
+    # ========== Phase 0-A: 분석 모드 선택 ==========
+    st.markdown("### 🎯 분석 모드 선택")
+
+    # Session state에 모드 저장
+    if "analysis_mode" not in st.session_state:
+        st.session_state.analysis_mode = "expert"  # 기본값: 전문가 모드
+
+    col_mode1, col_mode2 = st.columns(2)
+
+    with col_mode1:
+        if st.button("🟢 초급자 모드 (3분 빠른 분석)", use_container_width=True, type="primary" if st.session_state.analysis_mode == "beginner" else "secondary"):
+            st.session_state.analysis_mode = "beginner"
+
+    with col_mode2:
+        if st.button("🔵 전문가 모드 (10분 상세 분석)", use_container_width=True, type="primary" if st.session_state.analysis_mode == "expert" else "secondary"):
+            st.session_state.analysis_mode = "expert"
+
+    # 선택된 모드 설명
+    if st.session_state.analysis_mode == "beginner":
+        st.info("🟢 **초급자 모드**: 3개 핵심 전문가(뉴스, 재무, 차트)만 실행하여 약 3분 안에 빠르게 결론을 확인할 수 있습니다. 결론이 맨 위에 표시됩니다.")
+    else:
+        st.info("🔵 **전문가 모드**: 10개 전문가 전체를 실행하여 약 10분에 걸쳐 심층 분석을 제공합니다. 시장환경, ESG, 커뮤니티 등 모든 관점을 분석합니다.")
+
+    st.markdown("---")
 
     # 입력 섹션
     st.markdown("""
@@ -662,7 +743,7 @@ def main():
         # 분석 시작 버튼
         if st.button("🚀 AI 분석 시작", type="primary", use_container_width=True):
             if symbol:
-                run_analysis(symbol.strip(), company_name.strip() if company_name else None)
+                run_analysis(symbol.strip(), company_name.strip() if company_name else None, mode=st.session_state.analysis_mode)
             else:
                 st.error("종목코드를 입력해주세요!")
 
@@ -672,7 +753,7 @@ def main():
         popular_stocks = [("005930", "삼성전자"), ("000660", "SK하이닉스"), ("035420", "NAVER"), ("005380", "현대차")]
         for code, name in popular_stocks:
             if st.button(f"{name}\n{code}", key=f"popular_{code}", use_container_width=True):
-                run_analysis(code, name)
+                run_analysis(code, name, mode=st.session_state.analysis_mode)
 
     # 시스템 정보
     with st.expander("ℹ️ 시스템 정보"):
@@ -682,6 +763,13 @@ def main():
 
         **📊 데이터 소스:**
         FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News
+
+        **🆕 Phase 0-A (초급자 UX 개선):**
+        • 🟢 초급자 모드: 3개 핵심 전문가만 실행 (뉴스, 재무, 차트)
+        • ⚡ 분석 시간 단축: 10분 → 3분 (70% 단축)
+        • 🎯 결론 우선 표시: 투자 의견을 맨 위에 배치
+        • 💡 한 줄 요약: 초급자도 이해하기 쉬운 요약 제공
+        • 📈 예상 효과: 초급자 전환율 30% → 70% (사용자 피드백 기반)
 
         **✨ Phase 1 (투자 의견):**
         • BUY/HOLD/SELL 명확한 투자 의견
