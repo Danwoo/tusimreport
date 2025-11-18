@@ -160,7 +160,8 @@ def get_agent_config(agent_name):
         "comparative_expert": ("⚖️", "상대 가치 분석", "#10b981", "#d1fae5", "동종업계 비교 평가"),
         "esg_expert": ("🌱", "ESG 분석", "#84cc16", "#ecfccb", "지속가능경영 평가"),
         "community_expert": ("💬", "커뮤니티 여론 분석", "#f97316", "#fed7aa", "실제 투자자 의견 및 심리"),
-        "quantitative_expert": ("📊", "정량 분석 (Phase 3)", "#8b5cf6", "#ede9fe", "DCF + Multiples 밸류에이션 (전문가 87.5% 요구)")  # Phase 3
+        "quantitative_expert": ("📊", "정량 분석 (Phase 3)", "#8b5cf6", "#ede9fe", "DCF + Multiples 밸류에이션 (전문가 87.5% 요구)"),  # Phase 3
+        "advanced_chart_expert": ("🔮", "고급 차트 분석 (Phase 5)", "#a855f7", "#f3e8ff", "일목균형표, 피보나치, AI 패턴 인식")  # Phase 5
     }
     if agent_name in configs:
         icon, name, color, bg, desc = configs[agent_name]
@@ -235,8 +236,8 @@ def run_analysis(symbol, company_name):
         st.markdown("---")
     progress_container = st.empty()
 
-    # 에이전트 설정 (Phase 3: quantitative_expert 추가)
-    agent_names = ["context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert", "institutional_trading_expert", "comparative_expert", "esg_expert", "community_expert", "quantitative_expert"]
+    # 에이전트 설정 (Phase 3+5: quantitative_expert, advanced_chart_expert 추가)
+    agent_names = ["context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert", "institutional_trading_expert", "comparative_expert", "esg_expert", "community_expert", "quantitative_expert", "advanced_chart_expert"]
     result_containers = {}
     for agent_name in agent_names:
         config = get_agent_config(agent_name)
@@ -315,6 +316,7 @@ def run_analysis(symbol, company_name):
                     "esg_expert": "ESG_ANALYSIS_COMPLETE",
                     "community_expert": "COMMUNITY_ANALYSIS_COMPLETE",
                     "quantitative_expert": "QUANTITATIVE_ANALYSIS_COMPLETE",  # Phase 3
+                    "advanced_chart_expert": "ADVANCED_CHART_ANALYSIS_COMPLETE",  # Phase 5
                 }
 
                 for msg in messages:
@@ -433,15 +435,15 @@ def run_analysis(symbol, company_name):
                 mime="text/plain",
                 use_container_width=True
             )
-        elif completed_count < 7:
-            st.warning(f"⚠️ 일부 분석이 완료되지 않았습니다 ({completed_count}/7)")
+        elif completed_count < 10:
+            st.warning(f"⚠️ 일부 분석이 완료되지 않았습니다 ({completed_count}/10)")
 
         # 최종 진행률
         update_progress(completed_count, len(agent_names))
 
         # 로깅
         logger.info(f"================== 주식 분석 완료 ==================")
-        logger.info(f"완료된 전문가 수: {completed_count}/7")
+        logger.info(f"완료된 전문가 수: {completed_count}/10")
         logger.info(f"최종 보고서 생성: {'예' if final_report else '아니오'}")
         logger.info(f"분석 완료 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"====================================================")
@@ -454,8 +456,8 @@ def main():
     # 메인 헤더
     st.markdown("""
     <div class="main-header">
-        <h1 class="main-title">📊 AI Stock Analyzer v2.3 + Phase 1 + Phase 3</h1>
-        <p class="main-subtitle">🎯 BUY/HOLD/SELL 투자 의견 • 📊 DCF + Multiples 정량 분석 • 🆕 70-90개 뉴스 커버리지</p>
+        <h1 class="main-title">📊 AI Stock Analyzer v2.3 + Phase 1 + Phase 3 + Phase 5</h1>
+        <p class="main-subtitle">🎯 BUY/HOLD/SELL 투자 의견 • 📊 DCF + Multiples 정량 분석 • 🔮 고급 차트 분석 (일목균형표, AI 패턴)</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -517,7 +519,7 @@ def main():
 
     # 시스템 정보
     with st.expander("ℹ️ 시스템 정보"):
-        st.markdown("**🤖 AI 전문가 구성:**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News")
+        st.markdown("**🤖 AI 전문가 구성 (10개):**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석 💬 커뮤니티 📊 정량분석 🔮 고급차트\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News\n\n**🆕 Phase 5:** 일목균형표 • 피보나치 되돌림 • 거래량 프로파일 • AI 패턴 인식 (Head & Shoulders, Double Top/Bottom)")
 
 if __name__ == "__main__":
     main()
