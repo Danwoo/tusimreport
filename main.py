@@ -6,6 +6,7 @@ import time
 import requests
 
 from core.korean_supervisor_langgraph import stream_korean_stock_analysis
+from core.conversational_supervisor import get_conversational_supervisor  # Conversational AI
 from config.settings import settings
 from utils.helpers import setup_logging
 from data.chart_generator import create_stock_chart
@@ -85,6 +86,21 @@ st.markdown("""
     .portfolio-value { font-size: 1.5rem; font-weight: 700; margin: 0.3rem 0; }
     .portfolio-positive { color: #22c55e; }
     .portfolio-negative { color: #ef4444; }
+    /* Conversational AI Chat */
+    .chat-section { background: white; border-radius: 12px; padding: 1.5rem; margin: 2rem 0;
+                    border: 2px solid #e2e8f0; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .chat-header { font-size: 1.3rem; font-weight: 700; color: #334155; margin: 0 0 1rem 0;
+                   display: flex; align-items: center; gap: 0.5rem; }
+    .chat-subtitle { font-size: 0.9rem; color: #64748b; margin: 0 0 1.5rem 0; line-height: 1.5; }
+    .quick-questions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+    .quick-btn { padding: 0.5rem 1rem; background: #f8fafc; border: 1px solid #e2e8f0;
+                 border-radius: 20px; font-size: 0.85rem; color: #475569; cursor: pointer;
+                 transition: all 0.2s ease; }
+    .quick-btn:hover { background: #e2e8f0; border-color: #cbd5e1; }
+    .chat-message { padding: 1rem; margin: 0.5rem 0; border-radius: 8px; line-height: 1.6; }
+    .chat-user { background: #eff6ff; border-left: 3px solid #3b82f6; }
+    .chat-assistant { background: #f0fdf4; border-left: 3px solid #22c55e; }
+    .chat-thinking { background: #fef3c7; border-left: 3px solid #f59e0b; font-style: italic; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     @media (max-width: 768px) { .main-title { font-size: 1.8rem; } .input-section { padding: 0.8rem; } }
 </style>
@@ -508,6 +524,14 @@ def run_analysis(symbol, company_name):
         logger.info(f"분석 완료 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"====================================================")
 
+        # Session state 업데이트 (Conversational AI 활성화)
+        st.session_state.analysis_completed = True
+        st.session_state.last_stock_code = symbol
+        st.session_state.last_company_name = company_name
+        # 새로운 분석 시작 시 대화 히스토리 초기화
+        st.session_state.chat_messages = []
+        st.session_state.chat_session_id = None
+
     except Exception as e:
         logger.error(f"분석 실행 중 치명적 오류 발생: {str(e)}", exc_info=True)
         st.error(f"분석 프로세스 오류: {e}")
@@ -589,8 +613,8 @@ def main():
     # ========== 메인 헤더 ==========
     st.markdown("""
     <div class="main-header">
-        <h1 class="main-title">📊 AI Stock Analyzer v2.3 + Phase 1 + Phase 3 + Phase 4 + Phase 5</h1>
-        <p class="main-subtitle">🎯 BUY/HOLD/SELL 투자 의견 • 📊 DCF + Multiples 정량 분석 • 💼 포트폴리오 추적 • 🔮 고급 차트 분석</p>
+        <h1 class="main-title">📊 AI Stock Analyzer v2.3 + Phase 1~5 + 💬 Conversational AI</h1>
+        <p class="main-subtitle">🎯 BUY/HOLD/SELL 투자 의견 • 📊 DCF + Multiples 정량 분석 • 💼 포트폴리오 추적 • 🔮 고급 차트 분석 • 💬 AI 대화형 질문</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -681,7 +705,128 @@ def main():
         • 거래량 프로파일 (Volume Profile)
         • AI 패턴 인식 (Head & Shoulders, Double Top/Bottom)
         • 사용자 요구: 43% (13명)
+
+        **💬 Conversational AI (에이전트 재호출 시스템):**
+        • 분석 결과에 대한 대화형 질문 응답
+        • LLM 기반 Question Router: 질문에 맞는 전문가만 선택 (1-3명)
+        • 85% API 비용 절감: 10명 전문가 → 필요한 전문가만 실행
+        • LangGraph StateGraph: 분석 결과 영구 저장 및 재사용
+        • Session 기반 대화 히스토리 관리
         """)
+
+    # ========== Conversational AI Chat Interface ==========
+    # 초기 분석이 완료된 경우에만 표시
+    if "analysis_completed" in st.session_state and st.session_state.analysis_completed:
+        st.markdown("---")
+        st.markdown("""
+        <div class="chat-section">
+            <div class="chat-header">
+                💬 AI 전문가에게 추가 질문하기
+            </div>
+            <div class="chat-subtitle">
+                분석 결과에 대해 궁금한 점을 질문하세요.
+                AI가 필요한 전문가 에이전트를 선택하여 답변해드립니다. (85% 비용 절감)
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Session state 초기화
+        if "chat_messages" not in st.session_state:
+            st.session_state.chat_messages = []
+        if "chat_session_id" not in st.session_state:
+            st.session_state.chat_session_id = None
+
+        # 빠른 질문 버튼
+        st.markdown("**💡 빠른 질문:**")
+        quick_questions = [
+            "최근 뉴스에서 주가에 영향을 줄 만한 내용이 있나요?",
+            "재무 상태가 건전한가요?",
+            "지금이 매수 타이밍인가요?",
+            "기관투자자들은 어떻게 움직이고 있나요?",
+            "경쟁사 대비 밸류에이션은 어떤가요?"
+        ]
+
+        cols = st.columns(len(quick_questions))
+        for i, question in enumerate(quick_questions):
+            with cols[i]:
+                if st.button(f"❓ {question[:15]}...", key=f"quick_{i}", use_container_width=True):
+                    st.session_state.pending_question = question
+
+        # 대화 히스토리 표시
+        for msg in st.session_state.chat_messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+
+            if role == "user":
+                st.markdown(f"""
+                <div class="chat-message chat-user">
+                    <strong>👤 질문:</strong><br>{content}
+                </div>
+                """, unsafe_allow_html=True)
+            elif role == "assistant":
+                st.markdown(f"""
+                <div class="chat-message chat-assistant">
+                    <strong>🤖 AI 답변:</strong><br>{content}
+                </div>
+                """, unsafe_allow_html=True)
+
+        # 채팅 입력
+        user_question = st.chat_input("질문을 입력하세요...")
+
+        # 빠른 질문 버튼 클릭 처리
+        if "pending_question" in st.session_state:
+            user_question = st.session_state.pending_question
+            del st.session_state.pending_question
+
+        # 질문 처리
+        if user_question:
+            # 사용자 메시지 추가
+            st.session_state.chat_messages.append({
+                "role": "user",
+                "content": user_question
+            })
+
+            # 분석 중 표시
+            with st.spinner("🤔 AI 전문가가 분석 중입니다..."):
+                try:
+                    # ConversationalSupervisor 사용
+                    supervisor = get_conversational_supervisor()
+
+                    # 분석 실행
+                    result_state = supervisor.analyze(
+                        stock_code=st.session_state.last_stock_code,
+                        company_name=st.session_state.last_company_name,
+                        question=user_question,
+                        session_id=st.session_state.chat_session_id
+                    )
+
+                    # Session ID 저장 (첫 질문일 경우)
+                    if not st.session_state.chat_session_id:
+                        st.session_state.chat_session_id = result_state.get("session_id")
+
+                    # AI 답변 추가
+                    answer = result_state.get("final_answer", "답변을 생성하지 못했습니다.")
+                    st.session_state.chat_messages.append({
+                        "role": "assistant",
+                        "content": answer
+                    })
+
+                    # 선택된 에이전트 정보 로깅
+                    selected_agents = result_state.get("agents_to_execute", [])
+                    logger.info(f"Chat question: {user_question[:100]}")
+                    logger.info(f"Selected agents: {selected_agents}")
+                    logger.info(f"Answer length: {len(answer)} chars")
+
+                except Exception as e:
+                    logger.error(f"Chat error: {str(e)}")
+                    st.error(f"답변 생성 중 오류가 발생했습니다: {str(e)}")
+                    st.session_state.chat_messages.append({
+                        "role": "assistant",
+                        "content": f"⚠️ 오류가 발생했습니다: {str(e)}"
+                    })
+
+            # 페이지 새로고침
+            st.rerun()
 
 if __name__ == "__main__":
     main()
