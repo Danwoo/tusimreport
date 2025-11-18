@@ -21,7 +21,7 @@ class ProgressiveAnalysisEngine:
         self.supervisor_llm = get_supervisor_llm()
         self.agents = create_all_agents()
 
-        # Agent 실행 순서 (의존성 고려)
+        # Agent 실행 순서 (의존성 고려) - Phase 3+5 업데이트
         self.execution_order = [
             "context_expert",           # 1단계: 시장환경 (기초 데이터)
             "sentiment_expert",         # 2단계: 시장심리
@@ -30,7 +30,9 @@ class ProgressiveAnalysisEngine:
             "institutional_trading_expert", # 5단계: 수급분석
             "comparative_expert",       # 6단계: 상대평가
             "esg_expert",              # 7단계: ESG분석
-            "community_expert"         # 8단계: 커뮤니티 여론분석
+            "community_expert",        # 8단계: 커뮤니티 여론분석
+            "quantitative_expert",     # 9단계: 정량 분석 (Phase 3)
+            "advanced_chart_expert"    # 10단계: 고급 차트 분석 (Phase 5)
         ]
 
         logger.info("Progressive Analysis Engine 초기화 완료")
@@ -81,7 +83,7 @@ class ProgressiveAnalysisEngine:
                 last_message = result['messages'][-1]
                 content = last_message.content if hasattr(last_message, 'content') else str(last_message)
 
-                # 완료 시그널 확인
+                # 완료 시그널 확인 - Phase 3+5 업데이트
                 completion_signals = {
                     "context_expert": "MARKET_CONTEXT_ANALYSIS_COMPLETE",
                     "sentiment_expert": "SENTIMENT_ANALYSIS_COMPLETE",
@@ -89,7 +91,10 @@ class ProgressiveAnalysisEngine:
                     "advanced_technical_expert": "ADVANCED_TECHNICAL_ANALYSIS_COMPLETE",
                     "institutional_trading_expert": "INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE",
                     "comparative_expert": "COMPARATIVE_ANALYSIS_COMPLETE",
-                    "esg_expert": "ESG_ANALYSIS_COMPLETE"
+                    "esg_expert": "ESG_ANALYSIS_COMPLETE",
+                    "community_expert": "COMMUNITY_ANALYSIS_COMPLETE",
+                    "quantitative_expert": "QUANTITATIVE_ANALYSIS_COMPLETE",  # Phase 3
+                    "advanced_chart_expert": "ADVANCED_CHART_ANALYSIS_COMPLETE"  # Phase 5
                 }
 
                 expected_signal = completion_signals.get(agent_name)
