@@ -245,6 +245,7 @@ def run_analysis(symbol, company_name):
     # 상태 변수
     agent_states = {name: {"status": "waiting", "content": ""} for name in agent_names}
     completed_count, final_report = 0, ""
+    investment_opinion_data = None  # Phase 1: 투자 의견 데이터
 
     def update_progress(completed, total, current_agent=""):
         progress_pct = (completed / total) * 100
@@ -288,6 +289,9 @@ def run_analysis(symbol, company_name):
 
                 # 최종 보고서 처리
                 if supervisor_data.get("final_report_generated"):
+                    # Phase 1: 투자 의견 데이터 추출
+                    investment_opinion_data = supervisor_data.get("investment_opinion")
+
                     for msg in messages:
                         if isinstance(msg, dict):
                             msg_content = msg.get("content", "")
@@ -344,6 +348,72 @@ def run_analysis(symbol, company_name):
                                 update_progress(completed_count, len(agent_names))
                                 logger.info(f"===== {config['name']} ({agent_name}) 분석 완료 =====")
 
+        # Phase 1: 투자 의견 표시 (3초 요약 - 최우선 표시)
+        if investment_opinion_data and "error" not in investment_opinion_data:
+            opinion = investment_opinion_data.get('investment_opinion', {})
+            decision = opinion.get('decision', 'N/A')
+            confidence = opinion.get('confidence', 0)
+            key_reasons = opinion.get('key_reasons', [])
+            current_price = investment_opinion_data.get('current_price', 0)
+            target_prices = investment_opinion_data.get('target_prices', {})
+            stop_loss = investment_opinion_data.get('stop_loss', {})
+            risk_reward = investment_opinion_data.get('risk_reward_ratio', 0)
+
+            # BUY/HOLD/SELL 색상 설정
+            decision_colors = {
+                "BUY": {"bg": "#dcfce7", "text": "#166534", "border": "#22c55e"},
+                "HOLD": {"bg": "#fef3c7", "text": "#92400e", "border": "#f59e0b"},
+                "SELL": {"bg": "#fee2e2", "text": "#991b1b", "border": "#ef4444"}
+            }
+            colors = decision_colors.get(decision, decision_colors["HOLD"])
+
+            st.markdown(f"""
+            <div style="background: {colors['bg']}; border: 3px solid {colors['border']}; border-radius: 12px;
+                        padding: 1.5rem; margin: 1.5rem 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                <div style="text-align: center; margin-bottom: 1rem;">
+                    <h1 style="color: {colors['text']}; font-size: 2.5rem; margin: 0; font-weight: 800;">
+                        {decision}
+                    </h1>
+                    <p style="color: {colors['text']}; font-size: 1.2rem; margin: 0.5rem 0 0 0; opacity: 0.8;">
+                        신뢰도 {confidence}% • Risk/Reward {risk_reward}
+                    </p>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;
+                            margin: 1.5rem 0; padding: 1rem; background: rgba(255,255,255,0.5); border-radius: 8px;">
+                    <div style="text-align: center;">
+                        <p style="color: #64748b; font-size: 0.85rem; margin: 0;">현재가</p>
+                        <p style="color: #334155; font-size: 1.3rem; font-weight: 700; margin: 0.3rem 0 0 0;">
+                            {current_price:,}원
+                        </p>
+                    </div>
+                    <div style="text-align: center;">
+                        <p style="color: #64748b; font-size: 0.85rem; margin: 0;">3개월 목표가</p>
+                        <p style="color: {colors['text']}; font-size: 1.3rem; font-weight: 700; margin: 0.3rem 0 0 0;">
+                            {target_prices.get('3_months', {}).get('price', 0):,}원
+                            <span style="font-size: 0.9rem;">({target_prices.get('3_months', {}).get('percentage', 0):+.1f}%)</span>
+                        </p>
+                    </div>
+                    <div style="text-align: center;">
+                        <p style="color: #64748b; font-size: 0.85rem; margin: 0;">손절가</p>
+                        <p style="color: #991b1b; font-size: 1.3rem; font-weight: 700; margin: 0.3rem 0 0 0;">
+                            {stop_loss.get('price', 0):,}원
+                            <span style="font-size: 0.9rem;">({stop_loss.get('percentage', 0):.1f}%)</span>
+                        </p>
+                    </div>
+                </div>
+
+                <div style="background: rgba(255,255,255,0.7); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+                    <h3 style="color: {colors['text']}; font-size: 1.1rem; margin: 0 0 0.8rem 0; font-weight: 700;">
+                        💡 핵심 투자 근거
+                    </h3>
+                    <div style="color: #334155; line-height: 1.6;">
+                        {"".join(f"<p style='margin: 0.5rem 0; padding-left: 1.5rem; position: relative;'><span style='position: absolute; left: 0; color: {colors['text']}; font-weight: 700;'>{i+1}.</span> {reason}</p>" for i, reason in enumerate(key_reasons))}
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
         # 최종 보고서 표시
         if final_report and completed_count >= 5:  # 5개 이상 완료시
             st.markdown(f"""
@@ -382,8 +452,8 @@ def main():
     # 메인 헤더
     st.markdown("""
     <div class="main-header">
-        <h1 class="main-title">📊 AI Stock Analyzer v2.3</h1>
-        <p class="main-subtitle">AI 전문가 8인의 종합 주식 분석 • 🆕 70-90개 뉴스 분석 (경쟁사 대비 3.5배)</p>
+        <h1 class="main-title">📊 AI Stock Analyzer v2.3 + Phase 1</h1>
+        <p class="main-subtitle">🎯 명확한 투자 의견 제시 (BUY/HOLD/SELL) • 🆕 70-90개 뉴스 분석 (경쟁사 대비 3.5배)</p>
     </div>
     """, unsafe_allow_html=True)
 
