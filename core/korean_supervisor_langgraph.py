@@ -24,6 +24,7 @@ from agents.korean_institutional_trading_agent import create_institutional_tradi
 from agents.korean_comparative_agent import create_comparative_agent
 from agents.korean_esg_analysis_agent import create_esg_agent
 from agents.korean_community_agent import create_community_agent
+from agents.korean_investment_opinion_agent import generate_investment_opinion
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +70,18 @@ def create_all_agents():
 # ====================
 
 def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], stock_code: str, company_name: str) -> str:
-    """Supervisor가 직접 생성하는 종합 투자 참고자료"""
+    """Supervisor가 직접 생성하는 종합 투자 참고자료 (투자 의견 포함)"""
     try:
+        # 투자 의견 추출 (있는 경우)
+        investment_opinion = all_analyses.get('investment_opinion', None)
+
         # 모든 전문가 분석 내용을 하나의 문자열로 결합
         expert_analyses_text = ""
         for expert_key, analysis in all_analyses.items():
+            # investment_opinion은 별도 처리하므로 제외
+            if expert_key == 'investment_opinion':
+                continue
+
             expert_name = {
                 "context_expert": "시장·경제 전문가",
                 "sentiment_expert": "뉴스·여론 전문가",
@@ -101,11 +109,34 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
             logger.warning(f"⚠️ 분석 내용 부족: {total_analysis_length}자")
             return f"## 분석 내용 부족\n\n전문가 분석 내용이 {total_analysis_length}자로 부족하여 종합 보고서 생성이 어렵습니다."
 
+        # 투자 의견 요약 텍스트 생성
+        investment_opinion_summary = ""
+        if investment_opinion and "error" not in investment_opinion:
+            opinion_data = investment_opinion.get('investment_opinion', {})
+            decision = opinion_data.get('decision', 'N/A')
+            confidence = opinion_data.get('confidence', 0)
+            key_reasons = opinion_data.get('key_reasons', [])
+            target_3m = investment_opinion.get('target_prices', {}).get('3_months', {})
+            stop_loss = investment_opinion.get('stop_loss', {})
+
+            investment_opinion_summary = f"""
+
+🎯 **AI 투자 의견 (Phase 1 기능)**
+- **결론**: {decision} (신뢰도 {confidence}%)
+- **현재가**: {investment_opinion.get('current_price', 'N/A'):,}원
+- **3개월 목표가**: {target_3m.get('price', 'N/A'):,}원 ({target_3m.get('percentage', 'N/A')}%)
+- **손절가**: {stop_loss.get('price', 'N/A'):,}원 ({stop_loss.get('percentage', 'N/A')}%)
+
+**핵심 근거:**
+{chr(10).join(f'  {i+1}. {reason}' for i, reason in enumerate(key_reasons))}
+"""
+
         report_prompt = f"""
 🎯 당신은 **대한민국 최고 증권사의 Chief Investment Research Director**로서, {len(all_analyses)}개 전문가의 심층 분석을 바탕으로 기관투자자급 투자 리서치 보고서를 작성해야 합니다.
 
 📊 **분석 대상**: {stock_code} ({company_name})
 📈 **전문가 분석 총량**: {total_analysis_length:,}자
+{investment_opinion_summary}
 
 🔍 **전문가 팀 분석 결과:**
 {expert_analyses_text}
@@ -118,6 +149,7 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
 - **실용적 가치**: 실제 투자 결정에 도움되는 구체적이고 실행 가능한 가이드
 - **자연스러운 흐름**: 딱딱한 보고서가 아닌 읽기 편한 대화체로 작성
 - **핵심 메시지 우선**: 가장 중요한 투자 포인트를 명확히 부각
+- **투자 의견 반영**: 위 AI 투자 의견({decision if investment_opinion else 'N/A'})을 보고서 전체에 반영
 
 **🎯 필수 작성 요구사항:**
 - **길이**: 최소 5,000자 이상의 심층 분석
@@ -125,11 +157,12 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
 - **통찰력**: 7개 전문가 의견을 종합한 독창적 관점
 - **실용성**: 구체적 수치와 실행 가능한 투자 가이드
 - **가독성**: 핵심 메시지가 명확히 전달되는 구성
+- **명확한 결론**: {decision if investment_opinion else 'BUY/HOLD/SELL'} 의견을 뒷받침하는 논리
 
 # 📈 투자 리서치 보고서 - 증권사 Chief Analyst 스타일
 
 ## 🎯 Executive Summary (투자 의견 요약)
-**[핵심 투자 논리를 3-4줄로 명확하게 제시]**
+**[AI 투자 의견 {decision if investment_opinion else 'N/A'}를 기반으로 핵심 투자 논리를 3-4줄로 명확하게 제시]**
 
 ## 📊 Investment Thesis (투자 스토리)
 
@@ -449,17 +482,37 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                 }
             }
 
-            # 모든 7개 전문가 완료 시 Supervisor가 종합 보고서 생성
+            # 모든 7개 전문가 완료 시 투자 의견 생성 + 종합 보고서 생성
             if len(executed_agents) == len(expected_agents):
-                logger.info("🎉 All 7 expert agents completed! Generating comprehensive report...")
+                logger.info("🎉 All 7 expert agents completed! Generating investment opinion and comprehensive report...")
 
-                # Supervisor가 종합 보고서 생성
+                # 1단계: 투자 의견 생성 (BUY/HOLD/SELL)
+                investment_opinion_result = None
+                try:
+                    logger.info("💰 Generating investment opinion (BUY/HOLD/SELL)...")
+                    investment_opinion_result = generate_investment_opinion(
+                        company_name=company_name or "Unknown",
+                        stock_code=stock_code,
+                        all_agent_results=all_analyses
+                    )
+
+                    if "error" not in investment_opinion_result:
+                        logger.info(f"✅ Investment Opinion: {investment_opinion_result['investment_opinion']['decision']} "
+                                  f"(신뢰도: {investment_opinion_result['investment_opinion']['confidence']}%)")
+                        # 투자 의견을 all_analyses에 추가하여 최종 보고서에 포함
+                        all_analyses['investment_opinion'] = investment_opinion_result
+                    else:
+                        logger.error(f"❌ Investment opinion generation failed: {investment_opinion_result['error']}")
+                except Exception as opinion_error:
+                    logger.error(f"투자 의견 생성 오류: {str(opinion_error)}")
+
+                # 2단계: Supervisor가 종합 보고서 생성
                 try:
                     final_report = generate_comprehensive_report(
                         supervisor_llm, all_analyses, stock_code, company_name
                     )
 
-                    # 최종 보고서 yield
+                    # 최종 보고서 yield (투자 의견 포함)
                     yield {
                         "supervisor": {
                             "stock_code": stock_code,
@@ -469,7 +522,8 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                             "messages": [{"content": final_report}],
                             "executed_agents": len(executed_agents),
                             "total_agents": len(expected_agents),
-                            "final_report_generated": True
+                            "final_report_generated": True,
+                            "investment_opinion": investment_opinion_result  # 투자 의견 추가
                         }
                     }
                     logger.info("🎯 Supervisor comprehensive report generation completed!")
