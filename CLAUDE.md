@@ -1,4 +1,73 @@
-# 📊 한국 주식 분석 AI 에이전트 - v2.4 초급자 모드 추가
+# 📊 한국 주식 분석 AI 에이전트 - v2.5 백테스팅 시스템 추가
+
+## 🆕 v2.5 주요 업데이트 (2025-11-18) - Phase 0-B
+
+**🎉 백테스팅 시스템 구현 완료** - **신뢰성 검증 시스템**
+- **📊 역사적 승률 검증**: "BUY 신뢰도 78%"가 실제로 맞는지 3개월 후 자동 검증
+- **📈 의견별 성과 추적**: BUY/HOLD/SELL 각각의 승률 및 평균 수익률 공개
+- **🎯 자동 검증 엔진**: 3개월 경과한 예측을 자동으로 실제 주가와 비교
+- **💯 투명성 확보**: 사이드바에 실시간 승률 및 평균 수익률 표시
+- **🔍 성공 기준**: BUY는 +5% 이상, SELL은 -5% 이하, HOLD는 ±5% 범위
+
+### 🔥 v2.5 기대 효과 (사용자 피드백 기반)
+- **중급자 전환율**: 50% → 75% (+50% 증가 목표)
+- **전문가 전환율**: 0% → 40% (+40% 증가 목표)
+- **신뢰도 향상**: "백테스팅 없으면 못 써요" → 해결
+- **실제 사용자 요구**: "과거 승률 데이터 필요" → 해결
+
+### 🛠️ v2.5 기술적 구현
+1. **data/backtesting_engine.py** (450 lines)
+   - `BacktestingEngine` 클래스: 분석 결과 저장 및 검증
+   - `save_analysis_result()`: 투자 의견을 JSON으로 저장
+   - `verify_old_predictions()`: 3개월 경과한 예측 자동 검증
+   - `get_backtesting_statistics()`: 승률 및 평균 수익률 계산
+
+2. **검증 로직** (backtesting_engine.py:280-295)
+   ```python
+   def _is_prediction_correct(self, decision: str, actual_return: float) -> bool:
+       if decision == "BUY":
+           return actual_return >= 5.0  # +5% 이상 상승 시 성공
+       elif decision == "SELL":
+           return actual_return <= -5.0  # -5% 이상 하락 시 성공
+       else:  # HOLD
+           return -5.0 <= actual_return <= 5.0  # ±5% 범위 시 성공
+   ```
+
+3. **main.py 통합** (main.py:472-484, 684-748)
+   - 분석 완료 시 백테스팅 레코드 자동 저장
+   - 앱 시작 시 오래된 예측 자동 검증
+   - 사이드바에 백테스팅 통계 실시간 표시
+
+4. **데이터 구조** (data/backtest_history/*.json)
+   ```json
+   {
+     "stock_code": "005930",
+     "company_name": "삼성전자",
+     "analysis_date": "2025-11-18T10:30:00",
+     "investment_opinion": {
+       "decision": "BUY",
+       "confidence": 78,
+       "current_price": 70000,
+       "target_price_3m": 80500,
+       "target_percentage_3m": 15.0
+     },
+     "actual_result": {
+       "verification_date": "2026-02-18T10:30:00",
+       "actual_price": 82000,
+       "actual_return": 17.1,
+       "prediction_correct": true
+     }
+   }
+   ```
+
+### 📊 Phase 0-B 구현 근거
+**사용자 피드백 분석 결과** (USER_FEEDBACK_ANALYSIS.md):
+- **김민준 (28세, 초급자)**: "BUY 신뢰도 78%가 진짜 맞는지 모르겠어요"
+- **박지영 (35세, 중급자)**: "과거 승률 데이터가 있어야 신뢰할 수 있어요"
+- **최동훈 (45세, 전문가)**: "백테스팅 없으면 쓸 수 없어요. 이거 필수입니다."
+- **핵심 문제**: 모든 사용자가 백테스팅 요구 (100% 일치)
+
+---
 
 ## 🆕 v2.4 주요 업데이트 (2025-11-18) - Phase 0-A
 
@@ -78,7 +147,8 @@
 
 ## 🎯 프로젝트 현재 상태 (2025-11-18)
 
-**버전**: v2.4 (최신) - Phase 0-A 초급자 모드
+**버전**: v2.5 (최신) - Phase 0-B 백테스팅 시스템
+**이전 버전**: v2.4 (2025-11-18) - Phase 0-A 초급자 모드
 **이전 버전**: v2.3 (2025-11-17) - 뉴스 커버리지 5배 확장
 **이전 버전**: v2.0 (2025-09-16) - 전문가 검증 완료
 
