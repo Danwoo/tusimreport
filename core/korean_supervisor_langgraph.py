@@ -24,6 +24,7 @@ from agents.korean_institutional_trading_agent import create_institutional_tradi
 from agents.korean_comparative_agent import create_comparative_agent
 from agents.korean_esg_analysis_agent import create_esg_agent
 from agents.korean_community_agent import create_community_agent
+from agents.korean_quantitative_analysis_agent import create_quantitative_analysis_agent  # Phase 3
 from agents.korean_investment_opinion_agent import generate_investment_opinion
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ def get_supervisor_llm():
 # ====================
 
 def create_all_agents():
-    """모든 8개의 전문 분석 에이전트를 생성합니다."""
+    """모든 9개의 전문 분석 에이전트를 생성합니다 (Phase 3: 정량 분석 추가)."""
     try:
         agents = {
             "context_expert": create_context_agent(),
@@ -56,6 +57,7 @@ def create_all_agents():
             "comparative_expert": create_comparative_agent(),
             "esg_expert": create_esg_agent(),
             "community_expert": create_community_agent(),
+            "quantitative_expert": create_quantitative_analysis_agent(),  # Phase 3: DCF + Multiples
         }
 
         logger.info(f"Successfully created {len(agents)} expert agents: {list(agents.keys())}")
@@ -90,7 +92,8 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
                 "institutional_trading_expert": "수급 분석 전문가",
                 "comparative_expert": "상대 가치 전문가",
                 "esg_expert": "ESG 분석 전문가",
-                "community_expert": "커뮤니티 여론 전문가"
+                "community_expert": "커뮤니티 여론 전문가",
+                "quantitative_expert": "정량 분석 전문가 (DCF + Multiples)"  # Phase 3
             }.get(expert_key, expert_key)
 
             expert_analyses_text += f"\n\n=== {expert_name} 분석 ===\n{analysis}\n"
@@ -267,16 +270,16 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
 # ====================
 
 def create_korean_supervisor():
-    """7개 전문가 에이전트 + Supervisor 종합 보고서 생성 워크플로우"""
+    """9개 전문가 에이전트 + Supervisor 종합 보고서 생성 워크플로우 (Phase 3: 정량 분석 추가)"""
     try:
-        logger.info("Creating Korean Stock Analysis Supervisor with 7 expert agents.")
+        logger.info("Creating Korean Stock Analysis Supervisor with 9 expert agents (Phase 3).")
         supervisor_llm = get_supervisor_llm()
         all_agents = create_all_agents()
 
         supervisor_prompt = (
             """🎯 MISSION: You are the Chief Investment Research Director.
 
-## 📋 EXECUTION SEQUENCE (7 EXPERT AGENTS):
+## 📋 EXECUTION SEQUENCE (9 EXPERT AGENTS - Phase 3 Updated):
 1️⃣ context_expert → "MARKET_CONTEXT_ANALYSIS_COMPLETE"
 2️⃣ sentiment_expert → "SENTIMENT_ANALYSIS_COMPLETE"
 3️⃣ financial_expert → "FINANCIAL_ANALYSIS_COMPLETE"
@@ -284,26 +287,28 @@ def create_korean_supervisor():
 5️⃣ institutional_trading_expert → "INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE"
 6️⃣ comparative_expert → "COMPARATIVE_ANALYSIS_COMPLETE"
 7️⃣ esg_expert → "ESG_ANALYSIS_COMPLETE"
+8️⃣ community_expert → "COMMUNITY_ANALYSIS_COMPLETE"
+9️⃣ quantitative_expert → "QUANTITATIVE_ANALYSIS_COMPLETE" [Phase 3: DCF + Multiples]
 
 ## 🎯 NEW ARCHITECTURE:
-- Execute 7 specialized expert agents sequentially
-- Collect all expert analyses
+- Execute 9 specialized expert agents sequentially
+- Collect all expert analyses including quantitative valuation (Phase 3)
 - Supervisor will generate final comprehensive report
 - NO separate report_expert agent needed
 
 ## ✅ SUCCESS CRITERIA:
-- All 8 expert completion signals received
+- All 9 expert completion signals received
 - Expert analyses collected and ready for final report
 - System ready for supervisor report generation
 
-Execute all 8 expert agents and signal completion."""
+Execute all 9 expert agents and signal completion."""
         )
 
-        # 8개 전문가 에이전트만 확인 및 로깅
+        # 9개 전문가 에이전트 확인 및 로깅
         logger.info(f"Available agents: {list(all_agents.keys())}")
-        if len(all_agents) != 8:
-            logger.error(f"Expected 8 agents, but got {len(all_agents)}: {list(all_agents.keys())}")
-            raise ValueError("All 8 expert agents must be created")
+        if len(all_agents) != 9:
+            logger.error(f"Expected 9 agents, but got {len(all_agents)}: {list(all_agents.keys())}")
+            raise ValueError("All 9 expert agents must be created")
 
         workflow = create_supervisor(
             agents=list(all_agents.values()),
@@ -311,7 +316,7 @@ Execute all 8 expert agents and signal completion."""
             prompt=supervisor_prompt,
         )
 
-        logger.info("Korean Stock Analysis Supervisor with 8 expert agents created successfully.")
+        logger.info("Korean Stock Analysis Supervisor with 9 expert agents created successfully (Phase 3).")
         return workflow.compile()
 
     except Exception as e:
@@ -326,13 +331,15 @@ korean_supervisor_graph = create_korean_supervisor()
 # ====================
 
 AGENT_STAGES = {
-    "context_expert": ("시장/경제 분석", 0.14),
-    "sentiment_expert": ("뉴스/여론 분석", 0.28),
-    "financial_expert": ("재무 분석", 0.42),
-    "advanced_technical_expert": ("기술적 분석", 0.57),
-    "institutional_trading_expert": ("수급 분석", 0.71),
-    "comparative_expert": ("상대 가치 분석", 0.85),
-    "esg_expert": ("ESG 분석", 0.99),
+    "context_expert": ("시장/경제 분석", 0.11),
+    "sentiment_expert": ("뉴스/여론 분석", 0.22),
+    "financial_expert": ("재무 분석", 0.33),
+    "advanced_technical_expert": ("기술적 분석", 0.44),
+    "institutional_trading_expert": ("수급 분석", 0.55),
+    "comparative_expert": ("상대 가치 분석", 0.66),
+    "esg_expert": ("ESG 분석", 0.77),
+    "community_expert": ("커뮤니티 분석", 0.88),
+    "quantitative_expert": ("정량 분석 (DCF + Multiples)", 0.95),  # Phase 3
     "supervisor": ("종합 보고서 생성", 1.0),
 }
 
@@ -341,7 +348,7 @@ AGENT_STAGES = {
 # ====================
 
 def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_progressive: bool = True):
-    """개선된 LangGraph Supervisor - 7개 전문가 + Supervisor 종합 보고서
+    """개선된 LangGraph Supervisor - 9개 전문가 + Supervisor 종합 보고서 (Phase 3: 정량 분석 추가)
 
     Args:
         stock_code: 종목 코드
@@ -349,7 +356,7 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
         use_progressive: Progressive Analysis 사용 여부 (기본 True - 컨텍스트 최적화)
     """
     try:
-        logger.info(f"Starting streaming supervised analysis for {stock_code} with 7 expert agents (Progressive: {use_progressive}).")
+        logger.info(f"Starting streaming supervised analysis for {stock_code} with 9 expert agents (Phase 3, Progressive: {use_progressive}).")
 
         # Progressive Analysis 사용시 새로운 엔진 사용
         if use_progressive:
@@ -412,20 +419,21 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
         # 기존 LangGraph 방식 (레거시 지원)
         logger.info("⚠️  레거시 LangGraph 방식 사용 - 컨텍스트 제한 위험")
 
-        # 새로운 분석 요청 - 7개 전문가 에이전트 실행
+        # 새로운 분석 요청 - 9개 전문가 에이전트 실행 (Phase 3)
         analysis_request = (
             f"COMPREHENSIVE STOCK ANALYSIS for {stock_code} ({company_name or 'Unknown'}): "
-            f"Execute all 7 expert agents in sequence: "
+            f"Execute all 9 expert agents in sequence: "
             f"context_expert→sentiment_expert→financial_expert→advanced_technical_expert→"
-            f"institutional_trading_expert→comparative_expert→esg_expert. "
-            f"Collect all expert analyses for comprehensive final report generation."
+            f"institutional_trading_expert→comparative_expert→esg_expert→community_expert→quantitative_expert. "
+            f"Collect all expert analyses including quantitative valuation (Phase 3) for comprehensive final report generation."
         )
 
         executed_agents = set()
         all_analyses = {}  # 전문가 분석 결과 저장
         expected_agents = {
             "context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert",
-            "institutional_trading_expert", "comparative_expert", "esg_expert"
+            "institutional_trading_expert", "comparative_expert", "esg_expert", "community_expert",
+            "quantitative_expert"  # Phase 3
         }
 
         chunk_count = 0
@@ -458,7 +466,9 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                                 "advanced_technical_expert": "ADVANCED_TECHNICAL_ANALYSIS_COMPLETE",
                                 "institutional_trading_expert": "INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE",
                                 "comparative_expert": "COMPARATIVE_ANALYSIS_COMPLETE",
-                                "esg_expert": "ESG_ANALYSIS_COMPLETE"
+                                "esg_expert": "ESG_ANALYSIS_COMPLETE",
+                                "community_expert": "COMMUNITY_ANALYSIS_COMPLETE",
+                                "quantitative_expert": "QUANTITATIVE_ANALYSIS_COMPLETE"  # Phase 3
                             }.get(expected_agent, "")
 
                             if completion_signal and completion_signal in msg_content:
@@ -467,7 +477,7 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                                 analysis_content = msg_content.replace(completion_signal, "").strip()
                                 if len(analysis_content) > 100:  # 의미 있는 내용만
                                     all_analyses[expected_agent] = analysis_content
-                                logger.info(f"✅ Agent {expected_agent} completed. Total: {len(executed_agents)}/7")
+                                logger.info(f"✅ Agent {expected_agent} completed. Total: {len(executed_agents)}/9")
 
             yield {
                 "supervisor": {
@@ -482,9 +492,9 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                 }
             }
 
-            # 모든 7개 전문가 완료 시 투자 의견 생성 + 종합 보고서 생성
+            # 모든 9개 전문가 완료 시 투자 의견 생성 + 종합 보고서 생성
             if len(executed_agents) == len(expected_agents):
-                logger.info("🎉 All 7 expert agents completed! Generating investment opinion and comprehensive report...")
+                logger.info("🎉 All 9 expert agents completed! Generating investment opinion and comprehensive report...")
 
                 # 1단계: 투자 의견 생성 (BUY/HOLD/SELL)
                 investment_opinion_result = None
@@ -535,7 +545,7 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
 
             if chunk_count >= max_chunks:
                 logger.error(f"❌ Reached maximum chunks ({max_chunks}). Executed agents: {executed_agents}")
-                yield {"error": {"error": f"Workflow incomplete. Only {len(executed_agents)}/7 agents completed: {executed_agents}"}}
+                yield {"error": {"error": f"Workflow incomplete. Only {len(executed_agents)}/9 agents completed: {executed_agents}"}}
                 break
 
     except Exception as e:

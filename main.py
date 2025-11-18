@@ -159,7 +159,8 @@ def get_agent_config(agent_name):
         "institutional_trading_expert": ("🏦", "기관 수급 분석", "#06b6d4", "#cffafe", "기관투자자 매매 동향"),
         "comparative_expert": ("⚖️", "상대 가치 분석", "#10b981", "#d1fae5", "동종업계 비교 평가"),
         "esg_expert": ("🌱", "ESG 분석", "#84cc16", "#ecfccb", "지속가능경영 평가"),
-        "community_expert": ("💬", "커뮤니티 여론 분석", "#f97316", "#fed7aa", "실제 투자자 의견 및 심리")
+        "community_expert": ("💬", "커뮤니티 여론 분석", "#f97316", "#fed7aa", "실제 투자자 의견 및 심리"),
+        "quantitative_expert": ("📊", "정량 분석 (Phase 3)", "#8b5cf6", "#ede9fe", "DCF + Multiples 밸류에이션 (전문가 87.5% 요구)")  # Phase 3
     }
     if agent_name in configs:
         icon, name, color, bg, desc = configs[agent_name]
@@ -234,8 +235,8 @@ def run_analysis(symbol, company_name):
         st.markdown("---")
     progress_container = st.empty()
 
-    # 에이전트 설정
-    agent_names = ["context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert", "institutional_trading_expert", "comparative_expert", "esg_expert", "community_expert"]
+    # 에이전트 설정 (Phase 3: quantitative_expert 추가)
+    agent_names = ["context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert", "institutional_trading_expert", "comparative_expert", "esg_expert", "community_expert", "quantitative_expert"]
     result_containers = {}
     for agent_name in agent_names:
         config = get_agent_config(agent_name)
@@ -313,6 +314,7 @@ def run_analysis(symbol, company_name):
                     "comparative_expert": "COMPARATIVE_ANALYSIS_COMPLETE",
                     "esg_expert": "ESG_ANALYSIS_COMPLETE",
                     "community_expert": "COMMUNITY_ANALYSIS_COMPLETE",
+                    "quantitative_expert": "QUANTITATIVE_ANALYSIS_COMPLETE",  # Phase 3
                 }
 
                 for msg in messages:
@@ -452,8 +454,8 @@ def main():
     # 메인 헤더
     st.markdown("""
     <div class="main-header">
-        <h1 class="main-title">📊 AI Stock Analyzer v2.3 + Phase 1</h1>
-        <p class="main-subtitle">🎯 명확한 투자 의견 제시 (BUY/HOLD/SELL) • 🆕 70-90개 뉴스 분석 (경쟁사 대비 3.5배)</p>
+        <h1 class="main-title">📊 AI Stock Analyzer v2.3 + Phase 1 + Phase 3</h1>
+        <p class="main-subtitle">🎯 BUY/HOLD/SELL 투자 의견 • 📊 DCF + Multiples 정량 분석 • 🆕 70-90개 뉴스 커버리지</p>
     </div>
     """, unsafe_allow_html=True)
 
