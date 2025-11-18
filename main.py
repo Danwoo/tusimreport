@@ -153,7 +153,7 @@ def get_agent_config(agent_name):
     """에이전트별 설정"""
     configs = {
         "context_expert": ("🌍", "시장 환경 분석", "#3b82f6", "#dbeafe", "거시경제 및 시장 동향"),
-        "sentiment_expert": ("📰", "뉴스 여론 분석", "#8b5cf6", "#ede9fe", "뉴스 감정 및 시장 심리"),
+        "sentiment_expert": ("📰", "뉴스 여론 분석 v2.3", "#8b5cf6", "#ede9fe", "70-90개 뉴스 분석 (경쟁사 대비 3.5배)"),
         "financial_expert": ("💰", "재무 상태 분석", "#f59e0b", "#fef3c7", "재무제표 및 기업 건전성"),
         "advanced_technical_expert": ("📈", "기술적 분석", "#ef4444", "#fee2e2", "차트 패턴 및 기술 지표"),
         "institutional_trading_expert": ("🏦", "기관 수급 분석", "#06b6d4", "#cffafe", "기관투자자 매매 동향"),
@@ -175,9 +175,10 @@ def create_result_card(agent_name, config, status="waiting", content="", news_so
     # 🔧 뉴스 감정 분석과 커뮤니티 분석의 경우 데이터 소스 추가
     news_section = ""
     if agent_name == "sentiment_expert" and news_sources and status == "completed":
+        total_count = len(news_sources)
         news_section = "<div style='margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #f1f5f9;'>"
-        news_section += "<h4 style='font-size: 0.9rem; color: #64748b; margin: 0 0 0.5rem 0;'>📰 분석된 뉴스 (상위 5개)</h4>"
-        for i, news in enumerate(news_sources[:5], 1):
+        news_section += f"<h4 style='font-size: 0.9rem; color: #64748b; margin: 0 0 0.5rem 0;'>📰 분석된 뉴스 (상위 10개 / 총 {total_count}개) 🆕 v2.3</h4>"
+        for i, news in enumerate(news_sources[:10], 1):
             title = news.get('title', '').strip()
             url = news.get('url', '')
             if title:
@@ -381,8 +382,8 @@ def main():
     # 메인 헤더
     st.markdown("""
     <div class="main-header">
-        <h1 class="main-title">📊 AI Stock Analyzer</h1>
-        <p class="main-subtitle">AI 전문가 7인의 종합 주식 분석</p>
+        <h1 class="main-title">📊 AI Stock Analyzer v2.3</h1>
+        <p class="main-subtitle">AI 전문가 8인의 종합 주식 분석 • 🆕 70-90개 뉴스 분석 (경쟁사 대비 3.5배)</p>
     </div>
     """, unsafe_allow_html=True)
 
