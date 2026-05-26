@@ -15,6 +15,7 @@ from typing import Any
 
 import requests
 
+from core.errors import DataQualityError
 from data.external_schemas import validate_dart_envelope
 from utils.time import kst_days_ago_compact, kst_isoformat, kst_today_compact, kst_year
 
@@ -39,7 +40,16 @@ class DARTAPIClient:
         self.session.headers.update({"User-Agent": "TuSimReport/1.0", "Accept": "application/json"})
 
     def _make_request(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
-        """API 요청 실행"""
+        """API 요청 실행.
+
+        Pydantic envelope 검증을 한 곳에 모아, 호출 사이트(7개 DART endpoint)는
+        `result.get("status") == "000"` 패턴을 그대로 유지하면서도 status 키가
+        사라지거나 타입이 바뀌면 즉시 알아챌 수 있게 한다.
+
+        검증 실패 시 'status': 'schema_error' envelope를 돌려준다 — raise하지
+        않는 이유: 모든 호출자가 dict 반환을 가정하고, 한 단계 위에서 broad
+        except가 message를 표시하도록 설계되어 있기 때문.
+        """
         params["crtfc_key"] = self.api_key
 
         url = f"{self.base_url}/{endpoint}"
@@ -51,7 +61,17 @@ class DARTAPIClient:
             # Rate limiting
             time.sleep(0.1)
 
-            return response.json()
+            payload = response.json()
+            try:
+                validate_dart_envelope(payload, source=f"DART/{endpoint}")
+            except DataQualityError as e:
+                logger.warning(f"DART envelope validation failed for {endpoint}: {e}")
+                # source는 e.source에 들어가지만 str(e)에는 안 찍히므로 명시적으로 합친다.
+                return {
+                    "status": "schema_error",
+                    "message": f"DART/{endpoint}: {e}",
+                }
+            return payload
 
         except Exception as e:
             logger.error(f"DART API request failed: {str(e)}")
@@ -75,18 +95,16 @@ class DARTAPIClient:
             return None
 
     def get_company_info(self, corp_code: str) -> dict[str, Any]:
-        """기업 개요 조회"""
+        """기업 개요 조회.
+
+        _make_request이 이미 envelope를 검증하므로 여기서는 status만 보면 된다.
+        """
         try:
             params = {"corp_code": corp_code}
 
             result = self._make_request("company.json", params)
 
-            # DART envelope를 Pydantic으로 검증.
-            # status 키가 사라지거나 타입이 바뀌면 silent break 대신
-            # DataQualityError가 raise되어 아래 broad except에서 잡힌다.
-            env = validate_dart_envelope(result, source="DART/company.json")
-
-            if env.status == "000":
+            if result.get("status") == "000":
                 return {
                     "corp_name": result.get("corp_name"),
                     "corp_name_eng": result.get("corp_name_eng"),

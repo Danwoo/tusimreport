@@ -100,3 +100,62 @@ class TestPykrxFundamental:
         row = validate_pykrx_fundamental({"시가총액": 1, "PER": 0, "PBR": 0})
         assert row.per == 0
         assert row.pbr == 0
+
+
+class TestAssertPykrxColumns:
+    def test_overlap_passes(self) -> None:
+        from data.external_schemas import (
+            PYKRX_INDEX_OHLCV_COLUMNS,
+            assert_pykrx_columns,
+        )
+
+        # KOSPI 응답에 모든 한국어 컬럼이 살아 있는 정상 케이스
+        assert_pykrx_columns(
+            ["시가", "고가", "저가", "종가", "거래량"],
+            expected=PYKRX_INDEX_OHLCV_COLUMNS,
+            source="pykrx/index_ohlcv",
+        )
+
+    def test_partial_overlap_passes_with_min_one(self) -> None:
+        from data.external_schemas import (
+            PYKRX_TRADING_VALUE_COLUMNS,
+            assert_pykrx_columns,
+        )
+
+        # 컬럼 일부만 살아 있어도 min_overlap=1 기본이라 OK
+        assert_pykrx_columns(
+            ["순매수", "다른필드"],
+            expected=PYKRX_TRADING_VALUE_COLUMNS,
+            source="pykrx/trading_value",
+        )
+
+    def test_no_overlap_raises(self) -> None:
+        """라이브러리가 컬럼명을 영문화한 회귀 시나리오."""
+        from data.external_schemas import (
+            PYKRX_INDEX_OHLCV_COLUMNS,
+            assert_pykrx_columns,
+        )
+
+        with pytest.raises(DataQualityError) as exc:
+            assert_pykrx_columns(
+                ["Open", "High", "Low", "Close", "Volume"],  # 영문 컬럼
+                expected=PYKRX_INDEX_OHLCV_COLUMNS,
+                source="pykrx/index_ohlcv",
+            )
+        assert "drifted" in str(exc.value)
+        assert "pykrx/index_ohlcv" in (exc.value.source or "")
+
+    def test_higher_min_overlap_enforced(self) -> None:
+        """min_overlap=3이면 1개 겹쳐도 raise."""
+        from data.external_schemas import (
+            PYKRX_INDEX_OHLCV_COLUMNS,
+            assert_pykrx_columns,
+        )
+
+        with pytest.raises(DataQualityError):
+            assert_pykrx_columns(
+                ["종가"],  # 1개만
+                expected=PYKRX_INDEX_OHLCV_COLUMNS,
+                source="pykrx/x",
+                min_overlap=3,
+            )

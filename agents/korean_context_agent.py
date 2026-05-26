@@ -20,6 +20,7 @@ from langgraph.prebuilt import create_react_agent
 from config.llm_factory import build_llm
 from core.signals import AgentSignal
 from data.bok_api_client import get_macro_economic_indicators
+from data.external_schemas import PYKRX_INDEX_OHLCV_COLUMNS, assert_pykrx_columns
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
 from utils.helpers import convert_numpy_types
 from utils.time import kst_isoformat, kst_now, kst_today_compact
@@ -49,15 +50,25 @@ def get_market_and_economic_context_logic(stock_code: str, company_name: str) ->
         except Exception as e:
             logger.warning(f"FDR stock data error for {stock_code}: {e}")
 
-        # 2. 시장 지수 (PyKRX)
+        # 2. 시장 지수 (PyKRX) — '종가' 컬럼이 살아 있는지 schema-guard.
         try:
             today_str = kst_today_compact()
             kospi_ohlcv = stock.get_index_ohlcv_by_date("20240101", today_str, "1001")
             kosdaq_ohlcv = stock.get_index_ohlcv_by_date("20240101", today_str, "2001")
             if not kospi_ohlcv.empty:
+                assert_pykrx_columns(
+                    list(kospi_ohlcv.columns),
+                    expected=PYKRX_INDEX_OHLCV_COLUMNS,
+                    source="pykrx/get_index_ohlcv_by_date(KOSPI)",
+                )
                 context_data["kospi"] = {"current": float(kospi_ohlcv.iloc[-1]["종가"])}
                 insights.append(f"KOSPI 지수: {kospi_ohlcv.iloc[-1]['종가']:,.2f}")
             if not kosdaq_ohlcv.empty:
+                assert_pykrx_columns(
+                    list(kosdaq_ohlcv.columns),
+                    expected=PYKRX_INDEX_OHLCV_COLUMNS,
+                    source="pykrx/get_index_ohlcv_by_date(KOSDAQ)",
+                )
                 context_data["kosdaq"] = {"current": float(kosdaq_ohlcv.iloc[-1]["종가"])}
                 insights.append(f"KOSDAQ 지수: {kosdaq_ohlcv.iloc[-1]['종가']:,.2f}")
         except Exception as e:
