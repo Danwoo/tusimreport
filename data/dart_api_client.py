@@ -7,8 +7,10 @@ DART OpenAPI: https://opendart.fss.or.kr/
 """
 
 import logging
+import os
 import requests
 import pandas as pd
+from functools import lru_cache
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import time
@@ -22,9 +24,13 @@ class DARTAPIClient:
     """DART OpenAPI 클라이언트"""
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = (
-            api_key or "f8b3ea29d07f35057df6de77d72e84d726357c6b"
-        )  # 무료 API 키
+        # API 키는 .env(DART_API_KEY)에서만 로드. 하드코딩 금지.
+        self.api_key = api_key or os.getenv("DART_API_KEY")
+        if not self.api_key:
+            logger.warning(
+                "DART_API_KEY가 설정되지 않았습니다. .env에 DART_API_KEY를 추가하세요. "
+                "발급: https://opendart.fss.or.kr/"
+            )
         self.base_url = "https://opendart.fss.or.kr/api"
         self.session = requests.Session()
 
@@ -204,46 +210,63 @@ class DARTAPIClient:
             logger.error(f"Error mapping stock code {stock_code}: {str(e)}")
             return None
 
+    def _load_corp_code_map(self) -> Dict[str, str]:
+        """DART CORPCODE.xml을 한 번만 다운로드해 stock_code → corp_code 맵 빌드.
+
+        프로세스 수명 동안 캐싱되어 종목마다 3MB ZIP을 재다운로드하지 않는다.
+        """
+        import xml.etree.ElementTree as ET
+
+        if not self.api_key:
+            logger.error("DART API key가 없어 corp_code 맵을 로드할 수 없습니다.")
+            return {}
+
+        url = f"{self.base_url}/corpCode.xml"
+        params = {"crtfc_key": self.api_key}
+
+        logger.info("Downloading DART CORPCODE.xml (process-lifetime cache)")
+        response = self.session.get(url, params=params, timeout=30)
+        if response.status_code != 200:
+            logger.error(f"Failed to download DART corp_code data: {response.status_code}")
+            return {}
+
+        with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
+            xml_content = zip_file.read("CORPCODE.xml")
+
+        root = ET.fromstring(xml_content)
+        mapping: Dict[str, str] = {}
+        for company in root.findall(".//list"):
+            stock_code_elem = company.find("stock_code")
+            corp_code_elem = company.find("corp_code")
+            if (
+                stock_code_elem is not None
+                and corp_code_elem is not None
+                and stock_code_elem.text
+                and corp_code_elem.text
+            ):
+                code = stock_code_elem.text.strip()
+                if code:
+                    mapping[code] = corp_code_elem.text.strip()
+
+        logger.info(f"Loaded {len(mapping)} corp_code entries from DART")
+        return mapping
+
+    def _get_corp_code_map(self) -> Dict[str, str]:
+        """인스턴스 레벨 메모이제이션. lru_cache는 self 캐시가 GC를 방해해서 직접 구현."""
+        if not hasattr(self, "_corp_code_map_cache"):
+            self._corp_code_map_cache = self._load_corp_code_map()
+        return self._corp_code_map_cache
+
     def _fetch_corp_code_from_dart_api(self, stock_code: str) -> Optional[str]:
-        """실제 DART API에서 corp_code 조회"""
+        """stock_code → corp_code 조회 (메모이즈된 맵 사용)."""
         try:
-            # DART 고유번호 다운로드 API 사용
-            url = f"{self.base_url}/corpCode.xml"
-            params = {"crtfc_key": self.api_key}
-            
-            logger.info(f"Fetching corp_code for {stock_code} from DART API")
-            response = self.session.get(url, params=params, timeout=30)
-            
-            if response.status_code == 200:
-                # ZIP 파일 압축 해제
-                import zipfile
-                import xml.etree.ElementTree as ET
-                
-                with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
-                    xml_content = zip_file.read('CORPCODE.xml')
-                    
-                # XML 파싱하여 stock_code 매칭
-                root = ET.fromstring(xml_content)
-                
-                for company in root.findall('.//list'):
-                    stock_code_elem = company.find('stock_code')
-                    corp_code_elem = company.find('corp_code')
-                    
-                    if (stock_code_elem is not None and 
-                        corp_code_elem is not None and
-                        stock_code_elem.text and
-                        stock_code_elem.text.strip() == stock_code):
-                        
-                        corp_code = corp_code_elem.text.strip()
-                        logger.info(f"Found corp_code {corp_code} for stock {stock_code}")
-                        return corp_code
-                
-                logger.warning(f"Stock code {stock_code} not found in DART database")
-                return None
-            else:
-                logger.error(f"Failed to download DART corp_code data: {response.status_code}")
-                return None
-                
+            mapping = self._get_corp_code_map()
+            corp_code = mapping.get(stock_code)
+            if corp_code:
+                logger.debug(f"corp_code hit for {stock_code}: {corp_code}")
+                return corp_code
+            logger.warning(f"Stock code {stock_code} not found in DART database")
+            return None
         except Exception as e:
             logger.error(f"Error fetching corp_code from DART API: {str(e)}")
             return None
@@ -497,8 +520,12 @@ class DARTAPIClient:
             return {"E": 0, "S": 0, "G": 0, "total": 0, "error": str(e)}
 
 
-# 전역 인스턴스
-dart_client = DARTAPIClient(api_key="f8b3ea29d07f35057df6de77d72e84d726357c6b")
+# 전역 인스턴스 - 환경변수에서 API 키 로드
+try:
+    from config.settings import settings
+    dart_client = DARTAPIClient(api_key=settings.dart_api_key)
+except ImportError:
+    dart_client = DARTAPIClient(api_key=os.getenv("DART_API_KEY"))
 
 
 def get_comprehensive_company_data(stock_code: str) -> Dict[str, Any]:
