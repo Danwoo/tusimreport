@@ -10,13 +10,12 @@ DCInside Stock Gallery Crawler
 
 import logging
 import time
-from datetime import datetime
 from typing import Any
 
 import requests
 from bs4 import BeautifulSoup
 
-from utils.time import kst_isoformat
+from utils.time import kst_isoformat, kst_now
 
 logger = logging.getLogger(__name__)
 
@@ -203,9 +202,9 @@ class DCInsideCrawler:
             ISO 형식 날짜
         """
         try:
-            # "11:30" 형식 (오늘)
+            # "11:30" 형식 (오늘) — KST 기준. 디시인사이드는 한국 시간으로 게시.
             if ":" in date_str:
-                now = datetime.now()
+                now = kst_now()
                 return f"{now.year}-{now.month:02d}-{now.day:02d}T{date_str}:00"
 
             # "2025.11.17" 형식

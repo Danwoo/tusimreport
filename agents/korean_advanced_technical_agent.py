@@ -5,7 +5,7 @@ Korean Advanced Technical Analysis Agent - TA-Lib 기반 고급 기술적 분석
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 import FinanceDataReader as fdr
@@ -18,6 +18,7 @@ from config.llm_factory import build_llm
 from core.signals import AgentSignal
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
 from utils.helpers import convert_numpy_types
+from utils.time import kst_now
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def get_advanced_technical_analysis_logic(stock_code: str, company_name: str = "
 def calculate_momentum_indicators_logic(stock_code: str, period: int = 252) -> dict[str, Any]:
     """모멘텀 지표 계산 로직 (RSI, MACD, 스토캐스틱 등)"""
     try:
-        end_date = datetime.now()
+        end_date = kst_now()
         start_date = end_date - timedelta(days=period + 100)
         df = fdr.DataReader(stock_code, start=start_date.strftime("%Y-%m-%d"))
         if df.empty:
