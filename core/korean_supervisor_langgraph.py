@@ -390,12 +390,18 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                         "error": {"error": result.get("error", "알 수 없는 오류"), "progressive_mode": True}
                     }
                 else:
-                    # 진행 상황 업데이트
+                    # 진행 상황 업데이트. `running_agent`는 UI가 카드를
+                    # running 상태로 바꾸는 데 쓰는 명시적 키.
+                    # 한글 stage_name에서 영문 키를 추측하던 substring 매칭을
+                    # 대체한다.
                     yield {
                         "supervisor": {
                             "stock_code": stock_code,
                             "company_name": company_name,
                             "current_stage": result.get("message", "분석 진행 중"),
+                            "running_agent": (
+                                result.get("agent_name", "") if result.get("status") == "starting" else ""
+                            ),
                             "progress": result.get("progress", 0.0),
                             "messages": [],
                             "executed_agents": result.get("completed_agents", 0),
