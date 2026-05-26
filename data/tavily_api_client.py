@@ -5,10 +5,11 @@ Tavily Search API Client
 """
 
 import logging
-from datetime import datetime
 from typing import Any
 
 import requests
+
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,7 @@ class TavilyNewsClient:
             "news_items": news_items,
             "ai_summary": raw_results.get("answer", ""),
             "data_source": "Tavily Search API",
-            "search_timestamp": datetime.now().isoformat(),
+            "search_timestamp": kst_isoformat(),
         }
 
 

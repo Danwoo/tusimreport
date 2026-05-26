@@ -12,6 +12,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from config.llm_factory import build_llm
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -134,9 +135,7 @@ class ChatSession:
             # 동시 입력 보호: messages 갱신과 스냅샷 채취를 한 lock 안에서 처리.
             # LLM 호출 자체는 락 밖에서 (블로킹 길어도 다른 작업이 멈추지 않게).
             with self._messages_lock:
-                self.messages.append(
-                    {"role": "user", "content": user_question, "timestamp": datetime.now().isoformat()}
-                )
+                self.messages.append({"role": "user", "content": user_question, "timestamp": kst_isoformat()})
                 # 최근 컨텍스트: user 메시지에서 시작하도록 정렬 (user→assistant 페어 보존).
                 # 짝수 페어 경계를 맞추지 않으면 LLM이 assistant→user→... 같이
                 # 끝나는 부자연스러운 컨텍스트를 받게 된다.
@@ -159,9 +158,7 @@ class ChatSession:
 
             # 대화 히스토리에 답변 추가
             with self._messages_lock:
-                self.messages.append(
-                    {"role": "assistant", "content": answer, "timestamp": datetime.now().isoformat()}
-                )
+                self.messages.append({"role": "assistant", "content": answer, "timestamp": kst_isoformat()})
 
             logger.info(f"Question: {user_question[:50]}... | Answer length: {len(answer)}")
             return answer

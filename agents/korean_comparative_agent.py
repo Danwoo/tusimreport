@@ -5,7 +5,6 @@ Korean Comparative Analysis Agent
 """
 
 import logging
-from datetime import datetime
 from typing import Any
 
 import pykrx.stock as stock
@@ -16,6 +15,7 @@ from config.llm_factory import build_llm
 from core.signals import AgentSignal
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
 from utils.helpers import convert_numpy_types
+from utils.time import kst_today_compact
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ def get_comparative_analysis_logic(stock_code: str, company_name: str) -> dict[s
     """업종 내 경쟁사 비교 및 전체 시장 내 순위 분석을 통합적으로 수행하는 로직"""
     try:
         logger.info(f"Performing comprehensive comparative analysis for {stock_code}")
-        today_str = datetime.now().strftime("%Y%m%d")
+        today_str = kst_today_compact()
 
         analysis_result = {}
         insights = []

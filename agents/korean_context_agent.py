@@ -22,6 +22,7 @@ from core.signals import AgentSignal
 from data.bok_api_client import get_macro_economic_indicators
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
 from utils.helpers import convert_numpy_types
+from utils.time import kst_isoformat, kst_today_compact
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ def get_market_and_economic_context_logic(stock_code: str, company_name: str) ->
 
         # 2. 시장 지수 (PyKRX)
         try:
-            today_str = datetime.now().strftime("%Y%m%d")
+            today_str = kst_today_compact()
             kospi_ohlcv = stock.get_index_ohlcv_by_date("20240101", today_str, "1001")
             kosdaq_ohlcv = stock.get_index_ohlcv_by_date("20240101", today_str, "2001")
             if not kospi_ohlcv.empty:
@@ -87,7 +88,7 @@ def get_market_and_economic_context_logic(stock_code: str, company_name: str) ->
                 "context_summary": context_data,
                 "key_insights": insights,
                 "data_sources": ["FinanceDataReader", "PyKRX", "BOK ECOS API"],
-                "last_updated": datetime.now().isoformat(),
+                "last_updated": kst_isoformat(),
             }
         )
 

@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urlparse
 
 import requests
 import urllib3
+
+from utils.time import kst_isoformat
 
 # SSL 검증을 끄지 않는 게 원칙이지만, 일부 한국 매체 RSS는 인증서 체인이
 # 깨져 있어 우회가 필요. 화이트리스트에 명시된 호스트에만 한해 허용한다.
@@ -273,7 +274,7 @@ class KoreanNewsRSSClient:
                     url = ""
 
                 # 발행일은 추후 pubDate/Atom published 파싱 추가 예정 — 지금은 현재 시간 사용
-                published_at = datetime.now().isoformat()
+                published_at = kst_isoformat()
 
                 # 본문 추출
                 content = strip_html_tags(description) if description else ""

@@ -7,10 +7,11 @@ API Docs: https://production.dataviz.cnn.io/index/fearandgreed/graphdata
 """
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from data.base_client import BaseAPIClient
+from data.cache_ttl import FEAR_GREED_HOURS
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class FearGreedClient(BaseAPIClient):
             }
         """
         cache_key = "fear_greed_index"
-        cached = self.get_cached(cache_key, max_age_hours=6)  # 6시간 캐시
+        cached = self.get_cached(cache_key, max_age_hours=FEAR_GREED_HOURS)
         if cached:
             return cached
 
@@ -57,7 +58,7 @@ class FearGreedClient(BaseAPIClient):
                     "previous_week": int(current.get("previous_1_week", 50)),
                     "previous_month": int(current.get("previous_1_month", 50)),
                     "previous_year": int(current.get("previous_1_year", 50)),
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": kst_isoformat(),
                 }
 
                 self.save_cache(cache_key, result)
@@ -130,7 +131,7 @@ class FearGreedClient(BaseAPIClient):
                 "change_from_week": week_change,
                 "change_from_month": current - prev_month,
                 "interpretation_korean": self.get_interpretation_korean(current),
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": kst_isoformat(),
             }
 
         except Exception as e:
@@ -141,7 +142,7 @@ class FearGreedClient(BaseAPIClient):
                 "change_from_week": 0,
                 "change_from_month": 0,
                 "interpretation_korean": "데이터 없음",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": kst_isoformat(),
             }
 
     def _create_fallback_index(self) -> dict[str, Any]:
@@ -153,7 +154,7 @@ class FearGreedClient(BaseAPIClient):
             "previous_week": 50,
             "previous_month": 50,
             "previous_year": 50,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": kst_isoformat(),
             "note": "⚠️ Fear & Greed Index API 연결 실패. 기본값을 사용합니다.",
         }
 

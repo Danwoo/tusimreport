@@ -16,6 +16,8 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup
 
+from utils.time import kst_isoformat
+
 logger = logging.getLogger(__name__)
 
 
@@ -212,11 +214,11 @@ class DCInsideCrawler:
                 if len(parts) == 3:
                     return f"{parts[0]}-{parts[1]}-{parts[2]}T00:00:00"
 
-            return datetime.now().isoformat()
+            return kst_isoformat()
 
         except Exception as e:
             logger.debug(f"날짜 파싱 실패 ({date_str!r}): {e}")
-            return datetime.now().isoformat()
+            return kst_isoformat()
 
     def _parse_number(self, num_str: str) -> int:
         """

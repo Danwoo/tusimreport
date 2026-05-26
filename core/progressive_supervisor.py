@@ -8,7 +8,6 @@ import logging
 import threading
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from typing import Any
 
 from core.context_manager import get_context_manager
@@ -18,6 +17,7 @@ from core.korean_supervisor_langgraph import (
     get_supervisor_llm,
 )
 from core.signals import AGENT_TO_SIGNAL, ALL_AGENT_SIGNALS
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ class ProgressiveAnalysisEngine:
                     "compressed_content": compressed_content,
                     "is_complete": is_complete,
                     "token_count": self.context_manager.count_tokens(content),
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": kst_isoformat(),
                 }
             else:
                 raise ValueError(f"에이전트 응답이 비어있음: {agent_name}")
@@ -133,7 +133,7 @@ class ProgressiveAnalysisEngine:
                 "agent_name": agent_name,
                 "status": "error",
                 "error": str(e),
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": kst_isoformat(),
             }
 
     def _create_targeted_request(

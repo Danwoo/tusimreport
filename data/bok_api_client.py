@@ -13,6 +13,8 @@ from typing import Any
 
 import requests
 
+from utils.time import kst_days_ago_compact, kst_isoformat, kst_today_compact
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,9 +40,9 @@ class BOKAPIClient:
     ) -> dict[str, Any]:
         """API 요청 실행 - 실제 작동하는 fallback 포함"""
         if not end_date:
-            end_date = datetime.now().strftime("%Y%m%d")
+            end_date = kst_today_compact()
         if not start_date:
-            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+            start_date = kst_days_ago_compact(365)
 
         # 실제 API 키가 있을 때만 시도
         if self.api_key:
@@ -68,9 +70,9 @@ class BOKAPIClient:
     ) -> dict[str, Any]:
         """API 요청 재시도 로직 포함"""
         if not end_date:
-            end_date = datetime.now().strftime("%Y%m%d")
+            end_date = kst_today_compact()
         if not start_date:
-            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+            start_date = kst_days_ago_compact(365)
 
         # API 키 검증
         if not self.api_key:
@@ -144,7 +146,7 @@ class BOKAPIClient:
                     "base_rates": rates,
                     "latest_rate": rates[-1] if rates else None,
                     "data_source": "Bank of Korea",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": "No base rate data found"}
@@ -195,7 +197,7 @@ class BOKAPIClient:
                     "latest_rate": rates[-1] if rates else None,
                     "currency": currency_code,
                     "data_source": "Bank of Korea",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": f"No exchange rate data found for {currency_code}"}
@@ -249,7 +251,7 @@ class BOKAPIClient:
                     "latest_gdp": gdp_data[-1] if gdp_data else None,
                     "quarterly_growth_rate": round(growth_rate, 2),
                     "data_source": "Bank of Korea",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": "No GDP data found"}
@@ -299,7 +301,7 @@ class BOKAPIClient:
                     "latest_cpi": cpi_data[-1] if cpi_data else None,
                     "inflation_rate": round(inflation_rate, 2),
                     "data_source": "Bank of Korea",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": "No CPI data found"}
@@ -349,7 +351,7 @@ class BOKAPIClient:
                     "latest_index": ipi_data[-1] if ipi_data else None,
                     "monthly_change": round(monthly_change, 2),
                     "data_source": "Bank of Korea",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": "No industrial production index data found"}
@@ -392,7 +394,7 @@ class BOKAPIClient:
                     "unemployment_data": unemployment_data,
                     "latest_unemployment_rate": unemployment_data[-1] if unemployment_data else None,
                     "data_source": "Bank of Korea",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": "No unemployment rate data found"}
@@ -467,7 +469,7 @@ class BOKAPIClient:
                 "trade_balance": trade_balance,
                 "latest_trade_balance": trade_balance[-1] if trade_balance else None,
                 "data_source": "Bank of Korea",
-                "last_updated": datetime.now().isoformat(),
+                "last_updated": kst_isoformat(),
             }
 
         except Exception as e:
@@ -515,7 +517,7 @@ class BOKAPIClient:
                     "latest_index": housing_data[-1] if housing_data else None,
                     "monthly_change": round(monthly_change, 2),
                     "data_source": "Bank of Korea",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": "No housing price index data found"}
@@ -565,7 +567,7 @@ class BOKAPIClient:
                     "latest_money_supply": money_supply_data[-1] if money_supply_data else None,
                     "yoy_growth_rate": round(yoy_growth, 2),
                     "data_source": "Bank of Korea",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": "No monetary aggregates data found"}
@@ -725,7 +727,7 @@ def get_macro_economic_indicators(indicators_list: list[str] = None) -> dict[str
         return {
             "indicators": indicators,
             "data_source": "Bank of Korea ECOS API Only (No Mock Data)",
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": kst_isoformat(),
             "statistics": {
                 "successful_indicators": successful_indicators,
                 "total_indicators": total_indicators,
@@ -803,7 +805,7 @@ def get_sector_specific_indicators(sector: str = "manufacturing") -> dict[str, A
                 "trade": "수출입, 다중 환율 중심 분석",
             }.get(sector, "종합 경제지표 분석"),
             "data_source": "Bank of Korea ECOS - Sector Specific",
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": kst_isoformat(),
         }
 
     except Exception as e:
