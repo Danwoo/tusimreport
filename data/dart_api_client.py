@@ -15,6 +15,7 @@ from typing import Any
 
 import requests
 
+from data.external_schemas import validate_dart_envelope
 from utils.time import kst_days_ago_compact, kst_isoformat, kst_today_compact, kst_year
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,12 @@ class DARTAPIClient:
 
             result = self._make_request("company.json", params)
 
-            if result.get("status") == "000":
+            # DART envelope를 Pydantic으로 검증.
+            # status 키가 사라지거나 타입이 바뀌면 silent break 대신
+            # DataQualityError가 raise되어 아래 broad except에서 잡힌다.
+            env = validate_dart_envelope(result, source="DART/company.json")
+
+            if env.status == "000":
                 return {
                     "corp_name": result.get("corp_name"),
                     "corp_name_eng": result.get("corp_name_eng"),
