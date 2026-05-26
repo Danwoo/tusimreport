@@ -7,10 +7,11 @@ API Docs: https://www.coingecko.com/en/api/documentation
 """
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from data.base_client import BaseAPIClient
+from data.cache_ttl import CRYPTO_PRICE_MINUTES
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class CoinGeckoClient(BaseAPIClient):
             }
         """
         cache_key = "crypto_market_overview"
-        cached = self._get_cached_data(cache_key, max_age_minutes=5)  # 5분 캐시
+        cached = self._get_cached_data(cache_key, max_age_minutes=CRYPTO_PRICE_MINUTES)
         if cached:
             return cached
 
@@ -85,7 +86,7 @@ class CoinGeckoClient(BaseAPIClient):
             # 글로벌 시장 데이터 추가
             global_data = self._get_global_market_data()
             result["global"] = global_data
-            result["timestamp"] = datetime.now().isoformat()
+            result["timestamp"] = kst_isoformat()
 
             self._save_to_cache(cache_key, result)
             return result
@@ -166,7 +167,7 @@ class CoinGeckoClient(BaseAPIClient):
                 "bitcoin_change_24h": btc_change,
                 "stock_symbol": stock_symbol,
                 "correlation_interpretation": interpretation,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": kst_isoformat(),
             }
 
         except Exception as e:
@@ -176,7 +177,7 @@ class CoinGeckoClient(BaseAPIClient):
                 "bitcoin_change_24h": 0.0,
                 "stock_symbol": stock_symbol,
                 "correlation_interpretation": "데이터 없음",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": kst_isoformat(),
             }
 
     def _get_coin_symbol(self, coin_id: str) -> str:
@@ -210,7 +211,7 @@ class CoinGeckoClient(BaseAPIClient):
                 "total_volume_usd": 0.0,
             },
             "global": {},
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": kst_isoformat(),
             "note": "⚠️ CoinGecko API 연결 실패. 실시간 암호화폐 데이터를 사용할 수 없습니다.",
         }
 

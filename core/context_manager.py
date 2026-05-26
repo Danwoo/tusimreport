@@ -6,8 +6,9 @@ Enterprise Context Manager - 토큰 최적화 및 컨텍스트 압축
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
+
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,7 @@ class EnterpriseContextManager:
             "available_tokens": self.window.available_tokens,
             "cached_data_items": len(self.data_cache),
             "agent_summaries": len(self.agent_summaries),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": kst_isoformat(),
         }
 
 

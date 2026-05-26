@@ -11,10 +11,12 @@ import logging
 import os
 import time
 import zipfile
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 import requests
+
+from utils.time import kst_days_ago_compact, kst_isoformat, kst_today_compact
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +143,7 @@ class DARTAPIClient:
                     "year": bsns_year,
                     "report_code": reprt_code,
                     "financial_data": financial_data,
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": f"Financial statements not found: {result.get('message', 'Unknown error')}"}
@@ -153,8 +155,8 @@ class DARTAPIClient:
     def get_recent_disclosures(self, corp_code: str, page_count: int = 10) -> list[dict[str, Any]]:
         """최근 공시 조회"""
         try:
-            end_dt = datetime.now().strftime("%Y%m%d")
-            bgn_dt = (datetime.now() - timedelta(days=90)).strftime("%Y%m%d")
+            end_dt = kst_today_compact()
+            bgn_dt = kst_days_ago_compact(90)
 
             params = {
                 "corp_code": corp_code,
@@ -297,7 +299,7 @@ class DARTAPIClient:
                     "year": bsns_year,
                     "major_shareholders": shareholders,
                     "data_source": "DART - Major Shareholders",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": f"Major shareholder info not found: {result.get('message', 'Unknown error')}"}
@@ -339,7 +341,7 @@ class DARTAPIClient:
                     "executives": executives,
                     "total_executives": len(executives),
                     "data_source": "DART - Executive Status",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": f"Executive info not found: {result.get('message', 'Unknown error')}"}
@@ -375,7 +377,7 @@ class DARTAPIClient:
                     "year": bsns_year,
                     "dividend_info": dividends,
                     "data_source": "DART - Dividend Information",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": f"Dividend info not found: {result.get('message', 'Unknown error')}"}
@@ -412,7 +414,7 @@ class DARTAPIClient:
                     "year": bsns_year,
                     "audit_opinions": audit_opinions,
                     "data_source": "DART - Audit Opinion",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 }
 
             return {"error": f"Audit opinion not found: {result.get('message', 'Unknown error')}"}
@@ -457,7 +459,7 @@ class DARTAPIClient:
                 "year": bsns_year,
                 "esg_analysis": esg_data,
                 "esg_score": esg_score,
-                "analysis_timestamp": datetime.now().isoformat(),
+                "analysis_timestamp": kst_isoformat(),
                 "data_source": "DART - ESG Analysis",
             }
 
@@ -557,7 +559,7 @@ def get_comprehensive_company_data(stock_code: str) -> dict[str, Any]:
             },
             "recent_disclosures": recent_disclosures,
             "data_source": "DART OpenAPI",
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": kst_isoformat(),
         }
 
     except Exception as e:

@@ -7,8 +7,9 @@ Paxnet 종목토론 크롤링 클라이언트
 import logging
 import re
 import time
-from datetime import datetime
 from typing import Any
+
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ class PaxnetCrawlClient:
                     "stock_code": stock_code,
                     "source": "Paxnet 종목토론",
                     "url": url,
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": kst_isoformat(),
                     "total_posts": len(posts),
                     "posts": posts,
                 }

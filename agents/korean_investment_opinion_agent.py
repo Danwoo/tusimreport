@@ -6,7 +6,6 @@ Korean Investment Opinion Agent
 import json
 import logging
 import re
-from datetime import datetime
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -14,6 +13,7 @@ from langchain_core.tools import tool
 
 from config.llm_factory import build_llm
 from core.schemas import InvestmentOpinion
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +261,7 @@ def generate_investment_opinion(
             ),
         }
 
-        result["timestamp"] = datetime.now().isoformat()
+        result["timestamp"] = kst_isoformat()
 
         logger.info(f"✅ Level 3 투자 의견 생성: {result['opinion']} (신뢰도: {result['confidence']}%)")
         logger.info(
@@ -395,7 +395,7 @@ def _create_fallback_opinion(
             {"order": "2차", "price_range": "데이터 부족", "weight": "40%", "timing": "분석 불가"},
             {"order": "3차", "price_range": "데이터 부족", "weight": "30%", "timing": "분석 불가"},
         ],
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": kst_isoformat(),
         "error": error_msg,
     }
 
