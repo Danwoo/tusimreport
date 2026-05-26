@@ -19,8 +19,13 @@ class BOKAPIClient:
     """한국은행 경제통계 API 클라이언트"""
     
     def __init__(self, api_key: Optional[str] = None):
-        # 무료 샘플 API 키 (실제 서비스에서는 발급받은 키 사용)
-        self.api_key = api_key or "sample"
+        # API 키는 .env(ECOS_API_KEY)에서만 로드. "sample" 같은 placeholder 금지.
+        self.api_key = api_key
+        if not self.api_key:
+            logger.warning(
+                "ECOS_API_KEY가 설정되지 않았습니다. .env에 ECOS_API_KEY를 추가하세요. "
+                "발급: https://ecos.bok.or.kr/api/"
+            )
         self.base_url = "https://ecos.bok.or.kr/api"
         self.session = requests.Session()
         
@@ -38,7 +43,7 @@ class BOKAPIClient:
             start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
             
         # 실제 API 키가 있을 때만 시도
-        if self.api_key and self.api_key != "sample":
+        if self.api_key:
             url = f"{self.base_url}/StatisticSearch/{self.api_key}/json/kr/1/1000/{stat_code}/{cycle}/{start_date}/{end_date}"
             
             try:
@@ -61,8 +66,8 @@ class BOKAPIClient:
             start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
             
         # API 키 검증
-        if not self.api_key or self.api_key == "sample":
-            return {"error": f"유효하지 않은 API 키 - {stat_code}", "status": "invalid_api_key"}
+        if not self.api_key:
+            return {"error": f"ECOS API 키 미설정 - {stat_code}", "status": "invalid_api_key"}
             
         url = f"{self.base_url}/StatisticSearch/{self.api_key}/json/kr/1/1000/{stat_code}/{cycle}/{start_date}/{end_date}"
         
