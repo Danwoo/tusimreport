@@ -6,10 +6,10 @@ Chat Session Manager
 
 import logging
 import threading
-from typing import Dict, Any, List, Optional
 from datetime import datetime
+from typing import Any
 
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from config.llm_factory import build_llm
 
@@ -24,7 +24,7 @@ class ChatSession:
     사용자와 대화형 상호작용 제공
     """
 
-    def __init__(self, stock_code: str, company_name: str, analysis_result: Dict[str, Any]):
+    def __init__(self, stock_code: str, company_name: str, analysis_result: dict[str, Any]):
         """
         세션 초기화
 
@@ -39,7 +39,7 @@ class ChatSession:
         self.created_at = datetime.now()
 
         # 대화 히스토리 + 갱신 락 (Streamlit fragment/동시 입력 보호)
-        self.messages: List[Dict[str, str]] = []
+        self.messages: list[dict[str, str]] = []
         self._messages_lock = threading.Lock()
 
         # LLM 초기화
@@ -70,7 +70,7 @@ class ChatSession:
 
 **현재 분석 대상:**
 - 종목: {self.company_name} ({self.stock_code})
-- 분석 시간: {self.created_at.strftime('%Y-%m-%d %H:%M')}
+- 분석 시간: {self.created_at.strftime("%Y-%m-%d %H:%M")}
 
 **8개 전문 에이전트 분석 결과:**
 {analysis_summary}
@@ -100,19 +100,19 @@ class ChatSession:
 
         # 각 에이전트 결과 요약
         agent_names = {
-            'context_expert': '🌍 시장 환경',
-            'sentiment_expert': '📰 뉴스 여론',
-            'financial_expert': '💰 재무 상태',
-            'advanced_technical_expert': '📈 기술적 분석',
-            'institutional_trading_expert': '🏦 기관 수급',
-            'comparative_expert': '⚖️ 상대 가치',
-            'esg_expert': '🌱 ESG',
-            'community_expert': '💬 커뮤니티'
+            "context_expert": "🌍 시장 환경",
+            "sentiment_expert": "📰 뉴스 여론",
+            "financial_expert": "💰 재무 상태",
+            "advanced_technical_expert": "📈 기술적 분석",
+            "institutional_trading_expert": "🏦 기관 수급",
+            "comparative_expert": "⚖️ 상대 가치",
+            "esg_expert": "🌱 ESG",
+            "community_expert": "💬 커뮤니티",
         }
 
         for agent_key, agent_title in agent_names.items():
             if agent_key in self.analysis_result:
-                content = self.analysis_result[agent_key].get('content', '분석 데이터 없음')
+                content = self.analysis_result[agent_key].get("content", "분석 데이터 없음")
                 # 너무 길면 앞부분만
                 if len(content) > 500:
                     content = content[:500] + "..."
@@ -134,11 +134,9 @@ class ChatSession:
             # 동시 입력 보호: messages 갱신과 스냅샷 채취를 한 lock 안에서 처리.
             # LLM 호출 자체는 락 밖에서 (블로킹 길어도 다른 작업이 멈추지 않게).
             with self._messages_lock:
-                self.messages.append({
-                    "role": "user",
-                    "content": user_question,
-                    "timestamp": datetime.now().isoformat()
-                })
+                self.messages.append(
+                    {"role": "user", "content": user_question, "timestamp": datetime.now().isoformat()}
+                )
                 # 최근 컨텍스트: user 메시지에서 시작하도록 정렬 (user→assistant 페어 보존).
                 # 짝수 페어 경계를 맞추지 않으면 LLM이 assistant→user→... 같이
                 # 끝나는 부자연스러운 컨텍스트를 받게 된다.
@@ -148,9 +146,7 @@ class ChatSession:
                 recent_messages = list(tail)
 
             # LangChain 메시지 구성
-            langchain_messages = [
-                SystemMessage(content=self.system_prompt)
-            ]
+            langchain_messages = [SystemMessage(content=self.system_prompt)]
             for msg in recent_messages:
                 if msg["role"] == "user":
                     langchain_messages.append(HumanMessage(content=msg["content"]))
@@ -163,11 +159,9 @@ class ChatSession:
 
             # 대화 히스토리에 답변 추가
             with self._messages_lock:
-                self.messages.append({
-                    "role": "assistant",
-                    "content": answer,
-                    "timestamp": datetime.now().isoformat()
-                })
+                self.messages.append(
+                    {"role": "assistant", "content": answer, "timestamp": datetime.now().isoformat()}
+                )
 
             logger.info(f"Question: {user_question[:50]}... | Answer length: {len(answer)}")
             return answer
@@ -177,7 +171,7 @@ class ChatSession:
             logger.error(f"Chat error: {e}", exc_info=True)
             return error_msg
 
-    def get_conversation_history(self) -> List[Dict[str, str]]:
+    def get_conversation_history(self) -> list[dict[str, str]]:
         """대화 히스토리 반환 (snapshot)."""
         with self._messages_lock:
             return self.messages.copy()
@@ -189,7 +183,9 @@ class ChatSession:
         logger.info("Conversation history cleared")
 
 
-def create_chat_session(stock_code: str, company_name: str, analysis_result: Dict[str, Any]) -> Optional[ChatSession]:
+def create_chat_session(
+    stock_code: str, company_name: str, analysis_result: dict[str, Any]
+) -> ChatSession | None:
     """
     채팅 세션 생성 헬퍼 함수
 

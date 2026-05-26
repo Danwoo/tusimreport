@@ -5,25 +5,22 @@ Korean Stock Analysis Supervisor - LangGraph 기반
 """
 
 import logging
-from datetime import datetime
-from typing import Dict, Any
 
 from langgraph_supervisor import create_supervisor
-from langchain_core.messages import HumanMessage
 
-from config.llm_factory import build_llm
-from core.signals import AGENT_TO_SIGNAL
+from agents.korean_advanced_technical_agent import create_advanced_technical_agent
+from agents.korean_community_agent import create_community_agent
+from agents.korean_comparative_agent import create_comparative_agent
 
 # Import existing agents from agents folder
 from agents.korean_context_agent import create_context_agent
-from agents.korean_sentiment_agent import create_sentiment_agent
-from agents.korean_financial_react_agent import get_financial_react_agent
-from agents.korean_advanced_technical_agent import create_advanced_technical_agent
-from agents.korean_institutional_trading_agent import create_institutional_trading_agent
-from agents.korean_comparative_agent import create_comparative_agent
 from agents.korean_esg_analysis_agent import create_esg_agent
-from agents.korean_community_agent import create_community_agent
+from agents.korean_financial_react_agent import get_financial_react_agent
 from agents.korean_global_market_agent import create_global_market_agent  # 🆕 P1-3
+from agents.korean_institutional_trading_agent import create_institutional_trading_agent
+from agents.korean_sentiment_agent import create_sentiment_agent
+from config.llm_factory import build_llm
+from core.signals import AGENT_TO_SIGNAL
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +28,16 @@ logger = logging.getLogger(__name__)
 # LLM 설정
 # ====================
 
+
 def get_supervisor_llm():
     """Supervisor용 LLM (통합 팩토리)."""
     return build_llm(temperature=0.1)
 
+
 # ====================
 # 전문 에이전트 생성 (총 8개)
 # ====================
+
 
 def create_all_agents():
     """모든 9개의 전문 분석 에이전트를 생성합니다. (🆕 P1-3: global_market_expert 추가)"""
@@ -61,11 +61,15 @@ def create_all_agents():
         logger.error(f"Error creating agents: {str(e)}")
         raise e
 
+
 # ====================
 # 종합 보고서 생성 함수
 # ====================
 
-def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], stock_code: str, company_name: str) -> str:
+
+def generate_comprehensive_report(
+    supervisor_llm, all_analyses: dict[str, str], stock_code: str, company_name: str
+) -> str:
     """Supervisor가 직접 생성하는 종합 투자 참고자료"""
     try:
         # 모든 전문가 분석 내용을 하나의 문자열로 결합
@@ -80,7 +84,7 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
                 "comparative_expert": "상대 가치 전문가",
                 "esg_expert": "ESG 분석 전문가",
                 "community_expert": "커뮤니티 여론 전문가",
-                "global_market_expert": "글로벌 시장 전문가"  # 🆕 P1-3
+                "global_market_expert": "글로벌 시장 전문가",  # 🆕 P1-3
             }.get(expert_key, expert_key)
 
             expert_analyses_text += f"\n\n=== {expert_name} 분석 ===\n{analysis}\n"
@@ -205,7 +209,7 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
 
         # 🤖 Supervisor LLM으로 종합 보고서 생성
         response = supervisor_llm.invoke(report_prompt)
-        report_content = response.content if hasattr(response, 'content') else str(response)
+        report_content = response.content if hasattr(response, "content") else str(response)
 
         # 🔍 생성된 보고서 품질 검증
         logger.info("🎯 Supervisor가 종합 보고서 생성 완료")
@@ -227,11 +231,13 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
         logger.error(f"종합 보고서 생성 오류: {str(e)}")
         return f"## 종합 보고서 생성 오류\n\n보고서 생성 중 오류가 발생했습니다: {str(e)}"
 
+
 # ====================
 # SUPERVISOR 생성
 # ====================
 
 EXPECTED_AGENT_COUNT = 9
+
 
 def create_korean_supervisor():
     """9개 전문가 에이전트 + Supervisor 종합 보고서 생성 워크플로우"""
@@ -277,12 +283,15 @@ Execute all {n_agents} expert agents and signal completion."""
             prompt=supervisor_prompt,
         )
 
-        logger.info(f"Korean Stock Analysis Supervisor with {EXPECTED_AGENT_COUNT} expert agents created successfully.")
+        logger.info(
+            f"Korean Stock Analysis Supervisor with {EXPECTED_AGENT_COUNT} expert agents created successfully."
+        )
         return workflow.compile()
 
     except Exception as e:
         logger.error(f"Error creating Korean supervisor: {str(e)}")
         raise e
+
 
 # Lazy supervisor instance: 첫 사용 시점에 빌드 (import 시점 LLM 키 검증 방지)
 _korean_supervisor_graph = None
@@ -301,6 +310,7 @@ def __getattr__(name):
     if name == "korean_supervisor_graph":
         return get_korean_supervisor_graph()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # ====================
 # 진행 상황 추적
@@ -321,6 +331,7 @@ AGENT_STAGES = {
 # MAIN INTERFACE
 # ====================
 
+
 def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_progressive: bool = True):
     """개선된 LangGraph Supervisor - 7개 전문가 + Supervisor 종합 보고서
 
@@ -330,7 +341,9 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
         use_progressive: Progressive Analysis 사용 여부 (기본 True - 컨텍스트 최적화)
     """
     try:
-        logger.info(f"Starting streaming supervised analysis for {stock_code} with 7 expert agents (Progressive: {use_progressive}).")
+        logger.info(
+            f"Starting streaming supervised analysis for {stock_code} with 7 expert agents (Progressive: {use_progressive})."
+        )
 
         # Progressive Analysis 사용시 새로운 엔진 사용
         if use_progressive:
@@ -353,7 +366,7 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                             "messages": [{"content": result["content"]}],
                             "executed_agents": result["completed_agents"],
                             "total_agents": result["total_agents"],
-                            "progressive_mode": True
+                            "progressive_mode": True,
                         }
                     }
                 elif result["type"] == "final_report":
@@ -369,11 +382,13 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                             "total_agents": result["total_agents"],
                             "final_report_generated": True,
                             "progressive_mode": True,
-                            "context_stats": result.get("context_stats", {})
+                            "context_stats": result.get("context_stats", {}),
                         }
                     }
                 elif result["type"] in ["agent_error", "system_error", "report_error"]:
-                    yield {"error": {"error": result.get("error", "알 수 없는 오류"), "progressive_mode": True}}
+                    yield {
+                        "error": {"error": result.get("error", "알 수 없는 오류"), "progressive_mode": True}
+                    }
                 else:
                     # 진행 상황 업데이트
                     yield {
@@ -385,7 +400,7 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                             "messages": [],
                             "executed_agents": result.get("completed_agents", 0),
                             "total_agents": result.get("total_agents", 7),
-                            "progressive_mode": True
+                            "progressive_mode": True,
                         }
                     }
             return
@@ -405,18 +420,24 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
         executed_agents = set()
         all_analyses = {}  # 전문가 분석 결과 저장
         expected_agents = {
-            "context_expert", "sentiment_expert", "financial_expert", "advanced_technical_expert",
-            "institutional_trading_expert", "comparative_expert", "esg_expert"
+            "context_expert",
+            "sentiment_expert",
+            "financial_expert",
+            "advanced_technical_expert",
+            "institutional_trading_expert",
+            "comparative_expert",
+            "esg_expert",
         }
 
-        chunk_count = 0
         max_chunks = 100  # 안전장치
         supervisor_llm = get_supervisor_llm()  # Supervisor LLM 인스턴스
 
-        for chunk in korean_supervisor_graph.stream(
-            {"messages": [{"role": "user", "content": analysis_request}]}
+        for chunk_count, chunk in enumerate(
+            get_korean_supervisor_graph().stream(
+                {"messages": [{"role": "user", "content": analysis_request}]}
+            ),
+            start=1,
         ):
-            chunk_count += 1
             logger.debug(f"Processing chunk {chunk_count}: {chunk}")
 
             agent_name = next(iter(chunk)) if chunk else "supervisor"
@@ -430,7 +451,7 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
 
                     # 에이전트 완료 추적 및 분석 결과 저장 (단일 enum 소스)
                     for msg in messages:
-                        msg_content = msg.content if hasattr(msg, 'content') else str(msg)
+                        msg_content = msg.content if hasattr(msg, "content") else str(msg)
                         for expected_agent in expected_agents:
                             signal_enum = AGENT_TO_SIGNAL.get(expected_agent)
                             completion_signal = signal_enum.value if signal_enum else ""
@@ -441,7 +462,9 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                                 analysis_content = msg_content.replace(completion_signal, "").strip()
                                 if len(analysis_content) > 100:  # 의미 있는 내용만
                                     all_analyses[expected_agent] = analysis_content
-                                logger.info(f"✅ Agent {expected_agent} completed. Total: {len(executed_agents)}/{len(expected_agents)}")
+                                logger.info(
+                                    f"✅ Agent {expected_agent} completed. Total: {len(executed_agents)}/{len(expected_agents)}"
+                                )
 
             yield {
                 "supervisor": {
@@ -452,7 +475,7 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                     "progress": progress,
                     "messages": messages,
                     "executed_agents": len(executed_agents),
-                    "total_agents": len(expected_agents)
+                    "total_agents": len(expected_agents),
                 }
             }
 
@@ -476,7 +499,7 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                             "messages": [{"content": final_report}],
                             "executed_agents": len(executed_agents),
                             "total_agents": len(expected_agents),
-                            "final_report_generated": True
+                            "final_report_generated": True,
                         }
                     }
                     logger.info("🎯 Supervisor comprehensive report generation completed!")
@@ -488,7 +511,11 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
 
             if chunk_count >= max_chunks:
                 logger.error(f"❌ Reached maximum chunks ({max_chunks}). Executed agents: {executed_agents}")
-                yield {"error": {"error": f"Workflow incomplete. Only {len(executed_agents)}/7 agents completed: {executed_agents}"}}
+                yield {
+                    "error": {
+                        "error": f"Workflow incomplete. Only {len(executed_agents)}/7 agents completed: {executed_agents}"
+                    }
+                }
                 break
 
     except Exception as e:

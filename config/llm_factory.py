@@ -6,7 +6,7 @@ provider 추가/모델 변경 시 한 줄만 고치면 된다.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from config.settings import get_llm_model
 
@@ -14,9 +14,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 
-def build_llm(
-    temperature: float = 0.0, raise_on_missing: bool = True
-) -> Optional["BaseChatModel"]:
+def build_llm(temperature: float = 0.0, raise_on_missing: bool = True) -> BaseChatModel | None:
     """settings에 맞춰 ChatOpenAI 또는 ChatGoogleGenerativeAI 인스턴스를 반환한다.
 
     Args:

@@ -9,10 +9,11 @@ Korean Global Market Context Agent
 """
 
 import logging
-from typing import Dict, Any
+from datetime import datetime
+from typing import Any
+
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
-from datetime import datetime
 
 from config.llm_factory import build_llm
 from core.signals import AgentSignal
@@ -21,10 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 @tool
-def analyze_global_market_context(
-    company_name: str,
-    stock_code: str
-) -> Dict[str, Any]:
+def analyze_global_market_context(company_name: str, stock_code: str) -> dict[str, Any]:
     """
     글로벌 시장 맥락 분석 - 한국 주식에 영향을 주는 글로벌 시장 동향
 
@@ -61,12 +59,7 @@ def analyze_global_market_context(
 
         # 5. LLM 기반 분석
         analysis = _analyze_with_llm(
-            company_name,
-            stock_code,
-            global_markets,
-            crypto_markets,
-            market_sentiment,
-            forex
+            company_name, stock_code, global_markets, crypto_markets, market_sentiment, forex
         )
 
         result = {
@@ -77,10 +70,10 @@ def analyze_global_market_context(
             "market_sentiment": market_sentiment,
             "forex": forex,
             "analysis": analysis,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
-        logger.info(f"✅ 글로벌 시장 맥락 분석 완료")
+        logger.info("✅ 글로벌 시장 맥락 분석 완료")
         return result
 
     except Exception as e:
@@ -88,7 +81,7 @@ def analyze_global_market_context(
         return _create_fallback_analysis(company_name, stock_code, str(e))
 
 
-def _fetch_global_markets() -> Dict[str, Any]:
+def _fetch_global_markets() -> dict[str, Any]:
     """
     글로벌 주요 지수 현황 조회 (Alpha Vantage)
 
@@ -114,21 +107,15 @@ def _fetch_global_markets() -> Dict[str, Any]:
             "nasdaq": data.get("nasdaq", {}),
             "dow": data.get("dow", {}),
             "available": available,
-            "timestamp": data.get("timestamp", "")
+            "timestamp": data.get("timestamp", ""),
         }
 
     except Exception as e:
         logger.error(f"글로벌 시장 데이터 수집 실패: {str(e)}")
-        return {
-            "sp500": {},
-            "nasdaq": {},
-            "dow": {},
-            "available": False,
-            "error": str(e)
-        }
+        return {"sp500": {}, "nasdaq": {}, "dow": {}, "available": False, "error": str(e)}
 
 
-def _fetch_crypto_markets() -> Dict[str, Any]:
+def _fetch_crypto_markets() -> dict[str, Any]:
     """
     암호화폐 시장 현황 조회 (CoinGecko)
 
@@ -157,21 +144,15 @@ def _fetch_crypto_markets() -> Dict[str, Any]:
             "ethereum": data.get("ethereum", {}),
             "global": data.get("global", {}),
             "available": available,
-            "timestamp": data.get("timestamp", "")
+            "timestamp": data.get("timestamp", ""),
         }
 
     except Exception as e:
         logger.error(f"암호화폐 시장 데이터 수집 실패: {str(e)}")
-        return {
-            "bitcoin": {},
-            "ethereum": {},
-            "global": {},
-            "available": False,
-            "error": str(e)
-        }
+        return {"bitcoin": {}, "ethereum": {}, "global": {}, "available": False, "error": str(e)}
 
 
-def _fetch_market_sentiment() -> Dict[str, Any]:
+def _fetch_market_sentiment() -> dict[str, Any]:
     """
     시장 심리 지수 조회 (Fear & Greed Index)
 
@@ -201,7 +182,7 @@ def _fetch_market_sentiment() -> Dict[str, Any]:
             "trend": trend_data.get("trend", "stable"),
             "change_from_week": trend_data.get("change_from_week", 0),
             "available": available,
-            "timestamp": index_data.get("timestamp", "")
+            "timestamp": index_data.get("timestamp", ""),
         }
 
     except Exception as e:
@@ -212,11 +193,11 @@ def _fetch_market_sentiment() -> Dict[str, Any]:
             "interpretation": "",
             "trend": "stable",
             "available": False,
-            "error": str(e)
+            "error": str(e),
         }
 
 
-def _fetch_forex_data() -> Dict[str, Any]:
+def _fetch_forex_data() -> dict[str, Any]:
     """
     환율 데이터 조회 (Alpha Vantage)
 
@@ -245,25 +226,21 @@ def _fetch_forex_data() -> Dict[str, Any]:
                 "ask": data.get("ask", 0.0),
             },
             "available": available,
-            "timestamp": data.get("timestamp", "")
+            "timestamp": data.get("timestamp", ""),
         }
 
     except Exception as e:
         logger.error(f"환율 데이터 수집 실패: {str(e)}")
-        return {
-            "usd_krw": {},
-            "available": False,
-            "error": str(e)
-        }
+        return {"usd_krw": {}, "available": False, "error": str(e)}
 
 
 def _analyze_with_llm(
     company_name: str,
     stock_code: str,
-    global_markets: Dict[str, Any],
-    crypto_markets: Dict[str, Any],
-    market_sentiment: Dict[str, Any],
-    forex: Dict[str, Any]
+    global_markets: dict[str, Any],
+    crypto_markets: dict[str, Any],
+    market_sentiment: dict[str, Any],
+    forex: dict[str, Any],
 ) -> str:
     """
     LLM 기반 글로벌 시장 맥락 분석
@@ -325,7 +302,7 @@ def _analyze_with_llm(
         return f"⚠️ 자동 분석 중 오류가 발생했습니다: {str(e)}"
 
 
-def _format_global_markets(data: Dict[str, Any]) -> str:
+def _format_global_markets(data: dict[str, Any]) -> str:
     """글로벌 시장 데이터 포맷팅"""
     if not data.get("available", False):
         return "⚠️ 글로벌 시장 데이터를 사용할 수 없습니다."
@@ -335,13 +312,13 @@ def _format_global_markets(data: Dict[str, Any]) -> str:
     dow = data.get("dow", {})
 
     return f"""
-- S&P 500: {sp500.get('price', 0):.2f} ({sp500.get('change_percent', 0):+.2f}%)
-- NASDAQ: {nasdaq.get('price', 0):.2f} ({nasdaq.get('change_percent', 0):+.2f}%)
-- Dow Jones: {dow.get('price', 0):.2f} ({dow.get('change_percent', 0):+.2f}%)
+- S&P 500: {sp500.get("price", 0):.2f} ({sp500.get("change_percent", 0):+.2f}%)
+- NASDAQ: {nasdaq.get("price", 0):.2f} ({nasdaq.get("change_percent", 0):+.2f}%)
+- Dow Jones: {dow.get("price", 0):.2f} ({dow.get("change_percent", 0):+.2f}%)
 """
 
 
-def _format_crypto_markets(data: Dict[str, Any]) -> str:
+def _format_crypto_markets(data: dict[str, Any]) -> str:
     """암호화폐 시장 데이터 포맷팅"""
     if not data.get("available", False):
         return "⚠️ 암호화폐 시장 데이터를 사용할 수 없습니다."
@@ -353,13 +330,13 @@ def _format_crypto_markets(data: Dict[str, Any]) -> str:
     btc_dominance = global_data.get("bitcoin_dominance", 0)
 
     return f"""
-- Bitcoin: ${btc.get('current_price_usd', 0):,.2f} ({btc.get('price_change_24h', 0):+.2f}%)
-- Ethereum: ${eth.get('current_price_usd', 0):,.2f} ({eth.get('price_change_24h', 0):+.2f}%)
+- Bitcoin: ${btc.get("current_price_usd", 0):,.2f} ({btc.get("price_change_24h", 0):+.2f}%)
+- Ethereum: ${eth.get("current_price_usd", 0):,.2f} ({eth.get("price_change_24h", 0):+.2f}%)
 - BTC 도미넌스: {btc_dominance:.1f}%
 """
 
 
-def _format_market_sentiment(data: Dict[str, Any]) -> str:
+def _format_market_sentiment(data: dict[str, Any]) -> str:
     """시장 심리 데이터 포맷팅"""
     if not data.get("available", False):
         return "⚠️ 시장 심리 데이터를 사용할 수 없습니다."
@@ -376,7 +353,7 @@ def _format_market_sentiment(data: Dict[str, Any]) -> str:
 """
 
 
-def _format_forex(data: Dict[str, Any]) -> str:
+def _format_forex(data: dict[str, Any]) -> str:
     """환율 데이터 포맷팅"""
     if not data.get("available", False):
         return "⚠️ 환율 데이터를 사용할 수 없습니다."
@@ -389,11 +366,7 @@ def _format_forex(data: Dict[str, Any]) -> str:
 """
 
 
-def _create_fallback_analysis(
-    company_name: str,
-    stock_code: str,
-    error: str
-) -> Dict[str, Any]:
+def _create_fallback_analysis(company_name: str, stock_code: str, error: str) -> dict[str, Any]:
     """
     Fallback 분석 결과 생성
 
@@ -414,7 +387,7 @@ def _create_fallback_analysis(
         "forex": {"available": False},
         "analysis": f"⚠️ 글로벌 시장 데이터를 수집할 수 없습니다.\n\n이유: {error}\n\n해결 방법:\n1. Alpha Vantage API 키를 .env 파일에 추가하세요 (ALPHA_VANTAGE_API_KEY)\n2. 인터넷 연결을 확인하세요",
         "timestamp": datetime.now().isoformat(),
-        "error": error
+        "error": error,
     }
 
 
@@ -434,46 +407,36 @@ def create_global_market_agent():
     prompt = (
         "당신은 글로벌 시장과 한국 주식시장의 상관관계를 분석하는 전문가입니다. "
         "투자자들이 글로벌 시장 환경을 이해하고 한국 주식 투자 결정에 활용할 수 있도록 도와주세요.\n\n"
-
         "먼저 `analyze_global_market_context` 도구를 사용해서 다음 데이터를 수집하세요:\n"
         "1. 미국 주요 지수 (S&P 500, NASDAQ, Dow Jones)\n"
         "2. 암호화폐 시장 (Bitcoin, Ethereum)\n"
         "3. 시장 심리 지수 (Fear & Greed Index)\n"
         "4. 환율 (USD/KRW)\n\n"
-
         "데이터를 수집한 후, 다음과 같이 자연스럽게 분석해주세요:\n\n"
-
         "1. **글로벌 시장 현황**: 미국 증시와 암호화폐 시장이 어떻게 움직이고 있는지 요약\n"
         "2. **한국 시장 영향**: 이러한 글로벌 흐름이 한국 주식시장에 어떤 영향을 줄 수 있는지 설명\n"
         "3. **리스크 환경**: 지금이 Risk-On(위험 선호) 환경인지 Risk-Off(안전 선호) 환경인지 판단\n"
         "4. **투자 전략 시사점**: 현재 글로벌 환경에서 투자자들이 주의해야 할 점\n\n"
-
         "⚠️ 주의사항:\n"
         "- API 데이터가 없을 경우(available: false), 그 사실을 명시하고 사용 가능한 데이터만으로 분석하세요\n"
         "- 전문 용어를 사용할 때는 간단한 설명을 함께 제공하세요\n"
         "- 투자 초보자도 이해할 수 있도록 쉽게 설명하세요\n\n"
-
         "참고: 이 분석은 투자 참고자료이며 투자 추천이 아닙니다.\n\n"
         f"🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 '{AgentSignal.GLOBAL_MARKET.value}'라고 정확히 적어주세요."
     )
 
     return create_react_agent(
-        model=llm,
-        tools=global_market_tools,
-        prompt=prompt,
-        name="global_market_expert"
+        model=llm, tools=global_market_tools, prompt=prompt, name="global_market_expert"
     )
 
 
 # 테스트 코드
 if __name__ == "__main__":
     import json
+
     logging.basicConfig(level=logging.INFO)
 
-    result = analyze_global_market_context.invoke({
-        "company_name": "삼성전자",
-        "stock_code": "005930"
-    })
+    result = analyze_global_market_context.invoke({"company_name": "삼성전자", "stock_code": "005930"})
 
     print("\n=== 글로벌 시장 맥락 분석 결과 ===")
     print(json.dumps(result, indent=2, ensure_ascii=False))

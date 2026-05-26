@@ -5,20 +5,21 @@ Paxnet 종목토론 크롤링 클라이언트
 """
 
 import logging
-import time
 import re
-from typing import Dict, Any, List, Optional
+import time
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 try:
+    import chromedriver_autoinstaller
     from selenium import webdriver
-    from selenium.webdriver.common.by import By
     from selenium.webdriver.chrome.options import Options
     from selenium.webdriver.chrome.service import Service
-    import chromedriver_autoinstaller
+    from selenium.webdriver.common.by import By
     from webdriver_manager.chrome import ChromeDriverManager
+
     SELENIUM_AVAILABLE = True
 except ImportError:
     SELENIUM_AVAILABLE = False
@@ -31,7 +32,9 @@ class PaxnetCrawlClient:
     def __init__(self):
         """클라이언트 초기화"""
         if not SELENIUM_AVAILABLE:
-            raise ImportError("Selenium이 설치되지 않았습니다. pip install selenium chromedriver-autoinstaller webdriver-manager 실행하세요.")
+            raise ImportError(
+                "Selenium이 설치되지 않았습니다. pip install selenium chromedriver-autoinstaller webdriver-manager 실행하세요."
+            )
 
         self.driver = None
         self.base_url = "https://www.paxnet.co.kr"
@@ -62,7 +65,7 @@ class PaxnetCrawlClient:
             logger.error(f"드라이버 설정 실패: {e}")
             return False
 
-    def fetch_stock_discussions(self, stock_code: str, max_posts: int = 10) -> Dict[str, Any]:
+    def fetch_stock_discussions(self, stock_code: str, max_posts: int = 10) -> dict[str, Any]:
         """
         종목 토론 게시글 수집
 
@@ -73,9 +76,8 @@ class PaxnetCrawlClient:
         Returns:
             Dict containing posts data or error information
         """
-        if not self.driver:
-            if not self.setup_driver():
-                return {"error": "드라이버 설정에 실패했습니다."}
+        if not self.driver and not self.setup_driver():
+            return {"error": "드라이버 설정에 실패했습니다."}
 
         url = f"https://www.paxnet.co.kr/tbbs/list?tbbsType=L&id={stock_code}"
 
@@ -96,20 +98,16 @@ class PaxnetCrawlClient:
                     "url": url,
                     "timestamp": datetime.now().isoformat(),
                     "total_posts": len(posts),
-                    "posts": posts
+                    "posts": posts,
                 }
             else:
-                return {
-                    "error": "게시글을 찾을 수 없습니다.",
-                    "stock_code": stock_code,
-                    "url": url
-                }
+                return {"error": "게시글을 찾을 수 없습니다.", "stock_code": stock_code, "url": url}
 
         except Exception as e:
             logger.error(f"Paxnet 크롤링 오류: {e}")
             return {"error": f"크롤링 오류: {str(e)}"}
 
-    def _extract_posts(self, stock_code: str, max_posts: int) -> List[Dict[str, Any]]:
+    def _extract_posts(self, stock_code: str, max_posts: int) -> list[dict[str, Any]]:
         """게시글 목록 추출"""
         posts = []
 
@@ -141,18 +139,20 @@ class PaxnetCrawlClient:
                     href = element.get_attribute("href")
 
                     # seq 번호 추출
-                    seq_match = re.search(r'bbsWrtView\((\d+)\)', href)
+                    seq_match = re.search(r"bbsWrtView\((\d+)\)", href)
                     seq = seq_match.group(1) if seq_match else ""
 
                     if title and seq:
-                        post_info_list.append({
-                            "title": title,
-                            "seq": seq,
-                            "detail_url": f"https://www.paxnet.co.kr/tbbs/view?id={stock_code}&seq={seq}"
-                        })
+                        post_info_list.append(
+                            {
+                                "title": title,
+                                "seq": seq,
+                                "detail_url": f"https://www.paxnet.co.kr/tbbs/view?id={stock_code}&seq={seq}",
+                            }
+                        )
 
                 except Exception as e:
-                    logger.warning(f"게시글 {i+1} 정보 추출 오류: {e}")
+                    logger.warning(f"게시글 {i + 1} 정보 추출 오류: {e}")
                     continue
 
             logger.info(f"수집 예정 게시글: {len(post_info_list)}개")
@@ -160,14 +160,14 @@ class PaxnetCrawlClient:
             # 각 게시글 내용 수집
             for i, post_info in enumerate(post_info_list):
                 try:
-                    logger.debug(f"게시글 {i+1}/{len(post_info_list)} 처리 중...")
+                    logger.debug(f"게시글 {i + 1}/{len(post_info_list)} 처리 중...")
 
                     content = self._get_post_content(post_info["detail_url"])
 
                     post_data = {
                         "title": post_info["title"],
                         "content": content,
-                        "url": post_info["detail_url"]
+                        "url": post_info["detail_url"],
                     }
 
                     posts.append(post_data)
@@ -177,7 +177,7 @@ class PaxnetCrawlClient:
                         time.sleep(3)
 
                 except Exception as e:
-                    logger.warning(f"게시글 {i+1} 내용 수집 오류: {e}")
+                    logger.warning(f"게시글 {i + 1} 내용 수집 오류: {e}")
                     continue
 
         except Exception as e:
@@ -198,7 +198,7 @@ class PaxnetCrawlClient:
                 ".post-content",
                 "[class*='content']",
                 ".article-content",
-                ".detail-content"
+                ".detail-content",
             ]
 
             for selector in content_selectors:
@@ -214,11 +214,14 @@ class PaxnetCrawlClient:
 
             # 기본 body 텍스트 추출
             body_text = self.driver.find_element(By.TAG_NAME, "body").text
-            lines = [line.strip() for line in body_text.split('\n')
-                    if len(line.strip()) > 10 and
-                    not any(skip in line for skip in ['팍스넷', '로그인', '회원가입', '메뉴'])]
+            lines = [
+                line.strip()
+                for line in body_text.split("\n")
+                if len(line.strip()) > 10
+                and not any(skip in line for skip in ["팍스넷", "로그인", "회원가입", "메뉴"])
+            ]
 
-            return '\n'.join(lines[:10])[:1000]
+            return "\n".join(lines[:10])[:1000]
 
         except Exception as e:
             logger.warning(f"내용 추출 실패: {str(e)}")
@@ -243,7 +246,7 @@ class PaxnetCrawlClient:
 
 
 # 편의 함수
-def fetch_paxnet_discussions(stock_code: str, max_posts: int = 10) -> Dict[str, Any]:
+def fetch_paxnet_discussions(stock_code: str, max_posts: int = 10) -> dict[str, Any]:
     """
     Paxnet 종목토론 데이터 수집 편의 함수
 
@@ -275,7 +278,7 @@ if __name__ == "__main__":
 
     if "error" not in result:
         print(f"✅ 성공: {result['total_posts']}개 게시글 수집")
-        for i, post in enumerate(result['posts'][:3], 1):
+        for i, post in enumerate(result["posts"][:3], 1):
             print(f"{i}. {post['title'][:50]}...")
     else:
         print(f"❌ 오류: {result['error']}")
