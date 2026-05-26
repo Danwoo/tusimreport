@@ -1,101 +1,95 @@
 # Known limitations
 
 This document tracks the honest gaps a senior reviewer would still find,
-ordered by how badly they would bite production. The point of having this
-file is that the gaps are *known*, not denied. Items move out as they get
-addressed.
+ordered by how badly they would bite production. Items move out as they
+get addressed.
 
 ## Resolved since the first audit
 
-- ✅ ~~Agent-level smoke-only tests~~ — `tests/agents/` now covers
-  `technical_agent` (4), `comparative_agent` (3), `financial_react_agent` (5),
-  and `investment_opinion` (10) with PyKRX / FDR / LLM monkeypatching.
-- ✅ ~~No cache invalidation~~ — `BaseAPIClient.get_cached(force_refresh=True)`
-  bypasses live cache, and `_evict_if_over_limit()` LRU-trims when
-  `MAX_CACHE_ENTRIES=256` is exceeded. Tested in
-  `test_base_client_cache_policy.py`.
-- ✅ ~~Partial `datetime.now()` migration~~ — ~50 sites migrated to
-  `kst_isoformat()` / `kst_today_compact()` / `kst_year()` /
-  `kst_month_compact()`. The only `datetime.now()` left is in
-  `BaseAPIClient.get_cached` for mtime comparison (intentional — the OS
-  writes mtime in system clock, mixing it with KST would create negative
-  deltas).
+- ✅ ~~Agent-level smoke-only tests~~ — `tests/agents/` now covers 9 of the
+  9 agents (technical, comparative, financial_react, sentiment, context,
+  esg, community, institutional, investment_opinion) with PyKRX / FDR /
+  Naver / Tavily / LLM monkeypatching. **39 agent tests** total.
+- ✅ ~~No cache invalidation / no LRU eviction~~ —
+  `BaseAPIClient.get_cached(force_refresh=True)` bypasses live cache, and
+  `_evict_if_over_limit()` LRU-trims when `MAX_CACHE_ENTRIES=256` is
+  exceeded. `TUSIM_CACHE_DIR` env var lets operators point cache at a
+  persistent volume.
+- ✅ ~~Partial `datetime.now()` migration~~ — ~50 sites migrated. The only
+  `datetime.now()` left is in `BaseAPIClient.get_cached` for mtime
+  comparison (intentional — the OS writes file mtimes in system clock).
 - ✅ ~~Streamlit `session_state` race~~ — verified that no code outside
-  `main.py` (which is single-threaded under Streamlit's ScriptRunContext)
-  writes to `session_state`. The `ThreadPoolExecutor` in
-  `progressive_supervisor` only emits via generator yields, no shared
-  mutable state. The earlier worry was theoretical.
-- ✅ ~~LLM thread-safety assumed but not documented~~ — assumption is now
-  documented in `config/llm_factory.py` docstring (requests.Session
-  pool guarantees + LangChain creates per-call requests, so sharing one
-  instance across threads is safe).
-- ✅ ~~Timestamp datatype inconsistency~~ — all `timestamp` / `last_updated`
-  / `created_at` keys in result dicts now come from `kst_isoformat()`,
-  producing ISO 8601 strings with `+09:00` offset.
+  `main.py` writes to `session_state`. The earlier worry was theoretical.
+- ✅ ~~LLM thread-safety assumed but not documented~~ — documented in
+  `config/llm_factory.py` docstring with the requests.Session pool argument.
+- ✅ ~~Timestamp datatype inconsistency~~ — all `timestamp` /
+  `last_updated` keys now come from `kst_isoformat()` (+09:00 KST offset).
+- ✅ ~~PyKRX / DART responses not schema-validated~~ —
+  `data/external_schemas.py` introduces `DartStatusEnvelope`,
+  `DartCorpInfo`, and `PykrxFundamentalRow` Pydantic models with
+  `extra="ignore"`. Applied to `dart_api_client.get_company_info` and
+  `korean_financial_react_agent.get_pykrx_market_data`. Column-rename
+  regressions now raise `DataQualityError` instead of silent fallback.
+- ✅ ~~No cost / load numbers~~ — `utils/cost.py` provides `count_tokens`,
+  `estimate_cost_usd`, and `track_llm_call`. Per-call cost is logged as a
+  greppable structured line (`llm_call agent=X model=Y in_tok=N
+  cost_usd=...`). 2025-11 pricing table for the four models we use.
 
 ## Tier 1 — would block production but not yet fully fixed
 
-### 1. PyKRX / DART responses are not schema-validated
+### 1. Coverage uneven across `agents/`
 
-`pykrx.stock.get_market_fundamental(...)` returns a DataFrame whose
-columns are Korean strings (`"시가총액"`, `"PER"`, ...). If the upstream
-library changes those names (it has happened before) every downstream
-agent silently degrades to fallback values without raising. The agent
-tests now pin the *expected* shape with stub DataFrames, but there is no
-production-time validator. The clean fix is a Pydantic model per external
-response shape with `strict=True`.
+Per-agent coverage averages ~50% on average now (function-level), but the
+LangChain ReAct loop in each `create_*_agent()` factory is still
+untested — those need full LLM streaming mocking, which has not been
+written yet. The CI gate is at 30% (current measured: ~40%); reaching
+50% is still the next milestone.
 
-### 2. Coverage is 33% — `agents/` is barely 25%
+### 2. Pydantic validators applied to only 2 sites
 
-Per-module coverage is uneven: pure helpers (`core.signals`, `ui.cards`,
-`utils.time`) sit around 80-100%, but the 9 agent files average ~25%
-because we only test their internal `_logic` functions and not their
-LangChain ReAct loops (those need full LLM mocking, which has not been
-written yet).
-
-### 3. Coverage gate is at 30%
-
-CI fails on coverage < 30%. Current measured coverage is ~33%. We move
-this floor up by ~5%p per test-suite addition; reaching 50% is still a
-stated goal.
+`validate_dart_envelope` is used on `company.json` only. The other 6
+DART endpoints (`fnlttSinglAcnt.json` etc.) still parse with raw `.get()`
+calls. Same applies to PyKRX: `get_market_fundamental` is validated,
+but `get_market_trading_value_by_investor`, `get_index_ohlcv_by_date`,
+`get_market_cap` are not. Roll-out is incremental; the helpers exist,
+the call-sites haven't all been updated.
 
 ## Tier 2 — would be nice but not blocking
 
-### 4. No transitive lockfile
+### 3. No transitive lockfile checked in
 
-`requirements.in` / `requirements-dev.in` are checked in. The pip-compile
-generated `requirements.txt` with transitive pins has not been generated
-yet — the sandboxed CI build couldn't reach PyPI to produce one. The
-direct deps are still minor-pinned via `~=`, so the build is mostly
-deterministic, but a `pip install -r requirements.txt` two months from
-now could pull a newer transitive dep.
+`requirements.in` / `requirements-dev.in` exist and `make lock` produces
+`requirements.txt` via pip-compile. Run it on a developer machine with
+PyPI access — the sandboxed CI container in this environment can't reach
+PyPI, so the lockfile cannot be regenerated here. The direct deps are
+still minor-pinned via `~=`, so the build is mostly deterministic.
 
-### 5. No cost / load numbers
+### 4. ESG data source remains thin (DART filings only)
 
-We have no numbers for "what does one analysis cost in LLM tokens"
-or "at what concurrency does a single Streamlit process saturate". A
-serious deployment plan would need both.
+The ESG agent extracts governance / social / environmental signals from
+DART corporate filings. It does **not** consume:
 
-### 6. ESG agent's data source is thin
+- **MSCI ESG ratings** — paid feed, ~$50K/year for retail-scale access
+- **Sustainalytics ESG Risk Rating** — paid via Morningstar
+- **CDP climate disclosures** — bulk download requires registration
 
-Only DART filings; doesn't compare against MSCI / Sustainalytics scores
-or to peers. The "ESG score" displayed is more of a "disclosure
-completeness score". Acceptable for an MVP, not for a customer-facing
-ESG product.
+For an MVP analysis tool this is acceptable; for a customer-facing ESG
+product it isn't. The fix is not code, it's a budget line.
 
-### 7. Cache `cache_dir` lives in `tempfile.gettempdir()`
+### 5. CI cannot regenerate the lockfile in the sandbox
 
-Containers usually mount `/tmp` as tmpfs (memory-backed). That's fine for
-the small 256-entry cache but means a restart loses the working set. The
-Docker compose recipe mounts a named volume at `/tmp` to survive
-restarts, but a user not using compose loses the cache.
+This is an environment quirk: the sandbox the CI container runs in
+doesn't allow outbound to PyPI. The Makefile target `make lock` works
+fine on any developer machine. Adding an offline lockfile step into the
+CI workflow would require giving the runner network egress, which is a
+deployment decision, not a code one.
 
 ## Tier 3 — explicit non-goals (right now)
 
 - **Real-time order book / 호가**: this is an *analysis report* tool,
-  not a trading terminal. KRX direct feed would change the product.
+  not a trading terminal.
 - **Multi-tenant SaaS**: single Streamlit process. No user accounts,
-  no rate limiting per user, no quota tracking.
-- **Global market expansion**: KR market only. The `global_market_agent`
-  surfaces US/crypto context, but the analysis target is always a
-  Korean ticker.
+  no per-user rate limiting, no quota tracking.
+- **Global market expansion**: KR market only. The
+  `global_market_agent` surfaces US/crypto context, but the analysis
+  target is always a Korean ticker.

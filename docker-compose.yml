@@ -25,11 +25,12 @@ services:
       - path: .env
         required: false
     environment:
-      # 컴포즈 레벨에서 추가 오버라이드가 필요할 때 여기. 비워둠.
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # BaseAPIClient가 캐시 디렉토리 루트로 사용. 컨테이너 재시작에도
+      # 캐시가 살아남도록 named volume(api_cache)을 가리키게 둔다.
+      TUSIM_CACHE_DIR: /var/cache/tusim
     volumes:
-      # 캐시(파일 TTL 캐시) 영속화 — 같은 종목 재분석 시 외부 호출을 아낀다.
-      - api_cache:/tmp
+      - api_cache:/var/cache/tusim
     # 컨테이너 안에서 Selenium이 chromium을 띄울 때 /dev/shm이 부족하면
       # SessionNotCreatedException이 나는 게 흔하다. 2gb로 설정.
     shm_size: "2gb"
