@@ -1,0 +1,60 @@
+# Top-level production dependencies — human-edited source.
+#
+# requirements.txt is the fully-pinned lockfile that should be regenerated
+# from this file. Workflow:
+#
+#   # add or change a dep here, then:
+#   pip-compile --resolver=backtracking requirements.in -o requirements.txt
+#
+# To pick up upstream security fixes:
+#   pip-compile --upgrade requirements.in -o requirements.txt
+#
+# Dev tools (ruff/mypy/pytest-cov/types-requests/pip-audit/pre-commit) live in
+# requirements-dev.in and only get installed in CI / local dev. They are kept
+# out of the runtime image to keep the production image small.
+
+# Core Framework
+streamlit~=1.57
+python-dotenv~=1.0
+
+# AI and LangChain — minor pin (langchain bumps majors often)
+langchain~=1.3
+langchain-openai~=1.2
+langchain-google-genai~=4.2
+langgraph~=1.2
+langgraph-supervisor~=0.0.31
+openai>=1.3.0
+google-generativeai>=0.3.0
+
+# Data
+pandas~=2.3
+numpy~=2.4
+finance-datareader~=0.9
+pykrx~=1.2
+requests-html>=0.10.0
+lxml>=4.9.0
+
+# HTTP / scraping
+requests~=2.33
+beautifulsoup4>=4.12.0
+feedparser>=6.0.0
+selenium>=4.15.0
+chromedriver-autoinstaller>=0.6.4
+webdriver-manager>=4.0.1
+
+# Config / serialization
+pydantic-settings~=2.14
+
+# Visualization
+matplotlib>=3.7.0
+mplfinance>=0.12.0
+plotly>=5.17.0
+Pillow>=10.0.0
+
+# Technical analysis
+TA-Lib>=0.4.28
+yfinance>=0.2.28
+
+# Utilities
+python-dateutil>=2.8.0
+tiktoken~=0.13
