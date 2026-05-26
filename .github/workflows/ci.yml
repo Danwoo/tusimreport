@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 같은 PR에 새 push가 들어오면 이전 워크플로우는 취소.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-type-test:
+    name: Lint, type-check, and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff mypy pytest types-requests
+
+      - name: Ruff (lint)
+        run: ruff check .
+
+      - name: Ruff (format check)
+        run: ruff format --check .
+
+      - name: Mypy (strict modules only)
+        # pyproject.toml 의 override가 strict 영역을 지정한다. 나머지는 점진 도입.
+        run: |
+          mypy --config-file pyproject.toml \
+            core/signals.py \
+            core/schemas.py \
+            config/llm_factory.py \
+            ui/cards.py \
+            data/base_client.py
+
+      - name: Pytest
+        run: pytest -q
