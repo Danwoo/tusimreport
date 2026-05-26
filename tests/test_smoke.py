@@ -49,12 +49,14 @@ class TestImports:
         from core import korean_supervisor_langgraph
         from core import progressive_supervisor
         from core import context_manager
-        from core import enhanced_react_agent
+        from core import signals
+        from core import chat_session
 
         assert korean_supervisor_langgraph is not None
         assert progressive_supervisor is not None
         assert context_manager is not None
-        assert enhanced_react_agent is not None
+        assert signals is not None
+        assert chat_session is not None
 
     def test_import_data_clients(self):
         """데이터 클라이언트 import"""
@@ -193,16 +195,34 @@ class TestBasicFunctionality:
         assert logger is not None
 
     def test_no_hardcoded_api_keys(self):
-        """하드코딩된 API 키 없음 확인"""
-        from config.settings import settings
+        """소스 파일에 하드코딩된 API 키가 없는지 검증.
 
-        # deepsearch_api_key는 None이어야 함 (하드코딩 제거됨)
-        # 환경 변수가 설정되지 않은 경우 None이어야 함
+        과거 dart_api_client.py에 키가 박혀있었으나 test에선 deepsearch만 봐서 놓쳤다.
+        이번엔 data/ 디렉토리 전체를 grep 스타일로 스캔한다.
+        """
+        from config.settings import settings
+        import os
+        import re
+        from pathlib import Path
+
+        # 환경 변수에서 읽은 키만 허용
         if settings.deepsearch_api_key:
-            # 환경 변수에서 읽은 경우만 허용
-            import os
-            assert os.getenv("DEEPSEARCH_API_KEY") is not None, \
+            assert os.getenv("DEEPSEARCH_API_KEY") is not None, (
                 "deepsearch_api_key가 하드코딩되어 있습니다"
+            )
+
+        # 40자 이상 hex 문자열은 거의 확실히 API 키. 코드에 있으면 안 된다.
+        # 예외: 주석 안, docstring 안, 테스트 안, .env 예시.
+        hex_key_pattern = re.compile(r'["\']([a-f0-9]{40,})["\']')
+        data_dir = Path(__file__).parent.parent / "data"
+        offenders = []
+        for py_file in data_dir.glob("*.py"):
+            text = py_file.read_text(encoding="utf-8")
+            for match in hex_key_pattern.finditer(text):
+                offenders.append(f"{py_file.name}: {match.group(1)[:10]}...")
+        assert not offenders, (
+            "코드에 하드코딩된 API 키로 의심되는 hex 문자열 발견: " + ", ".join(offenders)
+        )
 
 
 class TestRequirements:
