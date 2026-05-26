@@ -48,6 +48,28 @@ def kst_days_ago_compact(days: int) -> str:
     return (kst_now() - timedelta(days=days)).strftime("%Y%m%d")
 
 
+def kst_month_compact(months_ago: int = 0) -> str:
+    """BOK ECOS가 받는 'YYYYMM' 형식. months_ago가 음수면 미래.
+
+    timedelta는 days만 지원하므로 month 계산은 (years, months) 산술로 한다.
+    BOK가 받는 분기/월별 시계열에 쓰는 헬퍼.
+    """
+    base = kst_now()
+    total_months = base.year * 12 + (base.month - 1) - months_ago
+    year, month_idx = divmod(total_months, 12)
+    return f"{year:04d}{month_idx + 1:02d}"
+
+
+def kst_year(offset: int = 0) -> int:
+    """현재 연도(+offset). 예: kst_year(-1)은 전년도.
+
+    DART의 사업연도(bsns_year) 인자에 쓰인다. UTC 컨테이너에서 1월 1일
+    08:59 KST에 'datetime.now().year'를 호출하면 전년이 나와 DART가 빈
+    응답을 돌려준다.
+    """
+    return kst_now().year + offset
+
+
 def kst_isoformat() -> str:
     """현재 시각의 ISO8601 문자열 (오프셋 +09:00 포함)."""
     return kst_now().isoformat()
