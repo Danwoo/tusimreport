@@ -11,7 +11,6 @@ Korean ESG Analysis Agent - DART API 기반
 """
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from langchain_core.tools import tool
@@ -22,6 +21,7 @@ from core.signals import AgentSignal
 from data.dart_api_client import get_comprehensive_company_data
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
 from utils.helpers import convert_numpy_types
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ def get_esg_analysis_logic(stock_code: str, company_name: str) -> dict[str, Any]
                 "environmental_disclosures": dart_info.get("environmental_info", {}),
             },
             "data_source": "DART OpenAPI",
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": kst_isoformat(),
         }
 
         return convert_numpy_types(esg_info)

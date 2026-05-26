@@ -11,7 +11,6 @@ Paxnet 종목토론 기반 투자 커뮤니티 감정 분석
 """
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from langchain_core.tools import tool
@@ -21,6 +20,7 @@ from config.llm_factory import build_llm
 from core.signals import AgentSignal
 from data.paxnet_crawl_client import fetch_paxnet_discussions
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,7 @@ def _analyze_community_sentiment(company_name: str, stock_code: str, paxnet_data
             "total_posts_analyzed": len(community_texts),
             "sentiment_analysis": parsed_result,
             "community_sources": community_sources,
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": kst_isoformat(),
         }
 
     except Exception as e:
