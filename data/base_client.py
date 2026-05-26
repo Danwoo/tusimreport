@@ -52,6 +52,11 @@ class BaseAPIClient:
     RETRY_TOTAL = 3
     RETRY_BACKOFF_FACTOR = 0.5  # 0.5, 1.0, 2.0초 대기 후 재시도
 
+    # LRU eviction: 캐시 디렉토리에 이 갯수보다 많이 쌓이면 가장 오래된 파일부터 삭제.
+    # 같은 cache_subdir을 공유하는 인스턴스 전반에 적용. 너무 작으면 hot key가
+    # 자주 evict되고, 너무 크면 디스크가 무한히 자란다.
+    MAX_CACHE_ENTRIES = 256
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -152,9 +157,21 @@ class BaseAPIClient:
         self._validate_cache_key(key)
         return os.path.join(self.cache_dir, f"{key}.json")
 
-    def get_cached(self, key: str, max_age_hours: float) -> Any | None:
-        """TTL 내 캐시가 있으면 반환, 없으면 None."""
-        if not self.cache_dir:
+    def get_cached(self, key: str, max_age_hours: float, force_refresh: bool = False) -> Any | None:
+        """TTL 내 캐시가 있으면 반환.
+
+        Args:
+            key: 캐시 키 (path-safe whitelist 통과 필요).
+            max_age_hours: 캐시가 신선하다고 간주할 최대 나이.
+            force_refresh: True면 캐시가 살아 있어도 무시. 호출자가
+                'fresh data right now'를 요구하는 경로용. 캐시 파일은 그대로
+                두고 (다음 호출이 재사용 가능) 그냥 None을 돌려준다.
+
+        NOTE: 시간 비교는 둘 다 `datetime.now()` (tz-naive)로 한다. 파일
+        mtime은 OS가 system clock으로 기록하므로 KST helper로 바꾸면 오히려
+        다른 base를 비교해 음수 delta가 나올 수 있다.
+        """
+        if not self.cache_dir or force_refresh:
             return None
         path = self._cache_path(key)
         if not os.path.exists(path):
@@ -178,6 +195,9 @@ class BaseAPIClient:
         - 캐시는 best-effort 레이어이므로 모든 예외(직렬화 실패, 디스크 풀,
           권한 등)는 warning 로깅 후 swallow한다. 호출자는 캐시 성공/실패와
           무관하게 동작해야 한다.
+        - 쓰기 후 `MAX_CACHE_ENTRIES`를 초과하면 가장 오래된 파일부터 LRU
+          eviction. 멀티프로세스 환경에선 race condition 가능하지만 best-
+          effort 정리이므로 무시 (eviction이 한 번 실패해도 다음 쓰기에서 재시도).
         """
         if not self.cache_dir:
             return
@@ -195,3 +215,26 @@ class BaseAPIClient:
             if tmp_path and os.path.exists(tmp_path):
                 with contextlib.suppress(OSError):
                     os.unlink(tmp_path)
+        self._evict_if_over_limit()
+
+    def _evict_if_over_limit(self) -> None:
+        """LRU eviction: MAX_CACHE_ENTRIES 초과 시 mtime 가장 오래된 것부터 삭제.
+
+        디렉토리 listing은 매번 호출돼 O(N log N). 256 정도 한도면 부담 없음.
+        atomicity는 보장 안 함 — 두 인스턴스가 동시에 eviction을 시도하면
+        한 쪽의 unlink가 ENOENT로 실패할 수 있는데 그건 swallow한다.
+        """
+        if not self.cache_dir:
+            return
+        try:
+            files = [f for f in os.listdir(self.cache_dir) if f.endswith(".json") and not f.startswith(".")]
+            if len(files) <= self.MAX_CACHE_ENTRIES:
+                return
+            # mtime 오름차순 (오래된 것 먼저)
+            paths = [os.path.join(self.cache_dir, f) for f in files]
+            paths.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0)
+            for old_path in paths[: len(paths) - self.MAX_CACHE_ENTRIES]:
+                with contextlib.suppress(OSError):
+                    os.unlink(old_path)
+        except OSError as e:
+            logger.debug(f"cache eviction skipped: {e}")
