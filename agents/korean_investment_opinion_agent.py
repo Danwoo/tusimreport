@@ -3,13 +3,37 @@ Korean Investment Opinion Agent
 8개 전문 에이전트 분석 결과를 종합하여 명확한 투자 의견 생성
 """
 
+import json
 import logging
+import re
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, HumanMessage
-from config.settings import get_llm_model
+
+from config.llm_factory import build_llm
+from core.types import InvestmentOpinion
 
 logger = logging.getLogger(__name__)
+
+
+def _clamp_price(raw: Any, current_price: float, default_mult: float) -> int:
+    """LLM이 반환한 가격을 current_price 대비 합리적 범위(0.5x-2.0x)로 clamp.
+
+    - 파싱 실패/음수/0 → current_price * default_mult로 fallback.
+    - 너무 멀면 (0.5x 미만 또는 2.0x 초과) 경계로 clamp (LLM 환각 방어).
+    """
+    if current_price <= 0:
+        return int(current_price * default_mult)
+    try:
+        price = float(raw)
+    except (TypeError, ValueError):
+        return int(current_price * default_mult)
+    if price <= 0:
+        return int(current_price * default_mult)
+    lower = current_price * 0.5
+    upper = current_price * 2.0
+    return int(max(lower, min(upper, price)))
 
 
 @tool
@@ -18,7 +42,7 @@ def generate_investment_opinion(
     stock_code: str,
     agent_results: Dict[str, Any],
     current_price: Optional[float] = None
-) -> Dict[str, Any]:
+) -> InvestmentOpinion:
     """
     🔧 P1-1: Level 3 투자 의견 생성 (목표가, 손절가, R/R 비율, 분할 매수 전략)
 
@@ -69,23 +93,8 @@ def generate_investment_opinion(
         else:
             logger.info(f"Current price provided: {current_price:,}원")
 
-        # LLM 모델 가져오기
-        provider, model, api_key = get_llm_model(raise_on_missing=True)
-
-        if provider == "gemini":
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            llm = ChatGoogleGenerativeAI(
-                model=model,
-                google_api_key=api_key,
-                temperature=0.3  # 일관된 의견 생성
-            )
-        else:  # openai
-            from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(
-                model=model,
-                api_key=api_key,
-                temperature=0.3
-            )
+        # LLM 모델 (통합 팩토리)
+        llm = build_llm(temperature=0.3)
 
         # 8개 에이전트 결과 요약
         analysis_summary = _summarize_agent_results(agent_results)
@@ -184,9 +193,6 @@ def generate_investment_opinion(
         response = llm.invoke(messages)
         response_text = response.content.strip()
 
-        # JSON 파싱
-        import json
-
         # JSON 블록 추출 (```json ... ``` 형태 처리)
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0].strip()
@@ -195,21 +201,50 @@ def generate_investment_opinion(
 
         opinion_data = json.loads(response_text)
 
+        # 생성지점에서 화이트리스트 검증 — UI가 막더라도 TypedDict 계약을 진실로 만든다.
+        # LLM이 "매수"/"강력매수"/임의 문자열 반환해도 BUY/HOLD/SELL로 정규화.
+        raw_opinion = opinion_data.get("opinion", "HOLD")
+        if raw_opinion not in ("BUY", "HOLD", "SELL"):
+            logger.warning(f"LLM이 비표준 opinion 반환: {raw_opinion!r} → HOLD로 정규화")
+            raw_opinion = "HOLD"
+
+        # confidence도 0-100 clamp
+        try:
+            confidence = int(opinion_data.get("confidence", 50))
+        except (TypeError, ValueError):
+            confidence = 50
+        confidence = max(0, min(100, confidence))
+
+        # 가격/비율도 생성지점에서 합리적 범위로 clamp.
+        # LLM이 target=-5000이나 999999999를 뱉으면 UI에서 % 계산이 깨지므로 막아야 함.
+        target_price = _clamp_price(
+            opinion_data.get("target_price"), current_price, default_mult=1.1
+        )
+        stop_loss = _clamp_price(
+            opinion_data.get("stop_loss"), current_price, default_mult=0.9
+        )
+        try:
+            rr_ratio = round(float(opinion_data.get("risk_reward_ratio", 1.5)), 1)
+        except (TypeError, ValueError):
+            rr_ratio = 1.5
+        # R/R는 음수/0 차단 + 합리적 상한(10배 이상은 비현실)
+        rr_ratio = max(0.1, min(10.0, rr_ratio))
+
         # 🔧 P1-1: Level 3 결과 포맷팅 (목표가, 손절가, R/R, 분할매수 추가)
         result = {
             "company_name": company_name,
             "stock_code": stock_code,
-            "opinion": opinion_data.get("opinion", "HOLD"),
-            "confidence": int(opinion_data.get("confidence", 50)),
+            "opinion": raw_opinion,
+            "confidence": confidence,
             "reasoning": opinion_data.get("reasoning", "분석 결과를 종합하여 판단이 필요합니다."),
             "key_positives": opinion_data.get("key_positives", []),
             "key_risks": opinion_data.get("key_risks", []),
             "timeframe": opinion_data.get("timeframe", "중기(3-6개월)"),
             # 🆕 Level 3 추가 필드
             "current_price": current_price,
-            "target_price": int(opinion_data.get("target_price", current_price * 1.1)),
-            "stop_loss": int(opinion_data.get("stop_loss", current_price * 0.9)),
-            "risk_reward_ratio": round(float(opinion_data.get("risk_reward_ratio", 1.5)), 1),
+            "target_price": target_price,
+            "stop_loss": stop_loss,
+            "risk_reward_ratio": rr_ratio,
             "split_buy_strategy": opinion_data.get("split_buy_strategy", [
                 {"order": "1차", "price_range": f"{int(current_price*0.98):,}-{int(current_price*1.02):,}", "weight": "30%", "timing": "현재가 근처"},
                 {"order": "2차", "price_range": f"{int(current_price*0.94):,}-{int(current_price*0.97):,}", "weight": "40%", "timing": "조정 시"},
@@ -217,8 +252,6 @@ def generate_investment_opinion(
             ])
         }
 
-        # 시간 기록
-        from datetime import datetime
         result["timestamp"] = datetime.now().isoformat()
 
         logger.info(f"✅ Level 3 투자 의견 생성: {result['opinion']} (신뢰도: {result['confidence']}%)")
@@ -231,12 +264,8 @@ def generate_investment_opinion(
         return _create_fallback_opinion(company_name, stock_code, "JSON 파싱 오류", current_price)
     except Exception as e:
         logger.error(f"Error generating investment opinion: {str(e)}")
-        # current_price가 정의되지 않은 경우 기본값 사용
-        try:
-            _current_price = current_price
-        except NameError:
-            _current_price = 100000.0
-        return _create_fallback_opinion(company_name, stock_code, str(e), _current_price)
+        # current_price는 함수 파라미터(또는 _extract_current_price)로 항상 bound되어 있다.
+        return _create_fallback_opinion(company_name, stock_code, str(e), current_price)
 
 
 def _summarize_agent_results(agent_results: Dict[str, Any]) -> str:
@@ -293,7 +322,6 @@ def _extract_current_price(stock_code: str, agent_results: Dict[str, Any]) -> fl
         for agent_name, content in agent_results.items():
             if isinstance(content, str):
                 # "현재가: 65,000원" 같은 패턴 찾기
-                import re
                 price_patterns = [
                     r'현재가[:\s]+([0-9,]+)원?',
                     r'종가[:\s]+([0-9,]+)원?',
@@ -332,8 +360,6 @@ def _create_fallback_opinion(
     current_price: float = 100000.0
 ) -> Dict[str, Any]:
     """🔧 P1-1: Level 3 fallback 투자 의견 (에러 발생 시)"""
-    from datetime import datetime
-
     return {
         "company_name": company_name,
         "stock_code": stock_code,
