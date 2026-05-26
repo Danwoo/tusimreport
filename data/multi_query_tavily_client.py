@@ -9,10 +9,10 @@ Multi-Query Tavily Search Client
 """
 
 import logging
-import requests
-from typing import Dict, Any, List, Optional
-from datetime import datetime
 import time
+from typing import Any
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +30,7 @@ class MultiQueryTavilyClient:
         self.api_key = api_key
         self.base_url = "https://api.tavily.com"
 
-    def generate_queries(
-        self,
-        company_name: str,
-        stock_code: str
-    ) -> List[Dict[str, Any]]:
+    def generate_queries(self, company_name: str, stock_code: str) -> list[dict[str, Any]]:
         """
         기업명 기반 다각화 검색 쿼리 생성
 
@@ -46,39 +42,16 @@ class MultiQueryTavilyClient:
             쿼리 설정 리스트 (5개)
         """
         queries = [
-            {
-                "query": f"{company_name} stock earnings financial",
-                "category": "재무/실적",
-                "max_results": 10
-            },
-            {
-                "query": f"{company_name} stock price analysis",
-                "category": "주가 분석",
-                "max_results": 10
-            },
-            {
-                "query": f"{company_name} latest news",
-                "category": "최신 뉴스",
-                "max_results": 10
-            },
-            {
-                "query": f"{company_name} market outlook forecast",
-                "category": "시장 전망",
-                "max_results": 10
-            },
-            {
-                "query": f"{company_name} stock investment",
-                "category": "투자 의견",
-                "max_results": 10
-            },
+            {"query": f"{company_name} stock earnings financial", "category": "재무/실적", "max_results": 10},
+            {"query": f"{company_name} stock price analysis", "category": "주가 분석", "max_results": 10},
+            {"query": f"{company_name} latest news", "category": "최신 뉴스", "max_results": 10},
+            {"query": f"{company_name} market outlook forecast", "category": "시장 전망", "max_results": 10},
+            {"query": f"{company_name} stock investment", "category": "투자 의견", "max_results": 10},
         ]
 
         return queries
 
-    def search_single_query(
-        self,
-        query_config: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def search_single_query(self, query_config: dict[str, Any]) -> dict[str, Any]:
         """
         단일 쿼리로 뉴스 검색
 
@@ -116,11 +89,7 @@ class MultiQueryTavilyClient:
                 ],
             }
 
-            response = requests.post(
-                f"{self.base_url}/search",
-                json=payload,
-                timeout=15
-            )
+            response = requests.post(f"{self.base_url}/search", json=payload, timeout=15)
             response.raise_for_status()
 
             return response.json()
@@ -130,11 +99,8 @@ class MultiQueryTavilyClient:
             return {"error": str(e), "results": []}
 
     def fetch_multi_query(
-        self,
-        company_name: str,
-        stock_code: str,
-        target_count: int = 50
-    ) -> List[Dict[str, Any]]:
+        self, company_name: str, stock_code: str, target_count: int = 50
+    ) -> list[dict[str, Any]]:
         """
         멀티 쿼리 전략으로 글로벌 뉴스 수집
 
@@ -159,7 +125,7 @@ class MultiQueryTavilyClient:
 
             for i, query_config in enumerate(query_configs, 1):
                 logger.info(f"   [{i}/{len(query_configs)}] 카테고리: {query_config['category']}")
-                logger.info(f"      쿼리: \"{query_config['query']}\"")
+                logger.info(f'      쿼리: "{query_config["query"]}"')
 
                 # API 호출
                 data = self.search_single_query(query_config)
@@ -171,15 +137,19 @@ class MultiQueryTavilyClient:
                     url = item.get("url", "")
                     if url and url not in seen_urls and len(item.get("title", "")) > 10:
                         seen_urls.add(url)
-                        all_news.append({
-                            "title": item.get("title", ""),
-                            "content": item.get("content", "")[:400],
-                            "url": url,
-                            "score": item.get("score", 0),
-                            "source": item.get("url", "").split("//")[-1].split("/")[0] if url else "unknown",
-                            "category": query_config["category"],
-                            "query": query_config["query"],
-                        })
+                        all_news.append(
+                            {
+                                "title": item.get("title", ""),
+                                "content": item.get("content", "")[:400],
+                                "url": url,
+                                "score": item.get("score", 0),
+                                "source": item.get("url", "").split("//")[-1].split("/")[0]
+                                if url
+                                else "unknown",
+                                "category": query_config["category"],
+                                "query": query_config["query"],
+                            }
+                        )
                         new_count += 1
 
                 logger.info(f"      → 수집: {len(results)}개, 신규: {new_count}개")
@@ -203,14 +173,12 @@ class MultiQueryTavilyClient:
 # 테스트 코드
 if __name__ == "__main__":
     import os
+
     from dotenv import load_dotenv
 
     load_dotenv()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     # API 키 로드
     api_key = os.getenv("TAVILY_API_KEY")
@@ -225,18 +193,14 @@ if __name__ == "__main__":
     client = MultiQueryTavilyClient(api_key)
 
     # 테스트: 삼성전자
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🌍 멀티 쿼리 Tavily Search 테스트 (삼성전자)")
-    print("="*80)
+    print("=" * 80)
 
-    news_list = client.fetch_multi_query(
-        company_name="삼성전자",
-        stock_code="005930",
-        target_count=50
-    )
+    news_list = client.fetch_multi_query(company_name="삼성전자", stock_code="005930", target_count=50)
 
     print(f"\n✅ 총 {len(news_list)}개 뉴스 수집 완료")
-    print(f"\n🔍 상위 10개 뉴스 샘플:")
+    print("\n🔍 상위 10개 뉴스 샘플:")
     for i, news in enumerate(news_list[:10], 1):
         print(f"\n[{i}] [{news['category']}] (Score: {news['score']:.2f})")
         print(f"    제목: {news['title'][:60]}...")

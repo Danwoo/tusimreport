@@ -7,8 +7,8 @@ API Docs: https://www.coingecko.com/en/api/documentation
 """
 
 import logging
-from typing import Dict, Any, Optional, List
 from datetime import datetime
+from typing import Any
 
 from data.base_client import BaseAPIClient
 
@@ -22,13 +22,13 @@ class CoinGeckoClient(BaseAPIClient):
         super().__init__(api_key=None, cache_subdir="coingecko_cache")
         self.base_url = "https://api.coingecko.com/api/v3"
 
-    def _get_cached_data(self, cache_key: str, max_age_minutes: int = 5) -> Optional[Dict[str, Any]]:
+    def _get_cached_data(self, cache_key: str, max_age_minutes: int = 5) -> dict[str, Any] | None:
         return self.get_cached(cache_key, max_age_hours=max_age_minutes / 60.0)
 
-    def _save_to_cache(self, cache_key: str, data: Dict[str, Any]) -> None:
+    def _save_to_cache(self, cache_key: str, data: dict[str, Any]) -> None:
         self.save_cache(cache_key, data)
 
-    def get_market_overview(self) -> Dict[str, Any]:
+    def get_market_overview(self) -> dict[str, Any]:
         """
         암호화폐 시장 개요 조회 (주요 코인: BTC, ETH, BNB, XRP, ADA)
 
@@ -61,14 +61,10 @@ class CoinGeckoClient(BaseAPIClient):
                 "vs_currencies": "usd,krw",
                 "include_market_cap": "true",
                 "include_24hr_vol": "true",
-                "include_24hr_change": "true"
+                "include_24hr_change": "true",
             }
 
-            response = self.session.get(
-                f"{self.base_url}/simple/price",
-                params=params,
-                timeout=10
-            )
+            response = self.session.get(f"{self.base_url}/simple/price", params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
 
@@ -83,7 +79,7 @@ class CoinGeckoClient(BaseAPIClient):
                         "current_price_krw": coin_data.get("krw", 0.0),
                         "price_change_24h": coin_data.get("usd_24h_change", 0.0),
                         "market_cap_usd": coin_data.get("usd_market_cap", 0.0),
-                        "total_volume_usd": coin_data.get("usd_24h_vol", 0.0)
+                        "total_volume_usd": coin_data.get("usd_24h_vol", 0.0),
                     }
 
             # 글로벌 시장 데이터 추가
@@ -98,7 +94,7 @@ class CoinGeckoClient(BaseAPIClient):
             logger.error(f"암호화폐 시장 데이터 조회 실패: {str(e)}")
             return self._create_fallback_market_overview()
 
-    def _get_global_market_data(self) -> Dict[str, Any]:
+    def _get_global_market_data(self) -> dict[str, Any]:
         """
         글로벌 암호화폐 시장 데이터 조회
 
@@ -122,7 +118,7 @@ class CoinGeckoClient(BaseAPIClient):
                     "total_volume_24h_usd": market_data.get("total_volume", {}).get("usd", 0.0),
                     "bitcoin_dominance": market_data.get("market_cap_percentage", {}).get("btc", 0.0),
                     "eth_dominance": market_data.get("market_cap_percentage", {}).get("eth", 0.0),
-                    "active_cryptocurrencies": market_data.get("active_cryptocurrencies", 0)
+                    "active_cryptocurrencies": market_data.get("active_cryptocurrencies", 0),
                 }
             else:
                 return {}
@@ -131,7 +127,7 @@ class CoinGeckoClient(BaseAPIClient):
             logger.error(f"글로벌 시장 데이터 조회 실패: {str(e)}")
             return {}
 
-    def get_bitcoin_correlation(self, stock_symbol: str = "SPY") -> Dict[str, Any]:
+    def get_bitcoin_correlation(self, stock_symbol: str = "SPY") -> dict[str, Any]:
         """
         비트코인과 주식시장 상관관계 분석 (간이 버전)
 
@@ -170,7 +166,7 @@ class CoinGeckoClient(BaseAPIClient):
                 "bitcoin_change_24h": btc_change,
                 "stock_symbol": stock_symbol,
                 "correlation_interpretation": interpretation,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
 
         except Exception as e:
@@ -180,7 +176,7 @@ class CoinGeckoClient(BaseAPIClient):
                 "bitcoin_change_24h": 0.0,
                 "stock_symbol": stock_symbol,
                 "correlation_interpretation": "데이터 없음",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
 
     def _get_coin_symbol(self, coin_id: str) -> str:
@@ -190,11 +186,11 @@ class CoinGeckoClient(BaseAPIClient):
             "ethereum": "ETH",
             "binancecoin": "BNB",
             "ripple": "XRP",
-            "cardano": "ADA"
+            "cardano": "ADA",
         }
         return symbol_map.get(coin_id, coin_id.upper()[:3])
 
-    def _create_fallback_market_overview(self) -> Dict[str, Any]:
+    def _create_fallback_market_overview(self) -> dict[str, Any]:
         """Fallback 암호화폐 시장 데이터 (API 실패 시)"""
         return {
             "bitcoin": {
@@ -203,7 +199,7 @@ class CoinGeckoClient(BaseAPIClient):
                 "current_price_krw": 0.0,
                 "price_change_24h": 0.0,
                 "market_cap_usd": 0.0,
-                "total_volume_usd": 0.0
+                "total_volume_usd": 0.0,
             },
             "ethereum": {
                 "symbol": "ETH",
@@ -211,11 +207,11 @@ class CoinGeckoClient(BaseAPIClient):
                 "current_price_krw": 0.0,
                 "price_change_24h": 0.0,
                 "market_cap_usd": 0.0,
-                "total_volume_usd": 0.0
+                "total_volume_usd": 0.0,
             },
             "global": {},
             "timestamp": datetime.now().isoformat(),
-            "note": "⚠️ CoinGecko API 연결 실패. 실시간 암호화폐 데이터를 사용할 수 없습니다."
+            "note": "⚠️ CoinGecko API 연결 실패. 실시간 암호화폐 데이터를 사용할 수 없습니다.",
         }
 
 

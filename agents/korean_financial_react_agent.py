@@ -1,38 +1,36 @@
 import logging
-from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from matplotlib import font_manager
-import tempfile
+from typing import Any
 
 # matplotlib backend 설정 (GUI 경고 방지)
 import matplotlib
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import pandas as pd
+from matplotlib import font_manager
 
 matplotlib.use("Agg")
 
 # 한국 주식 데이터 라이브러리
 import FinanceDataReader as fdr
 import pykrx.stock as stock
-
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
-from langchain_core.messages import HumanMessage
 
 from config.llm_factory import build_llm
 from core.signals import AgentSignal
-from utils.helpers import convert_numpy_types
-from data.dart_api_client import get_comprehensive_company_data
 from data.bok_api_client import get_macro_economic_indicators
+from data.dart_api_client import get_comprehensive_company_data
 from data.sector_analysis_client import analyze_sector_relative_performance
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
+from utils.helpers import convert_numpy_types
 
 logger = logging.getLogger(__name__)
 
 
 @tool
-def get_korean_stock_data(stock_code: str) -> Dict[str, Any]:
+def get_korean_stock_data(stock_code: str) -> dict[str, Any]:
     """FinanceDataReader로 한국 주식 기본 데이터 수집"""
     try:
         logger.info(f"Fetching Korean stock data for {stock_code}")
@@ -72,14 +70,10 @@ def get_korean_stock_data(stock_code: str) -> Dict[str, Any]:
             },
             "technical_indicators": {
                 "sma_20": (
-                    float(df["SMA_20"].iloc[-1])
-                    if not pd.isna(df["SMA_20"].iloc[-1])
-                    else current_price
+                    float(df["SMA_20"].iloc[-1]) if not pd.isna(df["SMA_20"].iloc[-1]) else current_price
                 ),
                 "sma_60": (
-                    float(df["SMA_60"].iloc[-1])
-                    if not pd.isna(df["SMA_60"].iloc[-1])
-                    else current_price
+                    float(df["SMA_60"].iloc[-1]) if not pd.isna(df["SMA_60"].iloc[-1]) else current_price
                 ),
                 "price_vs_sma20": (
                     (current_price / df["SMA_20"].iloc[-1] - 1) * 100
@@ -104,13 +98,12 @@ def get_korean_stock_data(stock_code: str) -> Dict[str, Any]:
 
 
 @tool
-def get_pykrx_market_data(stock_code: str) -> Dict[str, Any]:
+def get_pykrx_market_data(stock_code: str) -> dict[str, Any]:
     """PyKRX로 한국 주식 시장 데이터 및 기본 지표 수집"""
     try:
         logger.info(f"Fetching PyKRX market data for {stock_code}")
 
-        # 오늘과 어제 날짜
-        today = datetime.now().strftime("%Y%m%d")
+        # 어제 날짜 (장 마감 후 가장 최근 거래일 추정용)
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
 
         # 종목 기본 정보
@@ -123,18 +116,14 @@ def get_pykrx_market_data(stock_code: str) -> Dict[str, Any]:
                     ticker_info = {
                         "name": stock.get_market_ticker_name(ticker),
                         "market": (
-                            "KOSPI"
-                            if ticker in stock.get_market_ticker_list(market="KOSPI")
-                            else "KOSDAQ"
+                            "KOSPI" if ticker in stock.get_market_ticker_list(market="KOSPI") else "KOSDAQ"
                         ),
                     }
                     break
 
             # 시가총액 및 기본 지표 (날짜 범위로 조회)
             week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
-            fundamental_data = stock.get_market_fundamental(
-                week_ago, yesterday, stock_code
-            )
+            fundamental_data = stock.get_market_fundamental(week_ago, yesterday, stock_code)
 
             result = {
                 "company_info": ticker_info,
@@ -180,9 +169,7 @@ def get_pykrx_market_data(stock_code: str) -> Dict[str, Any]:
 
 
 @tool
-def save_stock_chart(
-    stock_code: str, chart_data: Optional[dict] = None
-) -> Dict[str, Any]:
+def save_stock_chart(stock_code: str, chart_data: dict | None = None) -> dict[str, Any]:
     """한국어 라벨링된 주가 차트 생성 및 저장"""
     try:
         logger.info(f"Creating chart for {stock_code}")
@@ -219,15 +206,11 @@ def save_stock_chart(
         # 이동평균선
         if len(df) > 20:
             sma20 = df["Close"].rolling(20).mean()
-            ax1.plot(
-                df.index, sma20, linewidth=1, label="20일선", color="#ff7f0e", alpha=0.8
-            )
+            ax1.plot(df.index, sma20, linewidth=1, label="20일선", color="#ff7f0e", alpha=0.8)
 
         if len(df) > 60:
             sma60 = df["Close"].rolling(60).mean()
-            ax1.plot(
-                df.index, sma60, linewidth=1, label="60일선", color="#2ca02c", alpha=0.8
-            )
+            ax1.plot(df.index, sma60, linewidth=1, label="60일선", color="#2ca02c", alpha=0.8)
 
         ax1.set_title(f"{stock_code} 주가 차트", fontsize=14, pad=20)
         ax1.set_ylabel("주가 (원)", fontsize=12)
@@ -258,7 +241,7 @@ def save_stock_chart(
             "chart_type": "price_volume",
             "data_points": len(df),
             "created_at": datetime.now().isoformat(),
-            "message": f"Chart saved as {chart_filename} for stock {stock_code}"
+            "message": f"Chart saved as {chart_filename} for stock {stock_code}",
         }
 
     except Exception as e:
@@ -267,7 +250,7 @@ def save_stock_chart(
 
 
 @tool
-def get_dart_company_data(stock_code: str) -> Dict[str, Any]:
+def get_dart_company_data(stock_code: str) -> dict[str, Any]:
     """DART API로 기업 공시 및 재무제표 데이터 수집"""
     try:
         logger.info(f"Fetching DART company data for {stock_code}")
@@ -301,7 +284,7 @@ def get_dart_company_data(stock_code: str) -> Dict[str, Any]:
                 "net_income": ["당기순이익", "순이익", "Net Income"],
                 "total_assets": ["자산총계", "Total Assets"],
                 "total_liabilities": ["부채총계", "Total Liabilities"],
-                "total_equity": ["자본총계", "자본금", "Total Equity"]
+                "total_equity": ["자본총계", "자본금", "Total Equity"],
             }
 
             # 각 지표별로 실제 존재하는 키를 찾아 매핑
@@ -311,7 +294,7 @@ def get_dart_company_data(stock_code: str) -> Dict[str, Any]:
                         financial_summary[metric] = {
                             "value": fin_data[key],
                             "source_key": key,
-                            "data_year": data_year
+                            "data_year": data_year,
                         }
                         break  # 첫 번째로 찾은 유효한 값 사용
 
@@ -344,7 +327,7 @@ def get_dart_company_data(stock_code: str) -> Dict[str, Any]:
 
 
 @tool
-def get_macro_economic_data() -> Dict[str, Any]:
+def get_macro_economic_data() -> dict[str, Any]:
     """한국은행 API로 거시경제 지표 수집 (기준금리, 환율, GDP, CPI 등)"""
     try:
         logger.info("Fetching macro economic indicators from Bank of Korea")
@@ -362,7 +345,7 @@ def get_macro_economic_data() -> Dict[str, Any]:
 
 
 @tool
-def get_sector_analysis(stock_code: str) -> Dict[str, Any]:
+def get_sector_analysis(stock_code: str) -> dict[str, Any]:
     """업종별 상대 평가 및 동종업계 비교 분석"""
     try:
         logger.info(f"Analyzing sector relative performance for {stock_code}")
@@ -392,7 +375,6 @@ financial_tools = [
 _FINANCIAL_PROMPT = (
     "당신은 기업의 재무 상태를 분석하는 재무 분석 전문가입니다. "
     "투자자들이 쉽게 이해할 수 있도록 회사의 재무 건전성과 성과를 분석해주세요.\n\n"
-
     "다음 도구들을 사용해서 종합적인 데이터를 수집한 후, 자연스럽고 이해하기 쉽게 설명해주세요:\n"
     "1. get_korean_stock_data - 기본 주식 데이터 수집\n"
     "2. get_pykrx_market_data - 시장 데이터 수집\n"
@@ -400,36 +382,28 @@ _FINANCIAL_PROMPT = (
     "4. get_macro_economic_data - 경제 환경 파악\n"
     "5. get_sector_analysis - 동종업계 비교\n"
     "6. save_stock_chart - 주가 차트 생성\n\n"
-
     "분석할 때는 다음과 같이 친근하게 설명해주세요:\n\n"
-
     "1. 이 회사가 어떤 사업을 하는 회사인지 간단히 소개해주세요\n"
     "   - 주요 사업 영역과 어떻게 돈을 버는지\n"
     "   - 회사 규모와 시장에서의 위치\n\n"
-
     "2. 회사의 성장세는 어떤지 알려주세요\n"
     "   - 매출이나 이익이 늘고 있는지, 줄고 있는지\n"
     "   - 최근 몇 년간의 추세를 쉽게 설명해주세요\n"
     "   - 같은 업종 다른 회사들과 비교했을 때는 어떤지\n\n"
-
     "3. 회사의 재무 건전성은 어떤지 평가해주세요\n"
     "   - 빚이 너무 많지는 않은지\n"
     "   - 현금 보유 상황은 어떤지\n"
     "   - 앞으로도 안정적으로 사업을 이어갈 수 있을지\n\n"
-
     "4. 투자자 관점에서 이 회사의 매력도를 설명해주세요\n"
     "   - 주가가 기업 가치 대비 적정한지\n"
     "   - 배당은 얼마나 주는지\n"
     "   - 투자할 때 어떤 점들을 고려해야 하는지\n\n"
-
     "5. 주의해서 봐야 할 위험 요소가 있다면 알려주세요\n"
     "   - 재무적으로 취약한 부분이 있는지\n"
     "   - 앞으로 어떤 변화를 주의 깊게 봐야 하는지\n\n"
-
     "전문 용어를 사용할 때는 간단한 설명을 함께 해주시고, "
     "숫자를 제시할 때는 그것이 좋은 건지 나쁜 건지, 평균적인 수준인지 함께 설명해주세요. "
     "마치 친구가 투자 조언을 해주듯이 따뜻하고 이해하기 쉬운 톤으로 작성해주세요.\n\n"
-
     "참고: 이 분석은 재무 참고자료이며 투자 추천이 아닙니다. 객관적인 정보 제공을 목적으로 합니다.\n\n"
     f"🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 '{AgentSignal.FINANCIAL.value}'라고 정확히 적어주세요. "
     "이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
@@ -477,7 +451,7 @@ def get_financial_analysis_logic(stock_code: str, company_name: str = None) -> d
             )
         ]
 
-        result = korean_financial_react_agent.invoke({"messages": messages})
+        result = get_financial_react_agent().invoke({"messages": messages})
         return {
             "agent": "korean_financial_agent",
             "messages": result["messages"],
@@ -493,7 +467,7 @@ def get_financial_analysis_logic(stock_code: str, company_name: str = None) -> d
             company_name=company_name or "Unknown",
             stock_code=stock_code,
             reason=error_msg,
-            data_source="DART API, FinanceDataReader"
+            data_source="DART API, FinanceDataReader",
         )
 
 

@@ -1,8 +1,7 @@
-import os
 from pathlib import Path
-from typing import Optional
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from dotenv import load_dotenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
 
@@ -20,8 +19,8 @@ class Settings(BaseSettings):
     )
 
     # LLM API 키 (OpenAI 또는 Google)
-    openai_api_key: Optional[str] = None
-    google_api_key: Optional[str] = None
+    openai_api_key: str | None = None
+    google_api_key: str | None = None
 
     # LLM 설정
     use_gemini: bool = False  # Gemini 할당량 초과 시 OpenAI fallback
@@ -29,26 +28,26 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4.1-nano"
 
     # 한국 뉴스 API 키 (선택사항)
-    naver_client_id: Optional[str] = None
-    naver_client_secret: Optional[str] = None
+    naver_client_id: str | None = None
+    naver_client_secret: str | None = None
 
     # Tavily Search API 키 (글로벌 뉴스 검색)
-    tavily_api_key: Optional[str] = None
+    tavily_api_key: str | None = None
 
     # 딥서치 뉴스 API (월 20회 제한으로 현재 비활성화 — env 전용)
-    deepsearch_api_key: Optional[str] = None
+    deepsearch_api_key: str | None = None
 
     # KOSIS 국가통계포털 서비스 키
-    kosis_service_key: Optional[str] = None
+    kosis_service_key: str | None = None
 
     # DART (금융감독원 전자공시) API 키
-    dart_api_key: Optional[str] = None
+    dart_api_key: str | None = None
 
     # ECOS (한국은행 경제통계시스템) API 키
-    ecos_api_key: Optional[str] = None
+    ecos_api_key: str | None = None
 
     # Alpha Vantage (글로벌 시장 데이터). 무료 25req/day → 캐싱 필수
-    alpha_vantage_api_key: Optional[str] = None
+    alpha_vantage_api_key: str | None = None
 
     # 애플리케이션 설정
     debug: bool = True
@@ -61,15 +60,13 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-def _is_valid_api_key(key: Optional[str], placeholder: str = "") -> bool:
+def _is_valid_api_key(key: str | None, placeholder: str = "") -> bool:
     """API 키가 유효한지 확인 (None이거나 placeholder가 아니어야 함)"""
     if not key:
         return False
     if placeholder and key == placeholder:
         return False
-    if key.startswith("your_") and key.endswith("_here"):
-        return False
-    return True
+    return not (key.startswith("your_") and key.endswith("_here"))
 
 
 def validate_api_keys() -> dict[str, bool]:
@@ -84,8 +81,8 @@ def validate_api_keys() -> dict[str, bool]:
         "google": _is_valid_api_key(settings.google_api_key),
         "dart": _is_valid_api_key(settings.dart_api_key),
         "ecos": _is_valid_api_key(settings.ecos_api_key),
-        "naver": _is_valid_api_key(settings.naver_client_id) and
-                _is_valid_api_key(settings.naver_client_secret),
+        "naver": _is_valid_api_key(settings.naver_client_id)
+        and _is_valid_api_key(settings.naver_client_secret),
         "tavily": _is_valid_api_key(settings.tavily_api_key),
         "alpha_vantage": _is_valid_api_key(settings.alpha_vantage_api_key),  # 🆕 P1-3
     }
@@ -105,7 +102,9 @@ def get_api_key_status() -> dict[str, str]:
         "ecos": "✅ 설정됨" if validation["ecos"] else "⚠️ 미설정 (경제 지표 제한)",
         "naver": "✅ 설정됨" if validation["naver"] else "⚠️ 미설정 (뉴스 분석 제한)",
         "tavily": "✅ 설정됨" if validation["tavily"] else "ℹ️ 미설정 (선택사항)",
-        "alpha_vantage": "✅ 설정됨" if validation["alpha_vantage"] else "ℹ️ 미설정 (글로벌 시장 제한)",  # 🆕 P1-3
+        "alpha_vantage": "✅ 설정됨"
+        if validation["alpha_vantage"]
+        else "ℹ️ 미설정 (글로벌 시장 제한)",  # 🆕 P1-3
     }
 
 

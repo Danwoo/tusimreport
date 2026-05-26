@@ -6,16 +6,15 @@ DART (전자공시) API 클라이언트
 DART OpenAPI: https://opendart.fss.or.kr/
 """
 
+import io
 import logging
 import os
-import requests
-import pandas as pd
-from functools import lru_cache
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
 import time
 import zipfile
-import io
+from datetime import datetime, timedelta
+from typing import Any
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,7 @@ logger = logging.getLogger(__name__)
 class DARTAPIClient:
     """DART OpenAPI 클라이언트"""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         # API 키는 .env(DART_API_KEY)에서만 로드. 하드코딩 금지.
         self.api_key = api_key or os.getenv("DART_API_KEY")
         if not self.api_key:
@@ -35,11 +34,9 @@ class DARTAPIClient:
         self.session = requests.Session()
 
         # 요청 헤더 설정
-        self.session.headers.update(
-            {"User-Agent": "TuSimReport/1.0", "Accept": "application/json"}
-        )
+        self.session.headers.update({"User-Agent": "TuSimReport/1.0", "Accept": "application/json"})
 
-    def _make_request(self, endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _make_request(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
         """API 요청 실행"""
         params["crtfc_key"] = self.api_key
 
@@ -58,7 +55,7 @@ class DARTAPIClient:
             logger.error(f"DART API request failed: {str(e)}")
             return {"status": "error", "message": str(e)}
 
-    def get_corp_code(self, corp_name: str) -> Optional[str]:
+    def get_corp_code(self, corp_name: str) -> str | None:
         """기업명으로 고유번호(corp_code) 조회"""
         try:
             # 기업 개요 조회
@@ -75,7 +72,7 @@ class DARTAPIClient:
             logger.error(f"Error getting corp_code for {corp_name}: {str(e)}")
             return None
 
-    def get_company_info(self, corp_code: str) -> Dict[str, Any]:
+    def get_company_info(self, corp_code: str) -> dict[str, Any]:
         """기업 개요 조회"""
         try:
             params = {"corp_code": corp_code}
@@ -102,9 +99,7 @@ class DARTAPIClient:
                     "acc_mt": result.get("acc_mt"),
                 }
 
-            return {
-                "error": f"Company info not found: {result.get('message', 'Unknown error')}"
-            }
+            return {"error": f"Company info not found: {result.get('message', 'Unknown error')}"}
 
         except Exception as e:
             logger.error(f"Error getting company info: {str(e)}")
@@ -112,7 +107,7 @@ class DARTAPIClient:
 
     def get_financial_statements(
         self, corp_code: str, bsns_year: str, reprt_code: str = "11013"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """재무제표 조회
 
         Args:
@@ -149,17 +144,13 @@ class DARTAPIClient:
                     "last_updated": datetime.now().isoformat(),
                 }
 
-            return {
-                "error": f"Financial statements not found: {result.get('message', 'Unknown error')}"
-            }
+            return {"error": f"Financial statements not found: {result.get('message', 'Unknown error')}"}
 
         except Exception as e:
             logger.error(f"Error getting financial statements: {str(e)}")
             return {"error": str(e)}
 
-    def get_recent_disclosures(
-        self, corp_code: str, page_count: int = 10
-    ) -> List[Dict[str, Any]]:
+    def get_recent_disclosures(self, corp_code: str, page_count: int = 10) -> list[dict[str, Any]]:
         """최근 공시 조회"""
         try:
             end_dt = datetime.now().strftime("%Y%m%d")
@@ -200,7 +191,7 @@ class DARTAPIClient:
             logger.error(f"Error getting recent disclosures: {str(e)}")
             return []
 
-    def get_stock_code_to_corp_code_mapping(self, stock_code: str) -> Optional[str]:
+    def get_stock_code_to_corp_code_mapping(self, stock_code: str) -> str | None:
         """주식코드로 고유번호 찾기 - 실제 DART API 사용"""
         try:
             # DART corpcode.xml 다운로드 및 파싱으로 실제 매핑 찾기
@@ -210,7 +201,7 @@ class DARTAPIClient:
             logger.error(f"Error mapping stock code {stock_code}: {str(e)}")
             return None
 
-    def _load_corp_code_map(self) -> Dict[str, str]:
+    def _load_corp_code_map(self) -> dict[str, str]:
         """DART CORPCODE.xml을 한 번만 다운로드해 stock_code → corp_code 맵 빌드.
 
         프로세스 수명 동안 캐싱되어 종목마다 3MB ZIP을 재다운로드하지 않는다.
@@ -234,7 +225,7 @@ class DARTAPIClient:
             xml_content = zip_file.read("CORPCODE.xml")
 
         root = ET.fromstring(xml_content)
-        mapping: Dict[str, str] = {}
+        mapping: dict[str, str] = {}
         for company in root.findall(".//list"):
             stock_code_elem = company.find("stock_code")
             corp_code_elem = company.find("corp_code")
@@ -251,13 +242,13 @@ class DARTAPIClient:
         logger.info(f"Loaded {len(mapping)} corp_code entries from DART")
         return mapping
 
-    def _get_corp_code_map(self) -> Dict[str, str]:
+    def _get_corp_code_map(self) -> dict[str, str]:
         """인스턴스 레벨 메모이제이션. lru_cache는 self 캐시가 GC를 방해해서 직접 구현."""
         if not hasattr(self, "_corp_code_map_cache"):
             self._corp_code_map_cache = self._load_corp_code_map()
         return self._corp_code_map_cache
 
-    def _fetch_corp_code_from_dart_api(self, stock_code: str) -> Optional[str]:
+    def _fetch_corp_code_from_dart_api(self, stock_code: str) -> str | None:
         """stock_code → corp_code 조회 (메모이즈된 맵 사용)."""
         try:
             mapping = self._get_corp_code_map()
@@ -271,216 +262,214 @@ class DARTAPIClient:
             logger.error(f"Error fetching corp_code from DART API: {str(e)}")
             return None
 
-    def get_major_shareholder_info(self, corp_code: str, bsns_year: str = None) -> Dict[str, Any]:
+    def get_major_shareholder_info(self, corp_code: str, bsns_year: str = None) -> dict[str, Any]:
         """최대주주 및 특수관계인 정보 조회"""
         try:
             if not bsns_year:
                 bsns_year = str(datetime.now().year - 1)  # 전년도 데이터
-            
+
             params = {
                 "corp_code": corp_code,
                 "bsns_year": bsns_year,
-                "reprt_code": "11011"  # 3분기보고서
+                "reprt_code": "11011",  # 3분기보고서
             }
-            
+
             result = self._make_request("hyslrSttus.json", params)
-            
+
             if result.get("status") == "000" and result.get("list"):
                 shareholders = []
                 for item in result["list"]:
-                    shareholders.append({
-                        "nm": item.get("nm"),  # 성명(명칭)
-                        "relate": item.get("relate"),  # 관계
-                        "stock_knd": item.get("stock_knd"),  # 주식종류
-                        "bsis_posesn_stock_co": item.get("bsis_posesn_stock_co", "0").replace(",", ""),
-                        "bsis_posesn_stock_qota_rt": item.get("bsis_posesn_stock_qota_rt", "0"),
-                        "trmend_posesn_stock_co": item.get("trmend_posesn_stock_co", "0").replace(",", ""),
-                        "trmend_posesn_stock_qota_rt": item.get("trmend_posesn_stock_qota_rt", "0")
-                    })
-                
+                    shareholders.append(
+                        {
+                            "nm": item.get("nm"),  # 성명(명칭)
+                            "relate": item.get("relate"),  # 관계
+                            "stock_knd": item.get("stock_knd"),  # 주식종류
+                            "bsis_posesn_stock_co": item.get("bsis_posesn_stock_co", "0").replace(",", ""),
+                            "bsis_posesn_stock_qota_rt": item.get("bsis_posesn_stock_qota_rt", "0"),
+                            "trmend_posesn_stock_co": item.get("trmend_posesn_stock_co", "0").replace(
+                                ",", ""
+                            ),
+                            "trmend_posesn_stock_qota_rt": item.get("trmend_posesn_stock_qota_rt", "0"),
+                        }
+                    )
+
                 return {
                     "year": bsns_year,
                     "major_shareholders": shareholders,
                     "data_source": "DART - Major Shareholders",
-                    "last_updated": datetime.now().isoformat()
+                    "last_updated": datetime.now().isoformat(),
                 }
-            
+
             return {"error": f"Major shareholder info not found: {result.get('message', 'Unknown error')}"}
-            
+
         except Exception as e:
             logger.error(f"Error getting major shareholder info: {str(e)}")
             return {"error": str(e)}
 
-    def get_executive_info(self, corp_code: str, bsns_year: str = None) -> Dict[str, Any]:
+    def get_executive_info(self, corp_code: str, bsns_year: str = None) -> dict[str, Any]:
         """임원 현황 조회"""
         try:
             if not bsns_year:
                 bsns_year = str(datetime.now().year - 1)
-            
-            params = {
-                "corp_code": corp_code,
-                "bsns_year": bsns_year,
-                "reprt_code": "11011"
-            }
-            
+
+            params = {"corp_code": corp_code, "bsns_year": bsns_year, "reprt_code": "11011"}
+
             result = self._make_request("exctvSttus.json", params)
-            
+
             if result.get("status") == "000" and result.get("list"):
                 executives = []
                 for item in result["list"]:
-                    executives.append({
-                        "nm": item.get("nm"),  # 성명
-                        "sexdstn": item.get("sexdstn"),  # 성별
-                        "birth_ym": item.get("birth_ym"),  # 생년월
-                        "ofcps": item.get("ofcps"),  # 직위
-                        "rgist_exctv_at": item.get("rgist_exctv_at"),  # 등기임원여부
-                        "tenure_bgn_dt": item.get("tenure_bgn_dt"),  # 임기시작일
-                        "tenure_end_dt": item.get("tenure_end_dt"),  # 임기만료일
-                        "crrs": item.get("crrs"),  # 주요경력
-                        "main_career": item.get("main_career"),  # 담당업무
-                        "mxmm_shrholdr_relate": item.get("mxmm_shrholdr_relate")  # 최대주주와의관계
-                    })
-                
+                    executives.append(
+                        {
+                            "nm": item.get("nm"),  # 성명
+                            "sexdstn": item.get("sexdstn"),  # 성별
+                            "birth_ym": item.get("birth_ym"),  # 생년월
+                            "ofcps": item.get("ofcps"),  # 직위
+                            "rgist_exctv_at": item.get("rgist_exctv_at"),  # 등기임원여부
+                            "tenure_bgn_dt": item.get("tenure_bgn_dt"),  # 임기시작일
+                            "tenure_end_dt": item.get("tenure_end_dt"),  # 임기만료일
+                            "crrs": item.get("crrs"),  # 주요경력
+                            "main_career": item.get("main_career"),  # 담당업무
+                            "mxmm_shrholdr_relate": item.get("mxmm_shrholdr_relate"),  # 최대주주와의관계
+                        }
+                    )
+
                 return {
                     "year": bsns_year,
                     "executives": executives,
                     "total_executives": len(executives),
                     "data_source": "DART - Executive Status",
-                    "last_updated": datetime.now().isoformat()
+                    "last_updated": datetime.now().isoformat(),
                 }
-            
+
             return {"error": f"Executive info not found: {result.get('message', 'Unknown error')}"}
-            
+
         except Exception as e:
             logger.error(f"Error getting executive info: {str(e)}")
             return {"error": str(e)}
 
-    def get_dividend_info(self, corp_code: str, bsns_year: str = None) -> Dict[str, Any]:
+    def get_dividend_info(self, corp_code: str, bsns_year: str = None) -> dict[str, Any]:
         """배당 정보 조회"""
         try:
             if not bsns_year:
                 bsns_year = str(datetime.now().year - 1)
-            
-            params = {
-                "corp_code": corp_code,
-                "bsns_year": bsns_year,
-                "reprt_code": "11011"
-            }
-            
+
+            params = {"corp_code": corp_code, "bsns_year": bsns_year, "reprt_code": "11011"}
+
             result = self._make_request("alotMatter.json", params)
-            
+
             if result.get("status") == "000" and result.get("list"):
                 dividends = []
                 for item in result["list"]:
-                    dividends.append({
-                        "se": item.get("se"),  # 구분
-                        "stock_knd": item.get("stock_knd"),  # 주식종류
-                        "thstrm": item.get("thstrm", "0").replace(",", ""),  # 당기
-                        "frmtrm": item.get("frmtrm", "0").replace(",", ""),  # 전기
-                        "lwfr": item.get("lwfr", "0").replace(",", "")  # 전전기
-                    })
-                
+                    dividends.append(
+                        {
+                            "se": item.get("se"),  # 구분
+                            "stock_knd": item.get("stock_knd"),  # 주식종류
+                            "thstrm": item.get("thstrm", "0").replace(",", ""),  # 당기
+                            "frmtrm": item.get("frmtrm", "0").replace(",", ""),  # 전기
+                            "lwfr": item.get("lwfr", "0").replace(",", ""),  # 전전기
+                        }
+                    )
+
                 return {
                     "year": bsns_year,
                     "dividend_info": dividends,
                     "data_source": "DART - Dividend Information",
-                    "last_updated": datetime.now().isoformat()
+                    "last_updated": datetime.now().isoformat(),
                 }
-            
+
             return {"error": f"Dividend info not found: {result.get('message', 'Unknown error')}"}
-            
+
         except Exception as e:
             logger.error(f"Error getting dividend info: {str(e)}")
             return {"error": str(e)}
 
-    def get_audit_opinion(self, corp_code: str, bsns_year: str = None) -> Dict[str, Any]:
+    def get_audit_opinion(self, corp_code: str, bsns_year: str = None) -> dict[str, Any]:
         """회계감사 의견 조회"""
         try:
             if not bsns_year:
                 bsns_year = str(datetime.now().year - 1)
-            
-            params = {
-                "corp_code": corp_code,
-                "bsns_year": bsns_year,
-                "reprt_code": "11011"
-            }
-            
+
+            params = {"corp_code": corp_code, "bsns_year": bsns_year, "reprt_code": "11011"}
+
             result = self._make_request("acntAudpnOp.json", params)
-            
+
             if result.get("status") == "000" and result.get("list"):
                 audit_opinions = []
                 for item in result["list"]:
-                    audit_opinions.append({
-                        "rcept_no": item.get("rcept_no"),
-                        "bsns_year": item.get("bsns_year"),
-                        "corp_code": item.get("corp_code"),
-                        "audpn_nm": item.get("audpn_nm"),  # 감사의견명
-                        "audpn": item.get("audpn"),  # 감사의견
-                        "auditor": item.get("auditor"),  # 감사인
-                    })
-                
+                    audit_opinions.append(
+                        {
+                            "rcept_no": item.get("rcept_no"),
+                            "bsns_year": item.get("bsns_year"),
+                            "corp_code": item.get("corp_code"),
+                            "audpn_nm": item.get("audpn_nm"),  # 감사의견명
+                            "audpn": item.get("audpn"),  # 감사의견
+                            "auditor": item.get("auditor"),  # 감사인
+                        }
+                    )
+
                 return {
                     "year": bsns_year,
                     "audit_opinions": audit_opinions,
                     "data_source": "DART - Audit Opinion",
-                    "last_updated": datetime.now().isoformat()
+                    "last_updated": datetime.now().isoformat(),
                 }
-            
+
             return {"error": f"Audit opinion not found: {result.get('message', 'Unknown error')}"}
-            
+
         except Exception as e:
             logger.error(f"Error getting audit opinion: {str(e)}")
             return {"error": str(e)}
 
-    def analyze_esg_factors(self, corp_code: str, bsns_year: str = None) -> Dict[str, Any]:
+    def analyze_esg_factors(self, corp_code: str, bsns_year: str = None) -> dict[str, Any]:
         """ESG 요소 분석 (공시 데이터 기반)"""
         try:
             if not bsns_year:
                 bsns_year = str(datetime.now().year - 1)
-            
+
             # ESG 관련 데이터 수집
             esg_data = {}
-            
+
             # Environmental (환경): 감사의견, 회계투명성
             audit_info = self.get_audit_opinion(corp_code, bsns_year)
             if not audit_info.get("error"):
                 esg_data["environmental_governance"] = audit_info
-            
+
             # Social (사회): 직원 현황, 임원 다양성
             executive_info = self.get_executive_info(corp_code, bsns_year)
             if not executive_info.get("error"):
                 esg_data["executive_diversity"] = executive_info
-            
+
             # Governance (지배구조): 주주 구성, 배당
             shareholder_info = self.get_major_shareholder_info(corp_code, bsns_year)
             if not shareholder_info.get("error"):
                 esg_data["governance_structure"] = shareholder_info
-            
+
             dividend_info = self.get_dividend_info(corp_code, bsns_year)
             if not dividend_info.get("error"):
                 esg_data["shareholder_returns"] = dividend_info
-            
+
             # ESG 점수 계산 (간단한 지표 기반)
             esg_score = self._calculate_esg_score(esg_data)
-            
+
             return {
                 "corp_code": corp_code,
                 "year": bsns_year,
                 "esg_analysis": esg_data,
                 "esg_score": esg_score,
                 "analysis_timestamp": datetime.now().isoformat(),
-                "data_source": "DART - ESG Analysis"
+                "data_source": "DART - ESG Analysis",
             }
-            
+
         except Exception as e:
             logger.error(f"Error analyzing ESG factors: {str(e)}")
             return {"error": str(e)}
 
-    def _calculate_esg_score(self, esg_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _calculate_esg_score(self, esg_data: dict[str, Any]) -> dict[str, Any]:
         """ESG 점수 계산 (기본적인 지표 기반)"""
         try:
             scores = {"E": 0, "S": 0, "G": 0, "total": 0}
-            
+
             # Environmental Score (감사의견 기반)
             if "environmental_governance" in esg_data:
                 audit_data = esg_data["environmental_governance"]
@@ -490,31 +479,33 @@ class DARTAPIClient:
                             scores["E"] += 30
                         else:
                             scores["E"] += 10
-            
+
             # Social Score (임원 다양성 기반)
             if "executive_diversity" in esg_data:
                 exec_data = esg_data["executive_diversity"]
                 if exec_data.get("executives"):
                     executives = exec_data["executives"]
-                    gender_diversity = len(set(exec.get("sexdstn", "") for exec in executives if exec.get("sexdstn")))
+                    gender_diversity = len(
+                        set(exec.get("sexdstn", "") for exec in executives if exec.get("sexdstn"))
+                    )
                     scores["S"] += min(gender_diversity * 15, 30)
-            
+
             # Governance Score (지배구조 기반)
             if "governance_structure" in esg_data:
                 governance_data = esg_data["governance_structure"]
                 if governance_data.get("major_shareholders"):
                     scores["G"] += 20
-            
+
             if "shareholder_returns" in esg_data:
                 dividend_data = esg_data["shareholder_returns"]
                 if dividend_data.get("dividend_info"):
                     scores["G"] += 20
-            
+
             # 총점 계산
             scores["total"] = scores["E"] + scores["S"] + scores["G"]
-            
+
             return scores
-            
+
         except Exception as e:
             logger.error(f"Error calculating ESG score: {str(e)}")
             return {"E": 0, "S": 0, "G": 0, "total": 0, "error": str(e)}
@@ -523,12 +514,13 @@ class DARTAPIClient:
 # 전역 인스턴스 - 환경변수에서 API 키 로드
 try:
     from config.settings import settings
+
     dart_client = DARTAPIClient(api_key=settings.dart_api_key)
 except ImportError:
     dart_client = DARTAPIClient(api_key=os.getenv("DART_API_KEY"))
 
 
-def get_comprehensive_company_data(stock_code: str) -> Dict[str, Any]:
+def get_comprehensive_company_data(stock_code: str) -> dict[str, Any]:
     """주식코드로 종합 기업 데이터 조회"""
     try:
         logger.info(f"Getting comprehensive DART data for {stock_code}")
@@ -549,12 +541,8 @@ def get_comprehensive_company_data(stock_code: str) -> Dict[str, Any]:
         current_year = str(datetime.now().year)
         prev_year = str(datetime.now().year - 1)
 
-        financial_current = dart_client.get_financial_statements(
-            corp_code, current_year, "11014"
-        )
-        financial_prev = dart_client.get_financial_statements(
-            corp_code, prev_year, "11014"
-        )
+        financial_current = dart_client.get_financial_statements(corp_code, current_year, "11014")
+        financial_prev = dart_client.get_financial_statements(corp_code, prev_year, "11014")
 
         # 4. 최근 공시 조회
         recent_disclosures = dart_client.get_recent_disclosures(corp_code, 20)

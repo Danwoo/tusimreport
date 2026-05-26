@@ -11,15 +11,13 @@ Paxnet 종목토론 기반 투자 커뮤니티 감정 분석
 """
 
 import logging
-from typing import Dict, Any, List
 from datetime import datetime
+from typing import Any
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
-from langchain_core.messages import HumanMessage
 
 from config.llm_factory import build_llm
-from config.settings import settings
 from core.signals import AgentSignal
 from data.paxnet_crawl_client import fetch_paxnet_discussions
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
@@ -27,7 +25,7 @@ from utils.agent_helpers import create_fallback_message, format_error_message_ko
 logger = logging.getLogger(__name__)
 
 
-def get_community_sentiment_analysis_logic(company_name: str, stock_code: str) -> Dict[str, Any]:
+def get_community_sentiment_analysis_logic(company_name: str, stock_code: str) -> dict[str, Any]:
     """
     한국 투자 커뮤니티 감정 분석 로직
     Paxnet 종목토론 기반 실제 투자자 의견 분석
@@ -49,12 +47,12 @@ def get_community_sentiment_analysis_logic(company_name: str, stock_code: str) -
             company_name=company_name,
             stock_code=stock_code,
             reason=error_msg,
-            data_source="Paxnet 크롤링"
+            data_source="Paxnet 크롤링",
         )
 
 
 @tool
-def get_community_sentiment_analysis(company_name: str, stock_code: str) -> Dict[str, Any]:
+def get_community_sentiment_analysis(company_name: str, stock_code: str) -> dict[str, Any]:
     """
     한국 투자 커뮤니티 감정 분석
     Paxnet 종목토론 기반 실제 투자자 의견 분석
@@ -62,7 +60,7 @@ def get_community_sentiment_analysis(company_name: str, stock_code: str) -> Dict
     return get_community_sentiment_analysis_logic(company_name, stock_code)
 
 
-def _fetch_paxnet_community_data(stock_code: str) -> Dict[str, Any]:
+def _fetch_paxnet_community_data(stock_code: str) -> dict[str, Any]:
     """Paxnet 종목토론 데이터 수집"""
     try:
         logger.info(f"Fetching Paxnet community data for {stock_code}")
@@ -82,7 +80,7 @@ def _fetch_paxnet_community_data(stock_code: str) -> Dict[str, Any]:
         return {"error": str(e), "posts": []}
 
 
-def _analyze_community_sentiment(company_name: str, stock_code: str, paxnet_data: Dict) -> Dict[str, Any]:
+def _analyze_community_sentiment(company_name: str, stock_code: str, paxnet_data: dict) -> dict[str, Any]:
     """커뮤니티 데이터 감정 분석"""
     try:
         sentiment_llm = build_llm(temperature=0.0)
@@ -91,7 +89,7 @@ def _analyze_community_sentiment(company_name: str, stock_code: str, paxnet_data
         community_texts = []
         if paxnet_data.get("posts"):
             community_texts = [
-                f"[게시글 {i+1}] 제목: {post['title']}\n내용: {post['content'][:300]}..."
+                f"[게시글 {i + 1}] 제목: {post['title']}\n내용: {post['content'][:300]}..."
                 for i, post in enumerate(paxnet_data["posts"])
             ]
 
@@ -140,13 +138,15 @@ def _analyze_community_sentiment(company_name: str, stock_code: str, paxnet_data
         community_sources = []
         if paxnet_data.get("posts"):
             for i, post in enumerate(paxnet_data["posts"]):
-                community_sources.append({
-                    "post_number": i + 1,
-                    "title": post.get("title", ""),
-                    "url": post.get("url", ""),
-                    "source": "Paxnet 종목토론",
-                    "type": "community_post"
-                })
+                community_sources.append(
+                    {
+                        "post_number": i + 1,
+                        "title": post.get("title", ""),
+                        "url": post.get("url", ""),
+                        "source": "Paxnet 종목토론",
+                        "type": "community_post",
+                    }
+                )
 
         return {
             "status": "success",
@@ -176,36 +176,28 @@ def create_community_agent():
     prompt = (
         "당신은 한국 투자 커뮤니티의 여론과 심리를 분석하는 전문가입니다. "
         "실제 개인 투자자들의 의견과 토론을 통해 시장의 생생한 분위기를 파악하고 분석해주세요.\n\n"
-
         "먼저 `get_community_sentiment_analysis` 도구를 사용해서 최신 커뮤니티 감정 분석 데이터를 수집한 후, "
         "다음과 같이 투자자 친화적으로 설명해주세요:\n\n"
-
         "1. 현재 이 종목에 대한 투자자들의 분위기가 어떤지 요약해주세요\n"
         "   - 전체적으로 긍정적인지, 부정적인지, 관망세인지\n"
         "   - 투자 심리 점수를 쉬운 말로 설명해주세요\n\n"
-
         "2. 투자자들이 가장 관심 갖는 이슈들을 알려주세요\n"
         "   - 어떤 종류의 정보나 이슈에 집중하고 있는지\n"
         "   - 기술적 분석, 기업 실적, 시장 이슈 등 어떤 관점이 많은지\n"
         "   - 투자자들 사이에서 화제가 되는 특별한 정보나 루머가 있는지\n\n"
-
         "3. 개인 투자자들의 실제 투자 심리를 분석해주세요\n"
         "   - 매수세인지 매도세인지, 관망세인지\n"
         "   - 단기적 관점인지 장기적 관점인지\n"
         "   - 투자자들이 우려하는 리스크는 무엇인지\n\n"
-
         "4. 기관/언론과 다른 개인 투자자만의 시각이 있는지 분석해주세요\n"
         "   - 커뮤니티에서만 나오는 독특한 관점이나 정보\n"
         "   - 일반 뉴스와 다른 해석이나 의견\n"
         "   - 투자자들 간의 의견 대립이 있는지\n\n"
-
         "5. 📋 분석에 사용된 커뮤니티 게시글 출처를 투명하게 공개해주세요\n"
         "   - 상위 5-10개 게시글의 제목을 간단히 나열해주세요\n"
         "   - 어떤 커뮤니티에서 수집된 데이터인지 명시해주세요\n\n"
-
         "개인 투자자들의 생생한 목소리를 전달하되, 객관적이고 균형잡힌 시각으로 분석해주세요. "
         "커뮤니티 특유의 감정적 반응이나 편향성도 있을 수 있음을 고려하여 해석해주세요.\n\n"
-
         "참고: 이 분석은 투자자 여론 참고자료이며 투자 추천이 아닙니다. 커뮤니티 의견의 객관적 분석을 목적으로 합니다.\n\n"
         f"🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 '{AgentSignal.COMMUNITY.value}'라고 정확히 적어주세요. "
         "이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
@@ -227,4 +219,5 @@ if __name__ == "__main__":
     result = get_community_sentiment_analysis(company_name, stock_code)
 
     import json
+
     print(json.dumps(result, indent=2, ensure_ascii=False))

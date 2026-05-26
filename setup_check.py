@@ -4,8 +4,8 @@ TuSimReport 환경 검증 스크립트
 설치 후 환경이 올바르게 설정되었는지 확인합니다.
 """
 
-import sys
 import os
+import sys
 from pathlib import Path
 
 
@@ -94,6 +94,7 @@ def check_api_keys():
     print_section("4. API 키 설정 확인")
 
     from dotenv import load_dotenv
+
     load_dotenv()
 
     required_keys = {
@@ -196,9 +197,9 @@ def check_directory_structure():
 
     # main.py 확인
     if Path("main.py").exists():
-        print(f"✅ main.py")
+        print("✅ main.py")
     else:
-        print(f"❌ main.py (없음)")
+        print("❌ main.py (없음)")
         all_exist = False
 
     return all_exist
