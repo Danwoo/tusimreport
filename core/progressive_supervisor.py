@@ -5,16 +5,22 @@ Progressive Multi-Agent Analysis System
 """
 
 import logging
-from typing import Dict, Any, Generator
-from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from typing import Any
 
 from core.context_manager import get_context_manager
-from core.korean_supervisor_langgraph import create_all_agents, get_supervisor_llm, generate_comprehensive_report
+from core.korean_supervisor_langgraph import (
+    create_all_agents,
+    generate_comprehensive_report,
+    get_supervisor_llm,
+)
 from core.signals import AGENT_TO_SIGNAL, ALL_AGENT_SIGNALS
 
 logger = logging.getLogger(__name__)
+
 
 class ProgressiveAnalysisEngine:
     """점진적 분석 엔진 - 메모리 효율적 멀티 에이전트 실행"""
@@ -27,19 +33,19 @@ class ProgressiveAnalysisEngine:
         # 🔧 P0-4 & P1-3: 병렬 실행 최적화 - 독립적 에이전트 vs 의존적 에이전트 분리
         # 병렬 실행 가능한 독립적 에이전트 (7개) 🆕 P1-3: global_market_expert 추가
         self.parallel_agents = [
-            "context_expert",           # 시장환경 (독립적)
-            "sentiment_expert",         # 뉴스여론 (독립적)
-            "advanced_technical_expert", # 기술분석 (독립적)
-            "institutional_trading_expert", # 기관수급 (독립적)
-            "esg_expert",              # ESG분석 (독립적)
-            "community_expert",        # 커뮤니티 (독립적)
-            "global_market_expert"     # 글로벌시장 (독립적) 🆕 P1-3
+            "context_expert",  # 시장환경 (독립적)
+            "sentiment_expert",  # 뉴스여론 (독립적)
+            "advanced_technical_expert",  # 기술분석 (독립적)
+            "institutional_trading_expert",  # 기관수급 (독립적)
+            "esg_expert",  # ESG분석 (독립적)
+            "community_expert",  # 커뮤니티 (독립적)
+            "global_market_expert",  # 글로벌시장 (독립적) 🆕 P1-3
         ]
 
         # 순차 실행 필요한 의존적 에이전트 (2개)
         self.sequential_agents = [
-            "financial_expert",         # 재무분석 (DART API 의존)
-            "comparative_expert"        # 상대평가 (재무 결과 참고 가능)
+            "financial_expert",  # 재무분석 (DART API 의존)
+            "comparative_expert",  # 상대평가 (재무 결과 참고 가능)
         ]
 
         # 전체 실행 순서 (레거시 호환성 유지)
@@ -53,12 +59,8 @@ class ProgressiveAnalysisEngine:
         logger.info(f"  - 순차 실행: {len(self.sequential_agents)}개 에이전트")
 
     def execute_agent_with_context_control(
-        self,
-        agent_name: str,
-        stock_code: str,
-        company_name: str,
-        previous_summaries: Dict[str, str] = None
-    ) -> Dict[str, Any]:
+        self, agent_name: str, stock_code: str, company_name: str, previous_summaries: dict[str, str] = None
+    ) -> dict[str, Any]:
         """컨텍스트 제어하에 단일 에이전트 실행"""
         try:
             logger.info(f"에이전트 실행 시작: {agent_name}")
@@ -78,9 +80,7 @@ class ProgressiveAnalysisEngine:
                 key_summaries = []
                 for prev_agent, summary in previous_summaries.items():
                     # 완전 보존 - 압축하지 않고 원본 그대로 전달
-                    preserved_content = self.context_manager.preserve_agent_output(
-                        prev_agent, summary
-                    )
+                    preserved_content = self.context_manager.preserve_agent_output(prev_agent, summary)
                     key_summaries.append(f"[{prev_agent}]: {preserved_content}")
 
                 context_info = "\n".join(key_summaries)
@@ -94,9 +94,9 @@ class ProgressiveAnalysisEngine:
             result = agent.invoke({"messages": [{"role": "user", "content": analysis_request}]})
 
             # 결과 처리
-            if 'messages' in result and result['messages']:
-                last_message = result['messages'][-1]
-                content = last_message.content if hasattr(last_message, 'content') else str(last_message)
+            if "messages" in result and result["messages"]:
+                last_message = result["messages"][-1]
+                content = last_message.content if hasattr(last_message, "content") else str(last_message)
 
                 # 완료 신호는 단일 enum에서 조회 (매직 스트링 제거)
                 expected_signal = AGENT_TO_SIGNAL.get(agent_name)
@@ -111,9 +111,7 @@ class ProgressiveAnalysisEngine:
                     )
 
                 # 컨텍스트 완전 보존 - 압축/요약 없음
-                compressed_content = self.context_manager.preserve_agent_output(
-                    agent_name, content
-                )
+                compressed_content = self.context_manager.preserve_agent_output(agent_name, content)
 
                 logger.info(f"✅ {agent_name} 실행 완료 (완료 시그널: {is_complete})")
 
@@ -124,7 +122,7 @@ class ProgressiveAnalysisEngine:
                     "compressed_content": compressed_content,
                     "is_complete": is_complete,
                     "token_count": self.context_manager.count_tokens(content),
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now().isoformat(),
                 }
             else:
                 raise ValueError(f"에이전트 응답이 비어있음: {agent_name}")
@@ -135,15 +133,11 @@ class ProgressiveAnalysisEngine:
                 "agent_name": agent_name,
                 "status": "error",
                 "error": str(e),
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
 
     def _create_targeted_request(
-        self,
-        agent_name: str,
-        stock_code: str,
-        company_name: str,
-        context_info: str = ""
+        self, agent_name: str, stock_code: str, company_name: str, context_info: str = ""
     ) -> str:
         """에이전트별 맞춤형 요청 메시지 생성"""
 
@@ -154,7 +148,7 @@ class ProgressiveAnalysisEngine:
             "advanced_technical_expert": f"종목 {stock_code} ({company_name})에 대한 고급 기술적 분석을 수행해주세요.",
             "institutional_trading_expert": f"종목 {stock_code} ({company_name})에 대한 기관 수급 분석을 수행해주세요.",
             "comparative_expert": f"종목 {stock_code} ({company_name})에 대한 동종업계 상대 평가를 수행해주세요.",
-            "esg_expert": f"종목 {stock_code} ({company_name})에 대한 ESG 및 지속가능성 분석을 수행해주세요."
+            "esg_expert": f"종목 {stock_code} ({company_name})에 대한 ESG 및 지속가능성 분석을 수행해주세요.",
         }
 
         request = base_requests.get(agent_name, f"종목 {stock_code}에 대한 분석을 수행해주세요.")
@@ -165,10 +159,10 @@ class ProgressiveAnalysisEngine:
             context_tokens = self.context_manager.count_tokens(context_info)
             if context_tokens > 50000:  # 5만 토큰 초과시 앞부분만 사용
                 # 앞부분 70% + 뒷부분 30% 조합으로 중요 정보 보존
-                context_lines = context_info.split('\n')
-                front_70 = context_lines[:int(len(context_lines) * 0.7)]
-                back_30 = context_lines[-int(len(context_lines) * 0.3):]
-                context_info = '\n'.join(front_70 + ['...'] + back_30)
+                context_lines = context_info.split("\n")
+                front_70 = context_lines[: int(len(context_lines) * 0.7)]
+                back_30 = context_lines[-int(len(context_lines) * 0.3) :]
+                context_info = "\n".join(front_70 + ["..."] + back_30)
 
             request += f"\n\n참고 정보:\n{context_info}"
 
@@ -192,8 +186,8 @@ class ProgressiveAnalysisEngine:
             # 신호 주변 텍스트를 포함하여 자르기 (앞부분 + 신호 부분)
             if signal_pos > max_length - 100:  # 신호가 뒤쪽에 있으면
                 # 앞부분 일부 + ... + 신호 부분
-                front_part = content[:max_length-200]
-                signal_part = content[signal_pos-50:signal_pos+len(signal)+10]
+                front_part = content[: max_length - 200]
+                signal_part = content[signal_pos - 50 : signal_pos + len(signal) + 10]
                 return front_part + "...\n\n" + signal_part
             else:
                 # 신호가 앞쪽에 있으면 그대로 자르기
@@ -203,13 +197,11 @@ class ProgressiveAnalysisEngine:
             return content[:max_length] + "..."
 
     def stream_progressive_analysis(
-        self,
-        stock_code: str,
-        company_name: str = None
-    ) -> Generator[Dict[str, Any], None, None]:
+        self, stock_code: str, company_name: str = None
+    ) -> Generator[dict[str, Any], None, None]:
         """🔧 P0-4: 병렬 실행 최적화 - 점진적 분석 실행"""
         try:
-            logger.info(f"=== 병렬 실행 모드 분석 시작 ===")
+            logger.info("=== 병렬 실행 모드 분석 시작 ===")
             logger.info(f"종목: {stock_code} ({company_name})")
             logger.info(f"병렬 에이전트: {len(self.parallel_agents)}개")
             logger.info(f"순차 에이전트: {len(self.sequential_agents)}개")
@@ -232,7 +224,7 @@ class ProgressiveAnalysisEngine:
                         agent_name,
                         stock_code,
                         company_name,
-                        {}  # 병렬 에이전트는 서로 독립적이므로 컨텍스트 없음
+                        {},  # 병렬 에이전트는 서로 독립적이므로 컨텍스트 없음
                     )
                     future_to_agent[future] = agent_name
 
@@ -244,7 +236,7 @@ class ProgressiveAnalysisEngine:
                         "status": "starting",
                         "message": f"{agent_name} 분석 시작 중...",
                         "completed_agents": completed_agents,
-                        "total_agents": total_agents
+                        "total_agents": total_agents,
                     }
 
                 # Process completed futures as they finish
@@ -267,10 +259,12 @@ class ProgressiveAnalysisEngine:
                                 "progress": completed_agents / total_agents,
                                 "status": "completed",
                                 "message": f"{agent_name} 분석 완료",
-                                "content": self._preserve_completion_signal(result["compressed_content"], 2000),
+                                "content": self._preserve_completion_signal(
+                                    result["compressed_content"], 2000
+                                ),
                                 "token_count": result["token_count"],
                                 "completed_agents": completed_agents,
-                                "total_agents": total_agents
+                                "total_agents": total_agents,
                             }
                         else:
                             # 실패한 경우
@@ -283,7 +277,7 @@ class ProgressiveAnalysisEngine:
                                 "message": f"{agent_name} 분석 실패: {result['error']}",
                                 "error": result["error"],
                                 "completed_agents": completed_agents,
-                                "total_agents": total_agents
+                                "total_agents": total_agents,
                             }
 
                     except Exception as e:
@@ -294,7 +288,7 @@ class ProgressiveAnalysisEngine:
                             "status": "error",
                             "error": str(e),
                             "completed_agents": completed_agents,
-                            "total_agents": total_agents
+                            "total_agents": total_agents,
                         }
 
             logger.info(f"Phase 1 완료: {completed_agents}/{len(self.parallel_agents)}개 성공")
@@ -312,7 +306,7 @@ class ProgressiveAnalysisEngine:
                         "status": "starting",
                         "message": f"{agent_name} 분석 시작 중...",
                         "completed_agents": completed_agents,
-                        "total_agents": total_agents
+                        "total_agents": total_agents,
                     }
 
                     # 에이전트 실행 (병렬 에이전트 결과 컨텍스트 포함)
@@ -338,7 +332,7 @@ class ProgressiveAnalysisEngine:
                             "content": self._preserve_completion_signal(result["compressed_content"], 2000),
                             "token_count": result["token_count"],
                             "completed_agents": completed_agents,
-                            "total_agents": total_agents
+                            "total_agents": total_agents,
                         }
                     else:
                         # 실패한 경우
@@ -351,7 +345,7 @@ class ProgressiveAnalysisEngine:
                             "message": f"{agent_name} 분석 실패: {result['error']}",
                             "error": result["error"],
                             "completed_agents": completed_agents,
-                            "total_agents": total_agents
+                            "total_agents": total_agents,
                         }
 
                 except Exception as e:
@@ -362,7 +356,7 @@ class ProgressiveAnalysisEngine:
                         "status": "error",
                         "error": str(e),
                         "completed_agents": completed_agents,
-                        "total_agents": total_agents
+                        "total_agents": total_agents,
                     }
 
             logger.info(f"Phase 2 완료: 총 {completed_agents}/{total_agents}개 에이전트 성공")
@@ -374,11 +368,11 @@ class ProgressiveAnalysisEngine:
                         "type": "progress",
                         "status": "generating_report",
                         "message": "종합 보고서 생성 중...",
-                        "progress": 0.95
+                        "progress": 0.95,
                     }
 
                     # 🎯 최종 보고서용 - 전체 원본 분석 내용 사용
-                    logger.info(f"🔍 최종 보고서 생성을 위한 에이전트 분석 내용 확인:")
+                    logger.info("🔍 최종 보고서 생성을 위한 에이전트 분석 내용 확인:")
                     for agent_name, content in agent_results.items():
                         content_length = len(content) if content else 0
                         logger.info(f"  - {agent_name}: {content_length}자")
@@ -396,7 +390,7 @@ class ProgressiveAnalysisEngine:
                         "report": final_report,
                         "completed_agents": completed_agents,
                         "total_agents": total_agents,
-                        "context_stats": self.context_manager.get_context_stats()
+                        "context_stats": self.context_manager.get_context_stats(),
                     }
 
                 except Exception as e:
@@ -405,7 +399,7 @@ class ProgressiveAnalysisEngine:
                         "type": "report_error",
                         "status": "error",
                         "error": str(e),
-                        "message": "최종 보고서 생성 실패"
+                        "message": "최종 보고서 생성 실패",
                     }
             else:
                 yield {
@@ -413,7 +407,7 @@ class ProgressiveAnalysisEngine:
                     "status": "incomplete",
                     "message": f"일부 에이전트 실행 실패 ({completed_agents}/{total_agents})",
                     "completed_agents": completed_agents,
-                    "total_agents": total_agents
+                    "total_agents": total_agents,
                 }
 
         except Exception as e:
@@ -422,8 +416,9 @@ class ProgressiveAnalysisEngine:
                 "type": "system_error",
                 "status": "error",
                 "error": str(e),
-                "message": "분석 시스템 오류 발생"
+                "message": "분석 시스템 오류 발생",
             }
+
 
 # Lazy 전역 Progressive Analysis Engine (import 시점 LLM/에이전트 빌드 회피)
 _progressive_engine: "ProgressiveAnalysisEngine | None" = None

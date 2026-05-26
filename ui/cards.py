@@ -12,8 +12,8 @@ XSS 방어:
 from __future__ import annotations
 
 import html
-from typing import Any, Iterable
-
+from collections.abc import Iterable
+from typing import Any
 
 _SAFE_URL_SCHEMES = ("http://", "https://")
 
@@ -122,12 +122,12 @@ def create_result_card(
 
     news_section = _render_news_sources(agent_name, news_sources) if status == "completed" else ""
 
-    return f"""<div class="result-card" style="--accent-color: {config['color']}; --bg-color: {config['bg']};">
+    return f"""<div class="result-card" style="--accent-color: {config["color"]}; --bg-color: {config["bg"]};">
         <div class="result-header">
-            <div class="result-icon">{config['icon']}</div>
+            <div class="result-icon">{config["icon"]}</div>
             <div class="result-title">
-                <h3 class="result-name">{config['name']}</h3>
-                <p class="result-desc">{config['desc']}</p>
+                <h3 class="result-name">{config["name"]}</h3>
+                <p class="result-desc">{config["desc"]}</p>
             </div>
             <span class="result-status status-{status}">{_STATUS_TEXT[status]}</span>
         </div>
@@ -218,8 +218,8 @@ def create_investment_opinion_card(opinion_data: dict[str, Any]) -> str:
     <div class="investment-opinion-card">
         <div class="opinion-header">
             <h2 class="opinion-title">AI Investment Opinion</h2>
-            <div class="opinion-main {cfg['class']}">
-                {cfg['text']}
+            <div class="opinion-main {cfg["class"]}">
+                {cfg["text"]}
             </div>
             <div class="confidence-section">
                 <div class="confidence-label">

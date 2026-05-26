@@ -9,10 +9,10 @@ Multi-Query Naver News Client
 """
 
 import logging
-import requests
-from typing import Dict, Any, List, Optional
-from datetime import datetime
 import time
+from typing import Any
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +32,7 @@ class MultiQueryNaverClient:
         self.client_secret = client_secret
         self.base_url = "https://openapi.naver.com/v1/search/news.json"
 
-    def generate_queries(
-        self,
-        company_name: str,
-        stock_code: str
-    ) -> List[str]:
+    def generate_queries(self, company_name: str, stock_code: str) -> list[str]:
         """
         기업명 기반 다각화 검색어 생성
 
@@ -48,11 +44,11 @@ class MultiQueryNaverClient:
             검색어 리스트 (5개)
         """
         queries = [
-            company_name,                    # 기본 검색
-            f"{company_name} 실적",          # 실적 관련
-            f"{company_name} 주가",          # 주가 동향
-            f"{company_name} 전망",          # 전망/분석
-            f"{company_name} 발표",          # 공시/발표
+            company_name,  # 기본 검색
+            f"{company_name} 실적",  # 실적 관련
+            f"{company_name} 주가",  # 주가 동향
+            f"{company_name} 전망",  # 전망/분석
+            f"{company_name} 발표",  # 공시/발표
         ]
 
         # 산업별 특화 키워드 (향후 확장 가능)
@@ -62,11 +58,7 @@ class MultiQueryNaverClient:
 
         return queries
 
-    def fetch_single_query(
-        self,
-        query: str,
-        display: int = 10
-    ) -> Dict[str, Any]:
+    def fetch_single_query(self, query: str, display: int = 10) -> dict[str, Any]:
         """
         단일 쿼리로 뉴스 검색
 
@@ -88,12 +80,7 @@ class MultiQueryNaverClient:
                 "sort": "sim",  # 정확도순
             }
 
-            response = requests.get(
-                self.base_url,
-                headers=headers,
-                params=params,
-                timeout=10
-            )
+            response = requests.get(self.base_url, headers=headers, params=params, timeout=10)
             response.raise_for_status()
 
             return response.json()
@@ -103,11 +90,8 @@ class MultiQueryNaverClient:
             return {"error": str(e), "items": []}
 
     def fetch_multi_query(
-        self,
-        company_name: str,
-        stock_code: str,
-        target_count: int = 50
-    ) -> List[Dict[str, Any]]:
+        self, company_name: str, stock_code: str, target_count: int = 50
+    ) -> list[dict[str, Any]]:
         """
         멀티 쿼리 전략으로 뉴스 수집
 
@@ -131,7 +115,7 @@ class MultiQueryNaverClient:
             seen_urls = set()
 
             for i, query in enumerate(queries, 1):
-                logger.info(f"   [{i}/{len(queries)}] 쿼리: \"{query}\"")
+                logger.info(f'   [{i}/{len(queries)}] 쿼리: "{query}"')
 
                 # API 호출
                 data = self.fetch_single_query(query, display=10)
@@ -143,14 +127,16 @@ class MultiQueryNaverClient:
                     url = item.get("link", "")
                     if url and url not in seen_urls:
                         seen_urls.add(url)
-                        all_news.append({
-                            "title": item.get("title", "").replace("<b>", "").replace("</b>", ""),
-                            "content": item.get("description", "").replace("<b>", "").replace("</b>", ""),
-                            "url": url,
-                            "source": "Naver News API",
-                            "published_at": item.get("pubDate", ""),
-                            "query": query,  # 어떤 쿼리로 수집되었는지 추적
-                        })
+                        all_news.append(
+                            {
+                                "title": item.get("title", "").replace("<b>", "").replace("</b>", ""),
+                                "content": item.get("description", "").replace("<b>", "").replace("</b>", ""),
+                                "url": url,
+                                "source": "Naver News API",
+                                "published_at": item.get("pubDate", ""),
+                                "query": query,  # 어떤 쿼리로 수집되었는지 추적
+                            }
+                        )
                         new_count += 1
 
                 logger.info(f"      → 수집: {len(items)}개, 신규: {new_count}개")
@@ -174,14 +160,12 @@ class MultiQueryNaverClient:
 # 테스트 코드
 if __name__ == "__main__":
     import os
+
     from dotenv import load_dotenv
 
     load_dotenv()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     # API 키 로드
     client_id = os.getenv("NAVER_CLIENT_ID")
@@ -198,18 +182,14 @@ if __name__ == "__main__":
     client = MultiQueryNaverClient(client_id, client_secret)
 
     # 테스트: 삼성전자
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("📰 멀티 쿼리 Naver News 테스트 (삼성전자)")
-    print("="*80)
+    print("=" * 80)
 
-    news_list = client.fetch_multi_query(
-        company_name="삼성전자",
-        stock_code="005930",
-        target_count=50
-    )
+    news_list = client.fetch_multi_query(company_name="삼성전자", stock_code="005930", target_count=50)
 
     print(f"\n✅ 총 {len(news_list)}개 뉴스 수집 완료")
-    print(f"\n🔍 상위 10개 뉴스 샘플:")
+    print("\n🔍 상위 10개 뉴스 샘플:")
     for i, news in enumerate(news_list[:10], 1):
         print(f"\n[{i}] [{news['query']}]")
         print(f"    제목: {news['title'][:60]}...")

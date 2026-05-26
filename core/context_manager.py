@@ -5,16 +5,17 @@ Enterprise Context Manager - 토큰 최적화 및 컨텍스트 압축
 """
 
 import logging
-import json
-from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ContextWindow:
     """컨텍스트 윈도우 관리 클래스"""
+
     max_tokens: int = 300000  # 30만 토큰으로 안전하게 설정
     reserved_tokens: int = 100000  # 응답용 여유 토큰 대폭 증가
     agent_summary_tokens: int = 10000  # 에이전트별 여유 토큰
@@ -22,6 +23,7 @@ class ContextWindow:
     @property
     def available_tokens(self) -> int:
         return self.max_tokens - self.reserved_tokens
+
 
 class EnterpriseContextManager:
     """엔터프라이즈급 컨텍스트 관리자"""
@@ -41,6 +43,7 @@ class EnterpriseContextManager:
         """tiktoken encoding을 lazy-load. 처음 호출 시에만 다운로드한다."""
         if self._encoding is None:
             import tiktoken
+
             self._encoding = tiktoken.encoding_for_model(self.model_name)
         return self._encoding
 
@@ -59,7 +62,7 @@ class EnterpriseContextManager:
         logger.info(f"[{agent_name}] 컨텍스트 완전 보존: {original_tokens:,} 토큰")
         return full_output
 
-    def create_progressive_summary(self, agent_outputs: Dict[str, str]) -> str:
+    def create_progressive_summary(self, agent_outputs: dict[str, str]) -> str:
         """점진적 요약 생성 - 정보 손실 최소화"""
         try:
             # 에이전트별 핵심 지표 추출
@@ -70,18 +73,18 @@ class EnterpriseContextManager:
 
                 # 에이전트별 구조화된 요약
                 agent_display_name = {
-                    'context_expert': '시장환경',
-                    'sentiment_expert': '시장심리',
-                    'financial_expert': '재무분석',
-                    'advanced_technical_expert': '기술분석',
-                    'institutional_trading_expert': '수급분석',
-                    'comparative_expert': '상대평가',
-                    'esg_expert': 'ESG평가'
+                    "context_expert": "시장환경",
+                    "sentiment_expert": "시장심리",
+                    "financial_expert": "재무분석",
+                    "advanced_technical_expert": "기술분석",
+                    "institutional_trading_expert": "수급분석",
+                    "comparative_expert": "상대평가",
+                    "esg_expert": "ESG평가",
                 }.get(agent_name, agent_name)
 
                 summary_sections.append(f"## {agent_display_name}\n{compressed}")
 
-            progressive_summary = '\n\n'.join(summary_sections)
+            progressive_summary = "\n\n".join(summary_sections)
 
             # 최종 토큰 검증
             final_tokens = self.count_tokens(progressive_summary)
@@ -102,7 +105,7 @@ class EnterpriseContextManager:
             logger.error(f"점진적 요약 생성 오류: {str(e)}")
             return "## 요약 생성 오류\n기술적 문제로 요약을 생성할 수 없습니다."
 
-    def optimize_data_requests(self, agent_name: str, request_data: Dict[str, Any]) -> Dict[str, Any]:
+    def optimize_data_requests(self, agent_name: str, request_data: dict[str, Any]) -> dict[str, Any]:
         """데이터 요청 최적화 - 중복 제거 및 캐싱"""
         try:
             cache_key = f"{agent_name}_{hash(str(request_data))}"
@@ -140,29 +143,29 @@ class EnterpriseContextManager:
             compression_ratio = available_tokens / prompt_tokens
 
             # 프롬프트의 핵심 부분 보존
-            lines = base_prompt.split('\n')
+            lines = base_prompt.split("\n")
 
             # 중요도별 라인 분류
             critical_lines = []  # CRITICAL REQUIREMENTS, MISSION
             structure_lines = []  # 분석 구조
-            detail_lines = []   # 상세 설명
+            detail_lines = []  # 상세 설명
 
             for line in lines:
-                if any(keyword in line.upper() for keyword in ['CRITICAL', 'MISSION', 'IMPORTANT']):
+                if any(keyword in line.upper() for keyword in ["CRITICAL", "MISSION", "IMPORTANT"]):
                     critical_lines.append(line)
-                elif any(keyword in line for keyword in ['###', '##', '-']):
+                elif any(keyword in line for keyword in ["###", "##", "-"]):
                     structure_lines.append(line)
                 else:
                     detail_lines.append(line)
 
             # 중요도 순으로 재구성
             compressed_lines = (
-                critical_lines +
-                structure_lines[:int(len(structure_lines) * compression_ratio)] +
-                detail_lines[:int(len(detail_lines) * compression_ratio * 0.5)]
+                critical_lines
+                + structure_lines[: int(len(structure_lines) * compression_ratio)]
+                + detail_lines[: int(len(detail_lines) * compression_ratio * 0.5)]
             )
 
-            compressed_prompt = '\n'.join(compressed_lines)
+            compressed_prompt = "\n".join(compressed_lines)
 
             logger.info(f"프롬프트 압축: {prompt_tokens:,} → {self.count_tokens(compressed_prompt):,} 토큰")
             return compressed_prompt
@@ -170,17 +173,18 @@ class EnterpriseContextManager:
         except Exception as e:
             logger.error(f"프롬프트 최적화 오류: {str(e)}")
             # 실패시 단순 truncation
-            return base_prompt[:int(len(base_prompt) * 0.7)]
+            return base_prompt[: int(len(base_prompt) * 0.7)]
 
-    def get_context_stats(self) -> Dict[str, Any]:
+    def get_context_stats(self) -> dict[str, Any]:
         """컨텍스트 사용량 통계"""
         return {
             "max_tokens": self.window.max_tokens,
             "available_tokens": self.window.available_tokens,
             "cached_data_items": len(self.data_cache),
             "agent_summaries": len(self.agent_summaries),
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
+
 
 # 전역 컨텍스트 매니저 인스턴스 (lazy singleton)
 _enterprise_context_manager: "EnterpriseContextManager | None" = None
