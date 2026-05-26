@@ -87,8 +87,13 @@ class BaseAPIClient:
 
         self.cache_dir: str | None = None
         if cache_subdir:
-            # tempfile.gettempdir()로 cross-platform (/tmp on Linux/macOS, %TEMP% on Windows).
-            self.cache_dir = os.path.join(tempfile.gettempdir(), cache_subdir)
+            # Cache root precedence:
+            # 1) TUSIM_CACHE_DIR env var (operator override for persistence —
+            #    point at a mounted volume so cache survives container restarts).
+            # 2) tempfile.gettempdir() default (/tmp on Linux/macOS, %TEMP% on
+            #    Windows) — fast, ephemeral, fine for dev.
+            root = os.environ.get("TUSIM_CACHE_DIR") or tempfile.gettempdir()
+            self.cache_dir = os.path.join(root, cache_subdir)
             os.makedirs(self.cache_dir, exist_ok=True)
 
     # ---- HTTP 도우미 ----
