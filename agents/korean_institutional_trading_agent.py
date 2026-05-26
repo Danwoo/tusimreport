@@ -13,6 +13,7 @@ from langgraph.prebuilt import create_react_agent
 
 from config.llm_factory import build_llm
 from core.signals import AgentSignal
+from data.external_schemas import PYKRX_TRADING_VALUE_COLUMNS, assert_pykrx_columns
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
 from utils.helpers import convert_numpy_types
 from utils.time import kst_now
@@ -33,6 +34,15 @@ def get_investor_trading_analysis_logic(
         trading_value = stock.get_market_trading_value_by_investor(start_str, end_str, stock_code)
         if trading_value.empty:
             return {"error": f"No trading value data for {stock_code}"}
+
+        # PyKRX 컬럼 회귀 가드: 한국어 컬럼 ('매도'/'매수'/'순매수') 중 하나라도
+        # 살아 있는지 확인. 라이브러리가 영문화하면 즉시 DataQualityError가 raise되어
+        # 아래 broad except에서 한글 fallback으로 변환.
+        assert_pykrx_columns(
+            list(trading_value.columns),
+            expected=PYKRX_TRADING_VALUE_COLUMNS,
+            source="pykrx/get_market_trading_value_by_investor",
+        )
 
         analysis_data = {}
         if "순매수" in trading_value.columns:
