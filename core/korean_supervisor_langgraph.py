@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
 """
 Korean Stock Analysis Supervisor - LangGraph 기반
-8개 전문가 에이전트를 통합하는 Supervisor 워크플로우
+9개 전문가 에이전트를 통합하는 Supervisor 워크플로우
 """
 
 import logging
 from datetime import datetime
 from typing import Dict, Any
 
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph_supervisor import create_supervisor
 from langchain_core.messages import HumanMessage
 
-from config.settings import get_llm_model
+from config.llm_factory import build_llm
+from core.signals import AGENT_TO_SIGNAL
 
 # Import existing agents from agents folder
 from agents.korean_context_agent import create_context_agent
 from agents.korean_sentiment_agent import create_sentiment_agent
-from agents.korean_financial_react_agent import korean_financial_react_agent
+from agents.korean_financial_react_agent import get_financial_react_agent
 from agents.korean_advanced_technical_agent import create_advanced_technical_agent
 from agents.korean_institutional_trading_agent import create_institutional_trading_agent
 from agents.korean_comparative_agent import create_comparative_agent
@@ -33,12 +32,8 @@ logger = logging.getLogger(__name__)
 # ====================
 
 def get_supervisor_llm():
-    """Supervisor용 LLM 설정"""
-    provider, model_name, api_key = get_llm_model()
-    if provider == "gemini":
-        return ChatGoogleGenerativeAI(model=model_name, temperature=0.1, google_api_key=api_key)
-    else:
-        return ChatOpenAI(model=model_name, temperature=0.1, api_key=api_key)
+    """Supervisor용 LLM (통합 팩토리)."""
+    return build_llm(temperature=0.1)
 
 # ====================
 # 전문 에이전트 생성 (총 8개)
@@ -50,7 +45,7 @@ def create_all_agents():
         agents = {
             "context_expert": create_context_agent(),
             "sentiment_expert": create_sentiment_agent(),
-            "financial_expert": korean_financial_react_agent,  # 이미 생성된 인스턴스
+            "financial_expert": get_financial_react_agent(),  # lazy 빌드
             "advanced_technical_expert": create_advanced_technical_agent(),
             "institutional_trading_expert": create_institutional_trading_agent(),
             "comparative_expert": create_comparative_agent(),
@@ -93,12 +88,12 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
         # 🔍 전문가 분석 데이터 품질 확인
         total_analysis_length = sum(len(str(analysis)) for analysis in all_analyses.values())
         logger.info(f"🔍 전문가 분석 총 길이: {total_analysis_length:,}자")
-        logger.info(f"🔍 참여 전문가 수: {len(all_analyses)}/8")
+        logger.info(f"🔍 참여 전문가 수: {len(all_analyses)}/9")
 
         # 🚨 데이터 부족 시 조기 반환
         if len(all_analyses) < 4:
-            logger.warning(f"⚠️ 전문가 분석 부족: {len(all_analyses)}/8")
-            return f"## 분석 데이터 부족\n\n{len(all_analyses)}/8개 전문가 분석만 완료되어 종합 보고서 생성이 제한됩니다."
+            logger.warning(f"⚠️ 전문가 분석 부족: {len(all_analyses)}/9")
+            return f"## 분석 데이터 부족\n\n{len(all_analyses)}/9개 전문가 분석만 완료되어 종합 보고서 생성이 제한됩니다."
 
         if total_analysis_length < 1000:
             logger.warning(f"⚠️ 분석 내용 부족: {total_analysis_length}자")
@@ -236,44 +231,45 @@ def generate_comprehensive_report(supervisor_llm, all_analyses: Dict[str, str], 
 # SUPERVISOR 생성
 # ====================
 
+EXPECTED_AGENT_COUNT = 9
+
 def create_korean_supervisor():
-    """7개 전문가 에이전트 + Supervisor 종합 보고서 생성 워크플로우"""
+    """9개 전문가 에이전트 + Supervisor 종합 보고서 생성 워크플로우"""
     try:
-        logger.info("Creating Korean Stock Analysis Supervisor with 7 expert agents.")
+        logger.info(f"Creating Korean Stock Analysis Supervisor with {EXPECTED_AGENT_COUNT} expert agents.")
         supervisor_llm = get_supervisor_llm()
         all_agents = create_all_agents()
 
-        supervisor_prompt = (
-            """🎯 MISSION: You are the Chief Investment Research Director.
+        numbered_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
+        execution_lines = "\n".join(
+            f'{numbered_emojis[i]} {agent_name} → "{signal.value}"'
+            for i, (agent_name, signal) in enumerate(AGENT_TO_SIGNAL.items())
+        )
+        n_agents = len(AGENT_TO_SIGNAL)
+        supervisor_prompt = f"""🎯 MISSION: You are the Chief Investment Research Director.
 
-## 📋 EXECUTION SEQUENCE (7 EXPERT AGENTS):
-1️⃣ context_expert → "MARKET_CONTEXT_ANALYSIS_COMPLETE"
-2️⃣ sentiment_expert → "SENTIMENT_ANALYSIS_COMPLETE"
-3️⃣ financial_expert → "FINANCIAL_ANALYSIS_COMPLETE"
-4️⃣ advanced_technical_expert → "ADVANCED_TECHNICAL_ANALYSIS_COMPLETE"
-5️⃣ institutional_trading_expert → "INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE"
-6️⃣ comparative_expert → "COMPARATIVE_ANALYSIS_COMPLETE"
-7️⃣ esg_expert → "ESG_ANALYSIS_COMPLETE"
+## 📋 EXECUTION SEQUENCE ({n_agents} EXPERT AGENTS):
+{execution_lines}
 
-## 🎯 NEW ARCHITECTURE:
-- Execute 7 specialized expert agents sequentially
+## 🎯 ARCHITECTURE:
+- Execute {n_agents} specialized expert agents
 - Collect all expert analyses
 - Supervisor will generate final comprehensive report
-- NO separate report_expert agent needed
 
 ## ✅ SUCCESS CRITERIA:
-- All 8 expert completion signals received
+- All {n_agents} expert completion signals received
 - Expert analyses collected and ready for final report
 - System ready for supervisor report generation
 
-Execute all 8 expert agents and signal completion."""
-        )
+Execute all {n_agents} expert agents and signal completion."""
 
-        # 8개 전문가 에이전트만 확인 및 로깅
+        # 9개 전문가 에이전트 확인 및 로깅
         logger.info(f"Available agents: {list(all_agents.keys())}")
-        if len(all_agents) != 8:
-            logger.error(f"Expected 8 agents, but got {len(all_agents)}: {list(all_agents.keys())}")
-            raise ValueError("All 8 expert agents must be created")
+        if len(all_agents) != EXPECTED_AGENT_COUNT:
+            logger.error(
+                f"Expected {EXPECTED_AGENT_COUNT} agents, but got {len(all_agents)}: {list(all_agents.keys())}"
+            )
+            raise ValueError(f"All {EXPECTED_AGENT_COUNT} expert agents must be created")
 
         workflow = create_supervisor(
             agents=list(all_agents.values()),
@@ -281,15 +277,30 @@ Execute all 8 expert agents and signal completion."""
             prompt=supervisor_prompt,
         )
 
-        logger.info("Korean Stock Analysis Supervisor with 8 expert agents created successfully.")
+        logger.info(f"Korean Stock Analysis Supervisor with {EXPECTED_AGENT_COUNT} expert agents created successfully.")
         return workflow.compile()
 
     except Exception as e:
         logger.error(f"Error creating Korean supervisor: {str(e)}")
         raise e
 
-# 글로벌 Supervisor 인스턴스
-korean_supervisor_graph = create_korean_supervisor()
+# Lazy supervisor instance: 첫 사용 시점에 빌드 (import 시점 LLM 키 검증 방지)
+_korean_supervisor_graph = None
+
+
+def get_korean_supervisor_graph():
+    """Lazy-singleton accessor for the Korean Supervisor LangGraph workflow."""
+    global _korean_supervisor_graph
+    if _korean_supervisor_graph is None:
+        _korean_supervisor_graph = create_korean_supervisor()
+    return _korean_supervisor_graph
+
+
+def __getattr__(name):
+    """PEP 562: `korean_supervisor_graph` 직접 접근 시 lazy 빌드."""
+    if name == "korean_supervisor_graph":
+        return get_korean_supervisor_graph()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # ====================
 # 진행 상황 추적
@@ -417,19 +428,12 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                 if isinstance(content, dict):
                     messages = content.get("messages", [])
 
-                    # 에이전트 완료 추적 및 분석 결과 저장
+                    # 에이전트 완료 추적 및 분석 결과 저장 (단일 enum 소스)
                     for msg in messages:
                         msg_content = msg.content if hasattr(msg, 'content') else str(msg)
                         for expected_agent in expected_agents:
-                            completion_signal = {
-                                "context_expert": "MARKET_CONTEXT_ANALYSIS_COMPLETE",
-                                "sentiment_expert": "SENTIMENT_ANALYSIS_COMPLETE",
-                                "financial_expert": "FINANCIAL_ANALYSIS_COMPLETE",
-                                "advanced_technical_expert": "ADVANCED_TECHNICAL_ANALYSIS_COMPLETE",
-                                "institutional_trading_expert": "INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE",
-                                "comparative_expert": "COMPARATIVE_ANALYSIS_COMPLETE",
-                                "esg_expert": "ESG_ANALYSIS_COMPLETE"
-                            }.get(expected_agent, "")
+                            signal_enum = AGENT_TO_SIGNAL.get(expected_agent)
+                            completion_signal = signal_enum.value if signal_enum else ""
 
                             if completion_signal and completion_signal in msg_content:
                                 executed_agents.add(expected_agent)
@@ -437,7 +441,7 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                                 analysis_content = msg_content.replace(completion_signal, "").strip()
                                 if len(analysis_content) > 100:  # 의미 있는 내용만
                                     all_analyses[expected_agent] = analysis_content
-                                logger.info(f"✅ Agent {expected_agent} completed. Total: {len(executed_agents)}/7")
+                                logger.info(f"✅ Agent {expected_agent} completed. Total: {len(executed_agents)}/{len(expected_agents)}")
 
             yield {
                 "supervisor": {

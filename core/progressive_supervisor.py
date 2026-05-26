@@ -5,13 +5,14 @@ Progressive Multi-Agent Analysis System
 """
 
 import logging
-from typing import Dict, Any, List, Generator
+from typing import Dict, Any, Generator
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
-from core.context_manager import get_context_manager, EnterpriseContextManager
+from core.context_manager import get_context_manager
 from core.korean_supervisor_langgraph import create_all_agents, get_supervisor_llm, generate_comprehensive_report
+from core.signals import AGENT_TO_SIGNAL, ALL_AGENT_SIGNALS
 
 logger = logging.getLogger(__name__)
 
@@ -97,27 +98,19 @@ class ProgressiveAnalysisEngine:
                 last_message = result['messages'][-1]
                 content = last_message.content if hasattr(last_message, 'content') else str(last_message)
 
-                # 완료 시그널 확인
-                completion_signals = {
-                    "context_expert": "MARKET_CONTEXT_ANALYSIS_COMPLETE",
-                    "sentiment_expert": "SENTIMENT_ANALYSIS_COMPLETE",
-                    "financial_expert": "FINANCIAL_ANALYSIS_COMPLETE",
-                    "advanced_technical_expert": "ADVANCED_TECHNICAL_ANALYSIS_COMPLETE",
-                    "institutional_trading_expert": "INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE",
-                    "comparative_expert": "COMPARATIVE_ANALYSIS_COMPLETE",
-                    "esg_expert": "ESG_ANALYSIS_COMPLETE"
-                }
+                # 완료 신호는 단일 enum에서 조회 (매직 스트링 제거)
+                expected_signal = AGENT_TO_SIGNAL.get(agent_name)
+                expected_signal_str = expected_signal.value if expected_signal else None
+                is_complete = bool(expected_signal_str) and expected_signal_str in content
 
-                expected_signal = completion_signals.get(agent_name)
-                is_complete = expected_signal and expected_signal in content
+                # 신호 누락은 로깅만. 자동 추가로 실패를 성공으로 위장하지 않는다.
+                if not is_complete and expected_signal_str:
+                    logger.warning(
+                        f"{agent_name}: completion signal '{expected_signal_str}' 누락. "
+                        f"content_len={len(content)}. 결과는 보존하되 is_complete=False로 표시."
+                    )
 
-                # 🔧 시니어 개발자 패치: LLM이 completion signal을 빠뜨린 경우 강제 추가
-                if not is_complete and expected_signal and len(content) > 200:
-                    logger.warning(f"🔧 {agent_name}: LLM이 completion signal을 누락함. 자동 추가 중...")
-                    content = content.strip() + f"\n\n{expected_signal}"
-                    is_complete = True
-
-                # 🎯 컨텍스트 완전 보존 - 압축/요약 없음
+                # 컨텍스트 완전 보존 - 압축/요약 없음
                 compressed_content = self.context_manager.preserve_agent_output(
                     agent_name, content
                 )
@@ -186,20 +179,9 @@ class ProgressiveAnalysisEngine:
         if len(content) <= max_length:
             return content
 
-        # 완료 신호 패턴들
-        completion_signals = [
-            "MARKET_CONTEXT_ANALYSIS_COMPLETE",
-            "SENTIMENT_ANALYSIS_COMPLETE",
-            "FINANCIAL_ANALYSIS_COMPLETE",
-            "ADVANCED_TECHNICAL_ANALYSIS_COMPLETE",
-            "INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE",
-            "COMPARATIVE_ANALYSIS_COMPLETE",
-            "ESG_ANALYSIS_COMPLETE"
-        ]
-
-        # 완료 신호가 있는지 확인하고 위치 찾기
+        # 완료 신호가 있는지 확인하고 위치 찾기 (단일 enum 소스)
         signal_info = None
-        for signal in completion_signals:
+        for signal in ALL_AGENT_SIGNALS:
             if signal in content:
                 signal_pos = content.find(signal)
                 signal_info = (signal, signal_pos)
@@ -237,11 +219,11 @@ class ProgressiveAnalysisEngine:
             completed_agents = 0
             total_agents = len(self.execution_order)
 
-            # === Phase 1: 병렬 실행 (6개 독립적 에이전트) ===
+            # === Phase 1: 병렬 실행 (독립적 에이전트) ===
             logger.info(f"Phase 1: {len(self.parallel_agents)}개 에이전트 병렬 실행 시작")
 
-            # ThreadPoolExecutor로 병렬 실행
-            with ThreadPoolExecutor(max_workers=6) as executor:
+            # ThreadPoolExecutor - 워커 수는 병렬 에이전트 수와 일치시켜 큐 대기 방지
+            with ThreadPoolExecutor(max_workers=len(self.parallel_agents)) as executor:
                 # Submit all parallel agents
                 future_to_agent = {}
                 for agent_name in self.parallel_agents:
@@ -339,10 +321,12 @@ class ProgressiveAnalysisEngine:
                     )
 
                     if result["status"] == "success":
-                        # 성공한 경우
-                        agent_results[agent_name] = result["content"]
-                        agent_summaries[agent_name] = result["compressed_content"]
-                        completed_agents += 1
+                        # 성공한 경우 - Phase 1과 동일하게 락 보호 (보고서 생성 스레드가
+                        # 동시 읽을 가능성 대비)
+                        with self.results_lock:
+                            agent_results[agent_name] = result["content"]
+                            agent_summaries[agent_name] = result["compressed_content"]
+                            completed_agents += 1
 
                         # 완료 상태 yield
                         yield {
@@ -441,9 +425,27 @@ class ProgressiveAnalysisEngine:
                 "message": "분석 시스템 오류 발생"
             }
 
-# 전역 Progressive Analysis Engine
-progressive_engine = ProgressiveAnalysisEngine()
+# Lazy 전역 Progressive Analysis Engine (import 시점 LLM/에이전트 빌드 회피)
+_progressive_engine: "ProgressiveAnalysisEngine | None" = None
+_engine_init_lock = threading.Lock()
+
 
 def get_progressive_engine() -> ProgressiveAnalysisEngine:
-    """전역 Progressive Analysis Engine 접근"""
-    return progressive_engine
+    """전역 Progressive Analysis Engine 접근 (thread-safe lazy singleton).
+
+    동시에 첫 호출이 들어와도 에이전트/LLM이 두 번 빌드되지 않도록
+    double-checked locking 패턴을 사용한다 (LLM 빌드는 비용이 크다).
+    """
+    global _progressive_engine
+    if _progressive_engine is None:
+        with _engine_init_lock:
+            if _progressive_engine is None:
+                _progressive_engine = ProgressiveAnalysisEngine()
+    return _progressive_engine
+
+
+def __getattr__(name):
+    """PEP 562: `progressive_engine` 직접 접근 시 lazy 빌드."""
+    if name == "progressive_engine":
+        return get_progressive_engine()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
