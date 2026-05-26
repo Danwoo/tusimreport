@@ -17,12 +17,12 @@ from typing import Dict, Any, List
 from datetime import datetime, timedelta
 
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage
 
-from config.settings import get_llm_model, settings
+from config.llm_factory import build_llm
+from config.settings import settings
+from core.signals import AgentSignal
 from data.tavily_api_client import TavilyNewsClient
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
 
@@ -115,16 +115,7 @@ def _fetch_tavily_news(company_name: str) -> Dict[str, Any]:
 def _analyze_dual_source_sentiment(company_name: str, stock_code: str, naver_data: Dict, tavily_data: Dict) -> Dict[str, Any]:
     """듀얼 소스 통합 감정 분석 (Dr. Rivera 최적화)"""
     try:
-        # LLM 초기화
-        llm_provider, llm_model_name, llm_api_key = get_llm_model()
-        if llm_provider == "gemini":
-            sentiment_llm = ChatGoogleGenerativeAI(
-                model=llm_model_name, temperature=0.0, google_api_key=llm_api_key
-            )
-        else:
-            sentiment_llm = ChatOpenAI(
-                model=llm_model_name, temperature=0.0, api_key=llm_api_key
-            )
+        sentiment_llm = build_llm(temperature=0.0)
 
         # 3자 전문가 추천: 균형잡힌 분석 데이터 (각 10개씩)
         naver_texts = []
@@ -240,19 +231,7 @@ get_naver_news_sentiment = get_enhanced_news_sentiment
 
 def create_sentiment_agent():
     """Sentiment Analysis Agent 생성 함수"""
-    # 🔧 Phase 3 개선: Graceful degradation
-    llm_config = get_llm_model(raise_on_missing=False)
-    if llm_config is None:
-        logger.error("❌ LLM API 키가 설정되지 않았습니다.")
-        raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
-
-    llm_provider, llm_model_name, llm_api_key = llm_config
-    if llm_provider == "gemini":
-        llm = ChatGoogleGenerativeAI(
-            model=llm_model_name, temperature=0.1, google_api_key=llm_api_key
-        )
-    else:
-        llm = ChatOpenAI(model=llm_model_name, temperature=0.1, api_key=llm_api_key)
+    llm = build_llm(temperature=0.1)
 
     prompt = (
         "당신은 뉴스와 시장 심리를 분석하는 감정 분석 전문가입니다. "
@@ -288,7 +267,8 @@ def create_sentiment_agent():
         "마치 친구가 투자 조언을 해주듯이 자연스럽고 따뜻한 톤으로 작성해주세요.\n\n"
 
         "참고: 이 분석은 뉴스 여론 참고자료이며 투자 추천이 아닙니다. 객관적인 정보 제공을 목적으로 합니다.\n\n"
-        "🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 'SENTIMENT_ANALYSIS_COMPLETE'라고 정확히 적어주세요. 이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
+        f"🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 '{AgentSignal.SENTIMENT.value}'라고 정확히 적어주세요. "
+        "이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
     )
 
     return create_react_agent(model=llm, tools=sentiment_tools, prompt=prompt, name="sentiment_expert")

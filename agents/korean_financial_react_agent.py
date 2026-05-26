@@ -17,12 +17,11 @@ import FinanceDataReader as fdr
 import pykrx.stock as stock
 
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage
 
-from config.settings import get_llm_model
+from config.llm_factory import build_llm
+from core.signals import AgentSignal
 from utils.helpers import convert_numpy_types
 from data.dart_api_client import get_comprehensive_company_data
 from data.bok_api_client import get_macro_economic_indicators
@@ -390,72 +389,80 @@ financial_tools = [
     get_sector_analysis,
 ]
 
-# LLM 설정 (Gemini 또는 OpenAI)
-# 🔧 Phase 3 개선: Graceful degradation
-llm_config = get_llm_model(raise_on_missing=False)
-if llm_config is None:
-    logger.error("❌ LLM API 키가 설정되지 않았습니다.")
-    raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
+_FINANCIAL_PROMPT = (
+    "당신은 기업의 재무 상태를 분석하는 재무 분석 전문가입니다. "
+    "투자자들이 쉽게 이해할 수 있도록 회사의 재무 건전성과 성과를 분석해주세요.\n\n"
 
-provider, model_name, api_key = llm_config
+    "다음 도구들을 사용해서 종합적인 데이터를 수집한 후, 자연스럽고 이해하기 쉽게 설명해주세요:\n"
+    "1. get_korean_stock_data - 기본 주식 데이터 수집\n"
+    "2. get_pykrx_market_data - 시장 데이터 수집\n"
+    "3. get_dart_company_data - 공식 재무제표 데이터\n"
+    "4. get_macro_economic_data - 경제 환경 파악\n"
+    "5. get_sector_analysis - 동종업계 비교\n"
+    "6. save_stock_chart - 주가 차트 생성\n\n"
 
-if provider == "gemini":
-    llm = ChatGoogleGenerativeAI(
-        model=model_name, temperature=0, google_api_key=api_key
-    )
-else:
-    llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
+    "분석할 때는 다음과 같이 친근하게 설명해주세요:\n\n"
 
-# 한국 금융 분석 ReAct Agent 생성
-korean_financial_react_agent = create_react_agent(
-    model=llm,
-    tools=financial_tools,
-    name="financial_expert",
-    prompt=(
-        "당신은 기업의 재무 상태를 분석하는 재무 분석 전문가입니다. "
-        "투자자들이 쉽게 이해할 수 있도록 회사의 재무 건전성과 성과를 분석해주세요.\n\n"
+    "1. 이 회사가 어떤 사업을 하는 회사인지 간단히 소개해주세요\n"
+    "   - 주요 사업 영역과 어떻게 돈을 버는지\n"
+    "   - 회사 규모와 시장에서의 위치\n\n"
 
-        "다음 도구들을 사용해서 종합적인 데이터를 수집한 후, 자연스럽고 이해하기 쉽게 설명해주세요:\n"
-        "1. get_korean_stock_data - 기본 주식 데이터 수집\n"
-        "2. get_pykrx_market_data - 시장 데이터 수집\n"
-        "3. get_dart_company_data - 공식 재무제표 데이터\n"
-        "4. get_macro_economic_data - 경제 환경 파악\n"
-        "5. get_sector_analysis - 동종업계 비교\n"
-        "6. save_stock_chart - 주가 차트 생성\n\n"
+    "2. 회사의 성장세는 어떤지 알려주세요\n"
+    "   - 매출이나 이익이 늘고 있는지, 줄고 있는지\n"
+    "   - 최근 몇 년간의 추세를 쉽게 설명해주세요\n"
+    "   - 같은 업종 다른 회사들과 비교했을 때는 어떤지\n\n"
 
-        "분석할 때는 다음과 같이 친근하게 설명해주세요:\n\n"
+    "3. 회사의 재무 건전성은 어떤지 평가해주세요\n"
+    "   - 빚이 너무 많지는 않은지\n"
+    "   - 현금 보유 상황은 어떤지\n"
+    "   - 앞으로도 안정적으로 사업을 이어갈 수 있을지\n\n"
 
-        "1. 이 회사가 어떤 사업을 하는 회사인지 간단히 소개해주세요\n"
-        "   - 주요 사업 영역과 어떻게 돈을 버는지\n"
-        "   - 회사 규모와 시장에서의 위치\n\n"
+    "4. 투자자 관점에서 이 회사의 매력도를 설명해주세요\n"
+    "   - 주가가 기업 가치 대비 적정한지\n"
+    "   - 배당은 얼마나 주는지\n"
+    "   - 투자할 때 어떤 점들을 고려해야 하는지\n\n"
 
-        "2. 회사의 성장세는 어떤지 알려주세요\n"
-        "   - 매출이나 이익이 늘고 있는지, 줄고 있는지\n"
-        "   - 최근 몇 년간의 추세를 쉽게 설명해주세요\n"
-        "   - 같은 업종 다른 회사들과 비교했을 때는 어떤지\n\n"
+    "5. 주의해서 봐야 할 위험 요소가 있다면 알려주세요\n"
+    "   - 재무적으로 취약한 부분이 있는지\n"
+    "   - 앞으로 어떤 변화를 주의 깊게 봐야 하는지\n\n"
 
-        "3. 회사의 재무 건전성은 어떤지 평가해주세요\n"
-        "   - 빚이 너무 많지는 않은지\n"
-        "   - 현금 보유 상황은 어떤지\n"
-        "   - 앞으로도 안정적으로 사업을 이어갈 수 있을지\n\n"
+    "전문 용어를 사용할 때는 간단한 설명을 함께 해주시고, "
+    "숫자를 제시할 때는 그것이 좋은 건지 나쁜 건지, 평균적인 수준인지 함께 설명해주세요. "
+    "마치 친구가 투자 조언을 해주듯이 따뜻하고 이해하기 쉬운 톤으로 작성해주세요.\n\n"
 
-        "4. 투자자 관점에서 이 회사의 매력도를 설명해주세요\n"
-        "   - 주가가 기업 가치 대비 적정한지\n"
-        "   - 배당은 얼마나 주는지\n"
-        "   - 투자할 때 어떤 점들을 고려해야 하는지\n\n"
-
-        "5. 주의해서 봐야 할 위험 요소가 있다면 알려주세요\n"
-        "   - 재무적으로 취약한 부분이 있는지\n"
-        "   - 앞으로 어떤 변화를 주의 깊게 봐야 하는지\n\n"
-
-        "전문 용어를 사용할 때는 간단한 설명을 함께 해주시고, "
-        "숫자를 제시할 때는 그것이 좋은 건지 나쁜 건지, 평균적인 수준인지 함께 설명해주세요. "
-        "마치 친구가 투자 조언을 해주듯이 따뜻하고 이해하기 쉬운 톤으로 작성해주세요.\n\n"
-
-        "참고: 이 분석은 재무 참고자료이며 투자 추천이 아닙니다. 객관적인 정보 제공을 목적으로 합니다.\n\n"
-        "🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 'FINANCIAL_ANALYSIS_COMPLETE'라고 정확히 적어주세요. 이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
-    ),
+    "참고: 이 분석은 재무 참고자료이며 투자 추천이 아닙니다. 객관적인 정보 제공을 목적으로 합니다.\n\n"
+    f"🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 '{AgentSignal.FINANCIAL.value}'라고 정확히 적어주세요. "
+    "이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
 )
+
+
+# Lazy initialization: LLM/에이전트는 import 시점이 아니라 첫 호출 때 생성한다.
+# 이전엔 모듈 import만으로 LLM 키 검증이 실행돼 테스트가 느려지고 import가 실패할 수 있었음.
+_financial_react_agent = None
+
+
+def get_financial_react_agent():
+    """Lazy-singleton accessor for the financial ReAct agent."""
+    global _financial_react_agent
+    if _financial_react_agent is None:
+        llm = build_llm(temperature=0)
+        _financial_react_agent = create_react_agent(
+            model=llm,
+            tools=financial_tools,
+            name="financial_expert",
+            prompt=_FINANCIAL_PROMPT,
+        )
+    return _financial_react_agent
+
+
+def __getattr__(name):
+    """모듈 레벨 lazy alias: `korean_financial_react_agent` 접근 시 lazy 빌드.
+
+    PEP 562 module-level __getattr__.
+    """
+    if name == "korean_financial_react_agent":
+        return get_financial_react_agent()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # 편의 함수

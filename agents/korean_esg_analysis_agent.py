@@ -15,11 +15,10 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 
-from config.settings import get_llm_model
+from config.llm_factory import build_llm
+from core.signals import AgentSignal
 from data.dart_api_client import get_comprehensive_company_data
 from utils.helpers import convert_numpy_types
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
@@ -92,17 +91,7 @@ esg_tools = [get_dart_company_info_wrapper]
 
 def create_esg_agent():
     """ESG Agent 생성 함수"""
-    # 🔧 Phase 3 개선: Graceful degradation
-    llm_config = get_llm_model(raise_on_missing=False)
-    if llm_config is None:
-        logger.error("❌ LLM API 키가 설정되지 않았습니다.")
-        raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
-
-    llm_provider, model_name, api_key = llm_config
-    if llm_provider == "gemini":
-        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0.1, google_api_key=api_key)
-    else:
-        llm = ChatOpenAI(model=model_name, temperature=0.1, api_key=api_key)
+    llm = build_llm(temperature=0.1)
 
     prompt = (
         "당신은 ESG(환경·사회·지배구조) 분석 전문가입니다. "
@@ -141,7 +130,8 @@ def create_esg_agent():
         "ESG 컨설턴트가 투자자에게 친근하게 설명해주는 느낌으로 작성해주세요.\n\n"
 
         "참고: 이 분석은 ESG 평가 참고자료이며 투자 추천이 아닙니다. 투자 시에는 신중히 판단하세요.\n\n"
-        "🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 'ESG_ANALYSIS_COMPLETE'라고 정확히 적어주세요. 이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
+        f"🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 '{AgentSignal.ESG.value}'라고 정확히 적어주세요. "
+        "이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
     )
 
     return create_react_agent(model=llm, tools=esg_tools, prompt=prompt, name="esg_expert")

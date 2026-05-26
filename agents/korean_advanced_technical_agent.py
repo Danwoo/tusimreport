@@ -13,12 +13,11 @@ from datetime import datetime, timedelta
 import talib
 import FinanceDataReader as fdr
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage
 
-from config.settings import get_llm_model
+from config.llm_factory import build_llm
+from core.signals import AgentSignal
 from utils.helpers import convert_numpy_types
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
 
@@ -83,17 +82,7 @@ advanced_technical_tools = [calculate_momentum_indicators]
 
 def create_advanced_technical_agent():
     """Advanced Technical Agent 생성 함수"""
-    # 🔧 Phase 3 개선: Graceful degradation
-    llm_config = get_llm_model(raise_on_missing=False)
-    if llm_config is None:
-        logger.error("❌ LLM API 키가 설정되지 않았습니다.")
-        raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
-
-    llm_provider, llm_model_name, llm_api_key = llm_config
-    if llm_provider == "gemini":
-        llm = ChatGoogleGenerativeAI(model=llm_model_name, temperature=0.1, google_api_key=llm_api_key)
-    else:
-        llm = ChatOpenAI(model=llm_model_name, temperature=0.1, api_key=llm_api_key)
+    llm = build_llm(temperature=0.1)
 
     prompt = (
         "당신은 차트와 기술적 지표를 분석하는 기술적 분석 전문가입니다. "
@@ -132,7 +121,8 @@ def create_advanced_technical_agent():
         "너무 복잡하게 말하지 마시고, 일반 투자자도 이해할 수 있게 설명해주세요.\n\n"
 
         "참고: 이 분석은 기술적 분석 참고자료이며 매매 추천이 아닙니다. 실제 투자 시에는 신중히 판단하세요.\n\n"
-        "🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 'ADVANCED_TECHNICAL_ANALYSIS_COMPLETE'라고 정확히 적어주세요. 이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
+        f"🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 '{AgentSignal.TECHNICAL.value}'라고 정확히 적어주세요. "
+        "이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
     )
     
     return create_react_agent(model=llm, tools=advanced_technical_tools, prompt=prompt, name="advanced_technical_expert")
