@@ -2,25 +2,51 @@
 Korean News RSS Client
 주요 경제지 RSS 실시간 수집
 
-🆕 P2-1: 뉴스 소스 대폭 확장 (Stage 3)
-- 한국경제, 매일경제, 서울경제, 머니투데이 등 RSS
-- 로그인 불필요, 공개 RSS 피드 활용
-- feedparser 대신 xml.etree 사용 (의존성 최소화)
+소스: Google News RSS만 유효 (그 외 국내 매체는 봇 차단으로 비활성).
+
+⚠️ SSL 검증: 일부 한국 RSS 서버가 SAN 누락/체인 깨진 인증서를 쓰는 경우가
+있어 verify=False가 필요했다. 그러나 MITM 위험을 줄이기 위해
+`_ALLOWED_HOSTS` 화이트리스트에 등록된 도메인에 대해서만 verify=False를
+허용하고, 그 외 도메인은 항상 verify=True로 요청한다.
 """
+
+from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from html.parser import HTMLParser
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 import urllib3
 
-# SSL 경고 억제 (verify=False 사용 시)
+# SSL 검증을 끄지 않는 게 원칙이지만, 일부 한국 매체 RSS는 인증서 체인이
+# 깨져 있어 우회가 필요. 화이트리스트에 명시된 호스트에만 한해 허용한다.
+_ALLOWED_INSECURE_HOSTS: frozenset[str] = frozenset(
+    {
+        # 현재 활성 소스: Google News. 정상 인증서. verify=True로 충분.
+        # 아래는 향후 우회가 필요할 때 명시적으로 추가할 자리:
+        # "rss.hankyung.com",
+        # "rss.mk.co.kr",
+    }
+)
+
+# verify=False가 들어가는 경우에만 인증서 경고를 끈다. 화이트리스트가 비면
+# 사실상 호출되지 않지만 import 시점 안전 가드로 남겨 둔다.
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
+
+
+def _should_verify_tls(url: str) -> bool:
+    """URL의 호스트가 insecure 허용 목록에 있으면 False, 아니면 True."""
+    try:
+        host = urlparse(url).hostname or ""
+    except ValueError:
+        return True
+    return host not in _ALLOWED_INSECURE_HOSTS
 
 
 class HTMLStripper(HTMLParser):
@@ -110,7 +136,7 @@ class KoreanNewsRSSClient:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
-            response = requests.get(url, headers=headers, timeout=10, verify=False)
+            response = requests.get(url, headers=headers, timeout=10, verify=_should_verify_tls(url))
             response.raise_for_status()
 
             # XML 파싱
@@ -200,7 +226,7 @@ class KoreanNewsRSSClient:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
-            response = requests.get(url, headers=headers, timeout=10, verify=False)
+            response = requests.get(url, headers=headers, timeout=10, verify=_should_verify_tls(url))
             response.raise_for_status()
 
             # XML 파싱
