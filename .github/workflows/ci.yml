@@ -59,16 +59,18 @@ jobs:
             utils/logging_context.py
 
       - name: Pytest with coverage
-        # 현재 baseline ~23%. fail-under는 회귀 방지선이라 일부러 baseline보다
-        # 살짝 아래(20%)에 둔다. 단위 테스트가 추가되는 대로 5%p씩 상향한다.
+        # 현재 baseline ~33% (data 클라이언트 + agents 4종 단위 테스트 추가 후).
+        # fail-under는 회귀 방지선 — baseline보다 살짝 아래에 둔다. 단위 테스트
+        # 추가되는 대로 5%p씩 상향한다.
         run: |
           pytest -q \
             --cov=core \
             --cov=ui \
             --cov=utils \
             --cov=data \
+            --cov=agents \
             --cov-report=term-missing \
-            --cov-fail-under=20
+            --cov-fail-under=30
 
   audit:
     name: Dependency audit
