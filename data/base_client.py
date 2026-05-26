@@ -5,6 +5,7 @@
   - requests.Session (커넥션 풀)
   - 파일 기반 TTL 캐시
   - User-Agent 헤더
+  - urllib3 Retry로 5xx/429에 지수 백오프 자동 적용
 """
 
 from __future__ import annotations
@@ -13,13 +14,27 @@ import contextlib
 import json
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime, timedelta
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+from core.errors import (
+    AuthenticationError,
+    DataSourceUnavailableError,
+    RateLimitError,
+)
 
 logger = logging.getLogger(__name__)
+
+# 캐시 키 화이트리스트: 영숫자/하이픈/언더스코어/점만 허용. 첫 글자는
+# 점이 될 수 없다 (리눅스 hidden file로 만들지 않기 위해).
+# Path traversal(`..`, `/`)뿐 아니라 윈도우 예약 문자, NUL 등도 막는다.
+_SAFE_CACHE_KEY = re.compile(r"^[A-Za-z0-9_\-][A-Za-z0-9_.\-]*$")
 
 
 class BaseAPIClient:
@@ -30,6 +45,12 @@ class BaseAPIClient:
     """
 
     DEFAULT_USER_AGENT = "TuSimReport/1.0"
+
+    # urllib3 Retry 정책: 5xx/429에만 자동 재시도. 4xx 클라이언트 에러는
+    # 즉시 raise하여 호출자가 인증/입력 문제로 분기하도록 둔다.
+    RETRY_STATUS = (429, 500, 502, 503, 504)
+    RETRY_TOTAL = 3
+    RETRY_BACKOFF_FACTOR = 0.5  # 0.5, 1.0, 2.0초 대기 후 재시도
 
     def __init__(
         self,
@@ -45,11 +66,70 @@ class BaseAPIClient:
                 "Accept": "application/json",
             }
         )
+        # 모든 HTTP/HTTPS 요청에 동일한 retry 정책을 mount.
+        # `allowed_methods` 명시: 기본은 HEAD/GET만 재시도지만, POST도 멱등인
+        # 케이스(JSON RPC 등)가 있어 우리 코드 전반에서 안전하다고 본다.
+        retry = Retry(
+            total=self.RETRY_TOTAL,
+            status_forcelist=self.RETRY_STATUS,
+            allowed_methods=frozenset(["GET", "POST", "HEAD"]),
+            backoff_factor=self.RETRY_BACKOFF_FACTOR,
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
+
         self.cache_dir: str | None = None
         if cache_subdir:
             # tempfile.gettempdir()로 cross-platform (/tmp on Linux/macOS, %TEMP% on Windows).
             self.cache_dir = os.path.join(tempfile.gettempdir(), cache_subdir)
             os.makedirs(self.cache_dir, exist_ok=True)
+
+    # ---- HTTP 도우미 ----
+
+    def request_json(self, method: str, url: str, **kwargs: Any) -> Any:
+        """`session.request`를 감싸 status code → 도메인 예외로 매핑.
+
+        4xx는 retry되지 않으므로 즉시 도메인 예외로 변환:
+          401/403 → AuthenticationError
+          429     → RateLimitError (urllib3 Retry로 3회 시도 후에도 실패한 경우)
+          5xx     → DataSourceUnavailableError (마찬가지)
+          그 외 4xx → DataSourceUnavailableError로 묶고 호출자에서 status로 분기
+        """
+        timeout = kwargs.pop("timeout", 10)
+        try:
+            resp = self.session.request(method, url, timeout=timeout, **kwargs)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            raise DataSourceUnavailableError(f"network failure calling {url}: {e}", source=url) from e
+
+        if resp.status_code in (401, 403):
+            raise AuthenticationError(
+                f"auth rejected by {url} (status {resp.status_code})",
+                source=url,
+                status_code=resp.status_code,
+            )
+        if resp.status_code == 429:
+            raise RateLimitError(f"rate limit exceeded at {url}", source=url, status_code=429)
+        if resp.status_code >= 500:
+            raise DataSourceUnavailableError(
+                f"upstream {resp.status_code} from {url}",
+                source=url,
+                status_code=resp.status_code,
+            )
+        if not resp.ok:
+            raise DataSourceUnavailableError(
+                f"http {resp.status_code} from {url}: {resp.text[:200]}",
+                source=url,
+                status_code=resp.status_code,
+            )
+
+        try:
+            return resp.json()
+        except ValueError as e:
+            raise DataSourceUnavailableError(
+                f"non-JSON response from {url}: {resp.text[:200]}", source=url
+            ) from e
 
     # ---- 캐싱 ----
 
@@ -57,13 +137,14 @@ class BaseAPIClient:
     def _validate_cache_key(key: str) -> None:
         """캐시 키에 path traversal 가능한 문자 차단.
 
-        현재 모든 호출자는 internal f-string으로 key를 만들지만, 새 contributor가
-        사용자 입력(종목명/뉴스 제목 등)을 key로 박을 가능성을 차단하는 cheap defense.
+        화이트리스트 방식: 영숫자/하이픈/언더스코어/점만 허용. 사용자 입력
+        (종목명/뉴스 제목)을 key로 박는 실수와 NUL 바이트, 윈도우 예약 문자,
+        UNC 경로 등을 한 줄로 차단한다.
         """
         if not isinstance(key, str) or not key:
             raise ValueError(f"invalid cache key: {key!r}")
-        if "/" in key or "\\" in key or ".." in key or key.startswith("."):
-            raise ValueError(f"unsafe cache key (path traversal): {key!r}")
+        if not _SAFE_CACHE_KEY.match(key):
+            raise ValueError(f"unsafe cache key (allowed: [A-Za-z0-9_.-]+): {key!r}")
 
     def _cache_path(self, key: str) -> str:
         if not self.cache_dir:
