@@ -4,7 +4,7 @@ Korean Institutional Trading Agent - PyKRX 투자자별 매매 동향 전문 분
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 import pykrx.stock as stock
@@ -15,6 +15,7 @@ from config.llm_factory import build_llm
 from core.signals import AgentSignal
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
 from utils.helpers import convert_numpy_types
+from utils.time import kst_now
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ def get_investor_trading_analysis_logic(
 ) -> dict[str, Any]:
     """투자자별 매매 동향 분석 로직"""
     try:
-        end_date = datetime.now()
+        end_date = kst_now()
         start_date = end_date - timedelta(days=period_days + 10)
         start_str = start_date.strftime("%Y%m%d")
         end_str = end_date.strftime("%Y%m%d")

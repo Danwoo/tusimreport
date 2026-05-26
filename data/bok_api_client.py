@@ -8,12 +8,11 @@
 
 import logging
 import time
-from datetime import datetime, timedelta
 from typing import Any
 
 import requests
 
-from utils.time import kst_days_ago_compact, kst_isoformat, kst_today_compact
+from utils.time import kst_days_ago_compact, kst_isoformat, kst_month_compact, kst_today_compact, kst_year
 
 logger = logging.getLogger(__name__)
 
@@ -215,11 +214,11 @@ class BOKAPIClient:
         """
         try:
             if not end_period:
-                current_year = datetime.now().year - 1  # 전년도 데이터 사용
+                current_year = kst_year(-1)  # 전년도 데이터 사용
                 end_period = f"{current_year}"
 
             if not start_period:
-                start_year = datetime.now().year - 3
+                start_year = kst_year(-3)
                 start_period = f"{start_year}"
 
             result = self._make_request_with_retry("200Y105", "A", start_period, end_period)
@@ -269,9 +268,9 @@ class BOKAPIClient:
         """
         try:
             if not end_date:
-                end_date = datetime.now().strftime("%Y%m")
+                end_date = kst_month_compact()
             if not start_date:
-                start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m")
+                start_date = kst_month_compact(12)
 
             result = self._make_request_with_retry("901Y009", "M", start_date, end_date)
 
@@ -319,9 +318,9 @@ class BOKAPIClient:
         """
         try:
             if not end_date:
-                end_date = datetime.now().strftime("%Y%m")
+                end_date = kst_month_compact()
             if not start_date:
-                start_date = (datetime.now() - timedelta(days=730)).strftime("%Y%m")
+                start_date = kst_month_compact(24)
 
             result = self._make_request_with_retry("901Y033", "M", start_date, end_date)
 
@@ -369,9 +368,9 @@ class BOKAPIClient:
         """
         try:
             if not end_date:
-                end_date = datetime.now().strftime("%Y%m")
+                end_date = kst_month_compact()
             if not start_date:
-                start_date = (datetime.now() - timedelta(days=730)).strftime("%Y%m")
+                start_date = kst_month_compact(24)
 
             # 실업률 통계표: 고용동향 실업률(계절조정) 표준 코드
             result = self._make_request_with_retry("200Y013", "M", start_date, end_date)
@@ -412,9 +411,9 @@ class BOKAPIClient:
         """
         try:
             if not end_date:
-                end_date = datetime.now().strftime("%Y%m")
+                end_date = kst_month_compact()
             if not start_date:
-                start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m")
+                start_date = kst_month_compact(12)
 
             # 수출 데이터: 국제수지 상품수출 표준 코드 사용
             export_result = self._make_request_with_retry("301Y013", "M", start_date, end_date)
@@ -485,9 +484,9 @@ class BOKAPIClient:
         """
         try:
             if not end_date:
-                end_date = datetime.now().strftime("%Y%m")
+                end_date = kst_month_compact()
             if not start_date:
-                start_date = (datetime.now() - timedelta(days=730)).strftime("%Y%m")
+                start_date = kst_month_compact(24)
 
             result = self._make_request_with_retry("901Y059", "M", start_date, end_date)
 
@@ -535,9 +534,9 @@ class BOKAPIClient:
         """
         try:
             if not end_date:
-                end_date = datetime.now().strftime("%Y%m")
+                end_date = kst_month_compact()
             if not start_date:
-                start_date = (datetime.now() - timedelta(days=730)).strftime("%Y%m")
+                start_date = kst_month_compact(24)
 
             result = self._make_request_with_retry("101Y003", "M", start_date, end_date)
 

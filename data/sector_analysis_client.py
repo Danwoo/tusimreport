@@ -7,13 +7,13 @@ PyKRX와 FinanceDataReader를 활용한 업종 분석
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 import FinanceDataReader as fdr
 import numpy as np
 
-from utils.time import kst_isoformat
+from utils.time import kst_isoformat, kst_now
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ class SectorAnalysisClient:
                 return {"error": f"Sector {sector_name} not found"}
 
             companies = self.sector_mapping[sector_name]["companies"]
-            end_date = datetime.now()
+            end_date = kst_now()
             start_date = end_date - timedelta(days=period_days)
 
             sector_data = []

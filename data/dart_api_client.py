@@ -11,12 +11,11 @@ import logging
 import os
 import time
 import zipfile
-from datetime import datetime
 from typing import Any
 
 import requests
 
-from utils.time import kst_days_ago_compact, kst_isoformat, kst_today_compact
+from utils.time import kst_days_ago_compact, kst_isoformat, kst_today_compact, kst_year
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +267,7 @@ class DARTAPIClient:
         """최대주주 및 특수관계인 정보 조회"""
         try:
             if not bsns_year:
-                bsns_year = str(datetime.now().year - 1)  # 전년도 데이터
+                bsns_year = str(kst_year(-1))  # 전년도 데이터
 
             params = {
                 "corp_code": corp_code,
@@ -312,7 +311,7 @@ class DARTAPIClient:
         """임원 현황 조회"""
         try:
             if not bsns_year:
-                bsns_year = str(datetime.now().year - 1)
+                bsns_year = str(kst_year(-1))
 
             params = {"corp_code": corp_code, "bsns_year": bsns_year, "reprt_code": "11011"}
 
@@ -354,7 +353,7 @@ class DARTAPIClient:
         """배당 정보 조회"""
         try:
             if not bsns_year:
-                bsns_year = str(datetime.now().year - 1)
+                bsns_year = str(kst_year(-1))
 
             params = {"corp_code": corp_code, "bsns_year": bsns_year, "reprt_code": "11011"}
 
@@ -390,7 +389,7 @@ class DARTAPIClient:
         """회계감사 의견 조회"""
         try:
             if not bsns_year:
-                bsns_year = str(datetime.now().year - 1)
+                bsns_year = str(kst_year(-1))
 
             params = {"corp_code": corp_code, "bsns_year": bsns_year, "reprt_code": "11011"}
 
@@ -427,7 +426,7 @@ class DARTAPIClient:
         """ESG 요소 분석 (공시 데이터 기반)"""
         try:
             if not bsns_year:
-                bsns_year = str(datetime.now().year - 1)
+                bsns_year = str(kst_year(-1))
 
             # ESG 관련 데이터 수집
             esg_data = {}
@@ -540,8 +539,8 @@ def get_comprehensive_company_data(stock_code: str) -> dict[str, Any]:
             return {"error": f"Company info error: {company_info['error']}"}
 
         # 3. 최근 재무제표 조회 (최근 연도)
-        current_year = str(datetime.now().year)
-        prev_year = str(datetime.now().year - 1)
+        current_year = str(kst_year())
+        prev_year = str(kst_year(-1))
 
         financial_current = dart_client.get_financial_statements(corp_code, current_year, "11014")
         financial_prev = dart_client.get_financial_statements(corp_code, prev_year, "11014")
