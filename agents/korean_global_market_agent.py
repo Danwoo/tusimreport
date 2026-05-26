@@ -11,11 +11,11 @@ Korean Global Market Context Agent
 import logging
 from typing import Dict, Any
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 from datetime import datetime
-from config.settings import get_llm_model
+
+from config.llm_factory import build_llm
+from core.signals import AgentSignal
 
 logger = logging.getLogger(__name__)
 
@@ -280,30 +280,9 @@ def _analyze_with_llm(
         분석 결과 텍스트
     """
     try:
-        from config.settings import get_llm_model
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        from langchain_openai import ChatOpenAI
-
-        # LLM 모델 가져오기
-        llm_config = get_llm_model(raise_on_missing=False)
-        if not llm_config:
+        llm = build_llm(temperature=0.3, raise_on_missing=False)
+        if llm is None:
             return "⚠️ LLM API 키가 설정되지 않아 자동 분석을 수행할 수 없습니다."
-
-        provider, model_name, api_key = llm_config
-
-        # LLM 초기화
-        if provider == "gemini":
-            llm = ChatGoogleGenerativeAI(
-                model=model_name,
-                google_api_key=api_key,
-                temperature=0.3
-            )
-        else:
-            llm = ChatOpenAI(
-                model=model_name,
-                api_key=api_key,
-                temperature=0.3
-            )
 
         # 프롬프트 구성
         prompt = f"""당신은 글로벌 시장 전문 애널리스트입니다.
@@ -450,25 +429,7 @@ def create_global_market_agent():
     Returns:
         LangGraph ReAct Agent
     """
-    # LLM 설정
-    llm_config = get_llm_model(raise_on_missing=False)
-    if llm_config is None:
-        logger.error("❌ LLM API 키가 설정되지 않았습니다.")
-        raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
-
-    llm_provider, llm_model_name, llm_api_key = llm_config
-    if llm_provider == "gemini":
-        llm = ChatGoogleGenerativeAI(
-            model=llm_model_name,
-            temperature=0.3,
-            google_api_key=llm_api_key
-        )
-    else:
-        llm = ChatOpenAI(
-            model=llm_model_name,
-            temperature=0.3,
-            api_key=llm_api_key
-        )
+    llm = build_llm(temperature=0.3)
 
     prompt = (
         "당신은 글로벌 시장과 한국 주식시장의 상관관계를 분석하는 전문가입니다. "
@@ -493,7 +454,7 @@ def create_global_market_agent():
         "- 투자 초보자도 이해할 수 있도록 쉽게 설명하세요\n\n"
 
         "참고: 이 분석은 투자 참고자료이며 투자 추천이 아닙니다.\n\n"
-        "🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 'GLOBAL_MARKET_ANALYSIS_COMPLETE'라고 정확히 적어주세요."
+        f"🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 '{AgentSignal.GLOBAL_MARKET.value}'라고 정확히 적어주세요."
     )
 
     return create_react_agent(
