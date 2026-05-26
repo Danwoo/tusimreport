@@ -295,4 +295,4 @@ python setup_check.py
 
 **Python**: 3.11 / 3.12 (CI matrix)
 **테스트**: 230개 (커버리지 ~46%)
-**문서**: [KNOWN_LIMITATIONS](docs/KNOWN_LIMITATIONS.md) · [INTERVIEW_QA](docs/INTERVIEW_QA.md) · [SECURITY](SECURITY.md)
+**보안 정책**: [SECURITY.md](SECURITY.md)
