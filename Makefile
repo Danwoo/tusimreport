@@ -13,12 +13,16 @@ install:  ## install runtime + dev dependencies
 	pip install -r requirements.txt -r requirements-dev.txt
 
 # ---- lockfile ----------------------------------------------------------------
+#
+# --pre is required because mplfinance 0.12 is only released as 0.12.10b0 on
+# PyPI (beta). Without --pre pip-compile refuses to consider it and the
+# resolve fails.
 
-lock:  ## regenerate requirements.txt from requirements.in (transitive pin)
-	pip-compile --resolver=backtracking --strip-extras --output-file=requirements.txt requirements.in
+lock:  ## regenerate requirements.lock (full transitive pin) from requirements.in
+	pip-compile --resolver=backtracking --strip-extras --pre --output-file=requirements.lock requirements.in
 
-lock-dev:  ## regenerate requirements-dev.txt from requirements-dev.in
-	pip-compile --resolver=backtracking --strip-extras --output-file=requirements-dev.txt requirements-dev.in
+lock-dev:  ## regenerate requirements-dev.lock from requirements-dev.in
+	pip-compile --resolver=backtracking --strip-extras --output-file=requirements-dev.lock requirements-dev.in
 
 lock-all: lock lock-dev  ## regenerate both lockfiles
 
