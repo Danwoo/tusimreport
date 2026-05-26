@@ -59,9 +59,9 @@ jobs:
             utils/logging_context.py
 
       - name: Pytest with coverage
-        # 현재 baseline ~42% (9/9 agent + Pydantic + chat + context_manager
-        # 단위 테스트 추가 후). fail-under는 회귀 방지선 — baseline보다 살짝
-        # 아래에 둔다. 50%까지 5%p 단위로 상향 예정.
+        # 현재 baseline ~46% (9/9 agent + supervisor stream + ReAct execute
+        # 통합 테스트까지 완료). fail-under는 회귀 방지선 — baseline보다 살짝
+        # 아래에 둔다. 60%까지 점진 상향 가능.
         run: |
           pytest -q \
             --cov=core \
@@ -70,7 +70,7 @@ jobs:
             --cov=data \
             --cov=agents \
             --cov-report=term-missing \
-            --cov-fail-under=40
+            --cov-fail-under=45
 
   audit:
     name: Dependency audit
