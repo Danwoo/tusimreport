@@ -13,6 +13,8 @@ from typing import Any
 import FinanceDataReader as fdr
 import numpy as np
 
+from utils.time import kst_isoformat
+
 logger = logging.getLogger(__name__)
 
 
@@ -178,7 +180,7 @@ class SectorAnalysisClient:
                     "worst_performer": min(sector_data, key=lambda x: x["return_percent"]),
                 },
                 "company_details": sector_data,
-                "last_updated": datetime.now().isoformat(),
+                "last_updated": kst_isoformat(),
             }
 
         except Exception as e:
@@ -265,7 +267,7 @@ class SectorAnalysisClient:
                     if company["stock_code"] != stock_code
                 ],
                 "analysis_period": period_days,
-                "last_updated": datetime.now().isoformat(),
+                "last_updated": kst_isoformat(),
             }
 
         except Exception as e:

@@ -11,7 +11,6 @@ Dr. Alex Rivera (Tavily CTO) 기술 지원으로 향상된 감정 분석:
 """
 
 import logging
-from datetime import datetime
 from typing import Any
 
 import requests
@@ -23,6 +22,7 @@ from config.settings import settings
 from core.signals import AgentSignal
 from data.tavily_api_client import TavilyNewsClient
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +218,7 @@ def _analyze_dual_source_sentiment(
             "news_sources": news_sources,
             "tavily_ai_summary": tavily_data.get("ai_summary", ""),
             "data_source": "Enhanced Dual-Source: Naver News API + Tavily Search API",
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": kst_isoformat(),
         }
 
     except Exception as e:

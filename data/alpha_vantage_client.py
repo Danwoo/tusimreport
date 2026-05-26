@@ -7,10 +7,11 @@ API Docs: https://www.alphavantage.co/documentation/
 """
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from data.base_client import BaseAPIClient
+from data.cache_ttl import FX_RATE_HOURS, GLOBAL_QUOTE_HOURS
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class AlphaVantageClient(BaseAPIClient):
             }
         """
         cache_key = "global_market_overview"
-        cached = self.get_cached(cache_key, max_age_hours=1)  # 1시간 캐시
+        cached = self.get_cached(cache_key, max_age_hours=GLOBAL_QUOTE_HOURS)
         if cached:
             return cached
 
@@ -53,7 +54,7 @@ class AlphaVantageClient(BaseAPIClient):
                 "sp500": self._get_quote("SPY"),
                 "nasdaq": self._get_quote("QQQ"),
                 "dow": self._get_quote("DIA"),
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": kst_isoformat(),
             }
 
             self.save_cache(cache_key, result)
@@ -114,7 +115,7 @@ class AlphaVantageClient(BaseAPIClient):
             }
         """
         cache_key = f"exchange_rate_{from_currency}_{to_currency}"
-        cached = self.get_cached(cache_key, max_age_hours=1)  # 1시간 캐시
+        cached = self.get_cached(cache_key, max_age_hours=FX_RATE_HOURS)
         if cached:
             return cached
 
@@ -142,7 +143,7 @@ class AlphaVantageClient(BaseAPIClient):
                 "from": from_currency,
                 "to": to_currency,
                 "rate": float(rate_data.get("5. Exchange Rate", 0)),
-                "timestamp": rate_data.get("6. Last Refreshed", datetime.now().isoformat()),
+                "timestamp": rate_data.get("6. Last Refreshed", kst_isoformat()),
                 "bid": float(rate_data.get("8. Bid Price", 0)),
                 "ask": float(rate_data.get("9. Ask Price", 0)),
             }
@@ -160,7 +161,7 @@ class AlphaVantageClient(BaseAPIClient):
             "sp500": {"symbol": "SPY", "price": 0.0, "change_percent": 0.0},
             "nasdaq": {"symbol": "QQQ", "price": 0.0, "change_percent": 0.0},
             "dow": {"symbol": "DIA", "price": 0.0, "change_percent": 0.0},
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": kst_isoformat(),
             "note": "⚠️ Alpha Vantage API 키가 설정되지 않았습니다. 실시간 데이터를 사용할 수 없습니다.",
         }
 
@@ -173,7 +174,7 @@ class AlphaVantageClient(BaseAPIClient):
             "from": from_currency,
             "to": to_currency,
             "rate": default_rate,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": kst_isoformat(),
             "note": "⚠️ Alpha Vantage API 키가 설정되지 않았습니다. 실시간 환율을 사용할 수 없습니다.",
         }
 

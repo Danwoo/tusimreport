@@ -9,7 +9,6 @@ Korean Global Market Context Agent
 """
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from langchain_core.tools import tool
@@ -17,6 +16,7 @@ from langgraph.prebuilt import create_react_agent
 
 from config.llm_factory import build_llm
 from core.signals import AgentSignal
+from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def analyze_global_market_context(company_name: str, stock_code: str) -> dict[st
             "market_sentiment": market_sentiment,
             "forex": forex,
             "analysis": analysis,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": kst_isoformat(),
         }
 
         logger.info("✅ 글로벌 시장 맥락 분석 완료")
@@ -386,7 +386,7 @@ def _create_fallback_analysis(company_name: str, stock_code: str, error: str) ->
         "market_sentiment": {"available": False},
         "forex": {"available": False},
         "analysis": f"⚠️ 글로벌 시장 데이터를 수집할 수 없습니다.\n\n이유: {error}\n\n해결 방법:\n1. Alpha Vantage API 키를 .env 파일에 추가하세요 (ALPHA_VANTAGE_API_KEY)\n2. 인터넷 연결을 확인하세요",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": kst_isoformat(),
         "error": error,
     }
 
