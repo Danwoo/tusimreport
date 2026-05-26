@@ -1,0 +1,57 @@
+# 빌드 context 최소화. 이 파일이 없으면 logs/, .git/, venv/, __pycache__ 등이
+# 빌더 스테이지로 전부 복사돼 layer cache가 무효화된다.
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Python 캐시/빌드 산출물
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+.eggs
+build
+dist
+.tox
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# 가상환경
+.venv
+venv
+env
+
+# IDE/에디터
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# 로그/캐시 디렉토리
+logs
+*.log
+korean_stock_chart.png
+
+# 환경변수 (이미지에 굽지 않는다 — 런타임에 env_file로 주입)
+.env
+.env.local
+.env.*.local
+
+# 문서/메타
+*.md
+SECURITY.md
+CHANGELOG.md
+docs
+
+# CI/툴체인
+.github
+.pre-commit-config.yaml
+
+# OS / 기타
+Thumbs.db
