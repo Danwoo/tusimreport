@@ -247,22 +247,24 @@ class TestRequirements:
     def test_critical_packages_in_requirements(self):
         """필수 패키지가 requirements.txt에 있는지"""
         project_root = Path(__file__).parent.parent
-        req_file = project_root / "requirements.txt"
+        # Production dependencies — runtime only. Dev tools (pytest 등) are
+        # in requirements-dev.txt so the Docker runtime image stays slim.
+        prod_req = (project_root / "requirements.txt").read_text()
+        dev_req = (project_root / "requirements-dev.txt").read_text()
 
-        with open(req_file) as f:
-            content = f.read()
-
-        critical_packages = [
+        prod_packages = [
             "streamlit",
             "langchain",
             "pandas",
             "pydantic-settings",
-            "selenium",  # v2.1
-            "pytest",
+            "selenium",
         ]
+        for pkg in prod_packages:
+            assert pkg in prod_req, f"{pkg}가 requirements.txt에 없습니다"
 
-        for package in critical_packages:
-            assert package in content, f"{package}가 requirements.txt에 없습니다"
+        dev_packages = ["pytest", "ruff", "mypy"]
+        for pkg in dev_packages:
+            assert pkg in dev_req, f"{pkg}가 requirements-dev.txt에 없습니다"
 
 
 if __name__ == "__main__":
