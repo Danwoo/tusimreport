@@ -1,38 +1,43 @@
-# Core Framework
-streamlit>=1.28.0
-python-dotenv>=1.0.0
+# 의존성 정책:
+# - 메이저 버전 깨짐을 막기 위해 핵심 패키지는 compatible-release(~=)로 잠근다.
+# - 빠르게 변하는 LangChain 생태계(`langchain*`, `langgraph*`)는 마이너 단위로 pinning.
+# - 변경할 때는 CI(.github/workflows/ci.yml)가 통과하는지 확인할 것.
 
-# AI and LangChain
-langchain>=0.1.0
-langchain-openai>=0.0.5
-langchain-google-genai>=0.0.6
-langgraph>=0.0.20
-langgraph-supervisor>=0.0.29
+# Core Framework
+streamlit~=1.57
+python-dotenv~=1.0
+
+# AI and LangChain — minor 단위 pinning. 메이저 변경 시 마이그레이션 필요.
+langchain~=1.3
+langchain-openai~=1.2
+langchain-google-genai~=4.2
+langgraph~=1.2
+langgraph-supervisor~=0.0.31
 openai>=1.3.0
 google-generativeai>=0.3.0
 
 # Data Processing
-pandas>=2.0.0
-numpy>=1.24.0
+pandas~=2.3
+numpy~=2.4
 
 # Korean Stock Market APIs
-finance-datareader>=0.9.0
-pykrx>=1.0.40
+finance-datareader~=0.9
+pykrx~=1.2
 requests-html>=0.10.0
 lxml>=4.9.0
 
 # Web Scraping & APIs
-requests>=2.31.0
+requests~=2.33
 beautifulsoup4>=4.12.0
 feedparser>=6.0.0
 
-# Web Scraping - Selenium (v2.1 Community Analysis)
+# Web Scraping - Selenium (커뮤니티 분석)
 selenium>=4.15.0
 chromedriver-autoinstaller>=0.6.4
 webdriver-manager>=4.0.1
 
 # Settings management
-pydantic-settings>=2.0.0
+pydantic-settings~=2.14
 
 # Visualization
 matplotlib>=3.7.0
@@ -50,4 +55,9 @@ pytest-cov>=4.1.0
 
 # Utilities
 python-dateutil>=2.8.0
-tiktoken>=0.5.0
+tiktoken~=0.13
+
+# Dev tools (CI 환경에서도 설치, 로컬은 선택사항)
+ruff>=0.15.0
+mypy>=1.19.0
+types-requests
