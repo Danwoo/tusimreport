@@ -63,6 +63,27 @@ class EnterpriseContextManager:
         logger.info(f"[{agent_name}] 컨텍스트 완전 보존: {original_tokens:,} 토큰")
         return full_output
 
+    def compress_agent_output(self, agent_name: str, full_output: str) -> str:
+        """에이전트 출력을 `agent_summary_tokens` 예산 안에 들어가도록 압축.
+
+        간단한 head-and-tail 전략: 토큰 예산을 초과하면 앞·뒷부분을 함께 유지
+        해 신호(완료 마커)와 도입부(투자 결론)가 잘리지 않도록 한다. 토큰 단위가
+        아닌 문자 단위 근사 — 토큰 카운트가 비싸기 때문에 char 길이를 비례 변환.
+        """
+        budget = self.window.agent_summary_tokens
+        token_count = self.count_tokens(full_output)
+        if token_count <= budget:
+            return full_output
+
+        # 토큰 1 ≈ 문자 4 (영문 평균). 한글이면 약간 짧아지지만 안전한 상한.
+        target_chars = budget * 4
+        if len(full_output) <= target_chars:
+            return full_output
+        head = full_output[: target_chars // 2]
+        tail = full_output[-target_chars // 2 :]
+        logger.info(f"[{agent_name}] 압축: {token_count:,} → ~{budget:,} 토큰 (head+tail)")
+        return f"{head}\n\n...[중략]...\n\n{tail}"
+
     def create_progressive_summary(self, agent_outputs: dict[str, str]) -> str:
         """점진적 요약 생성 - 정보 손실 최소화"""
         try:
