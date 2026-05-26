@@ -45,7 +45,7 @@ Dockerfile은 multi-stage: builder는 wheel 빌드만, runtime은 chromium + 한
 
 ## 🏗️ 시스템 아키텍처
 
-### 8개 전문 에이전트 (v2.1)
+### 9개 전문 에이전트
 
 ```
 tusimreport/
@@ -117,7 +117,7 @@ API 키가 부족할 때 명확한 안내를 제공합니다.
 
 ---
 
-## 💬 대화형 AI 기능 (Phase 4 - 2025-11-16)
+## 💬 대화형 AI 기능
 
 ### 🤖 ChatSession - 분석 결과 기반 대화
 
@@ -293,6 +293,6 @@ python setup_check.py
 
 ---
 
-**마지막 업데이트**: 2025-11-16
-**버전**: v2.2 (개발 중)
-**Python**: 3.11.14
+**Python**: 3.11 / 3.12 (CI matrix)
+**테스트**: 230개 (커버리지 ~46%)
+**문서**: [KNOWN_LIMITATIONS](docs/KNOWN_LIMITATIONS.md) · [INTERVIEW_QA](docs/INTERVIEW_QA.md) · [SECURITY](SECURITY.md)
