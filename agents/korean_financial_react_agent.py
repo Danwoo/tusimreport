@@ -22,6 +22,7 @@ from config.llm_factory import build_llm  # noqa: E402
 from core.signals import AgentSignal  # noqa: E402
 from data.bok_api_client import get_macro_economic_indicators  # noqa: E402
 from data.dart_api_client import get_comprehensive_company_data  # noqa: E402
+from data.external_schemas import validate_pykrx_fundamental  # noqa: E402
 from data.sector_analysis_client import analyze_sector_relative_performance  # noqa: E402
 from utils.agent_helpers import create_fallback_message, format_error_message_korean  # noqa: E402
 from utils.helpers import convert_numpy_types  # noqa: E402
@@ -138,21 +139,17 @@ def get_pykrx_market_data(stock_code: str) -> dict[str, Any]:
             }
 
             if not fundamental_data.empty:
-                latest_fundamental = fundamental_data.iloc[-1]
+                # PyKRX는 한국어 컬럼명 DataFrame을 돌려준다. 라이브러리가 컬럼명을
+                # 바꾸면 silent break 대신 DataQualityError를 받도록 schema로 검증.
+                row = fundamental_data.iloc[-1].to_dict()
+                validated = validate_pykrx_fundamental(row)
+                # 0/None은 PyKRX의 'no data' 약속 — UI에서 None으로 표시.
                 result["fundamental_data"] = {
-                    "market_cap": int(latest_fundamental.get("시가총액", 0)),
-                    "per": (
-                        float(latest_fundamental.get("PER", 0))
-                        if latest_fundamental.get("PER", 0) != 0
-                        else None
-                    ),
-                    "pbr": (
-                        float(latest_fundamental.get("PBR", 0))
-                        if latest_fundamental.get("PBR", 0) != 0
-                        else None
-                    ),
-                    "eps": int(latest_fundamental.get("EPS", 0)),
-                    "bps": int(latest_fundamental.get("BPS", 0)),
+                    "market_cap": int(validated.market_cap or 0),
+                    "per": float(validated.per) if validated.per else None,
+                    "pbr": float(validated.pbr) if validated.pbr else None,
+                    "eps": int(validated.eps or 0),
+                    "bps": int(validated.bps or 0),
                 }
 
             return convert_numpy_types(result)
