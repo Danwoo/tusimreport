@@ -8,6 +8,8 @@ import logging
 from typing import Dict, Any, Callable, Optional
 from functools import wraps
 
+from core.types import AgentResponse
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,7 +19,7 @@ def create_fallback_message(
     stock_code: str,
     reason: str,
     data_source: Optional[str] = None
-) -> Dict[str, Any]:
+) -> AgentResponse:
     """
     API 실패 시 반환할 fallback 메시지 생성
 
@@ -161,7 +163,7 @@ def create_limited_analysis_message(
     stock_code: str,
     available_data: Dict[str, Any],
     missing_apis: list[str]
-) -> Dict[str, Any]:
+) -> AgentResponse:
     """
     제한적 분석 메시지 생성 (일부 API만 사용 가능할 때)
 
@@ -241,7 +243,7 @@ def create_success_message(
     stock_code: str,
     analysis_result: Any,
     data_sources: list[str]
-) -> Dict[str, Any]:
+) -> AgentResponse:
     """
     성공 메시지 생성 (표준화)
 
