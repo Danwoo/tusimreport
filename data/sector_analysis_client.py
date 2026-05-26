@@ -176,9 +176,10 @@ class SectorAnalysisClient:
             
             return market_cap
             
-        except Exception:
+        except Exception as e:
+            logger.warning(f"시가총액 계산 실패 ({stock_code}): {e}")
             return None
-    
+
     def get_peer_comparison(self, stock_code: str, period_days: int = 90) -> Dict[str, Any]:
         """동종업계 비교 분석"""
         try:

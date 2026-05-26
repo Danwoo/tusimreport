@@ -219,7 +219,8 @@ class DCInsideCrawler:
 
             return datetime.now().isoformat()
 
-        except Exception:
+        except Exception as e:
+            logger.debug(f"날짜 파싱 실패 ({date_str!r}): {e}")
             return datetime.now().isoformat()
 
     def _parse_number(self, num_str: str) -> int:
@@ -240,7 +241,8 @@ class DCInsideCrawler:
             # 쉼표 제거
             return int(num_str.replace(',', ''))
 
-        except Exception:
+        except (ValueError, AttributeError) as e:
+            logger.debug(f"숫자 파싱 실패 ({num_str!r}): {e}")
             return 0
 
 
