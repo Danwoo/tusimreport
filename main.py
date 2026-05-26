@@ -15,8 +15,11 @@ from ui.stock_database import STOCK_DATABASE
 from ui.styles import PAGE_CSS
 from utils.agent_helpers import validate_stock_code
 from utils.helpers import setup_logging
+from utils.logging_context import bind_session, configure_logging
 
-# 로깅 설정 - 파일 로깅 활성화
+# 로깅: 표준 핸들러는 utils.logging_context가 부착(세션/종목 contextvars 주입).
+# 기존 setup_logging도 파일 로깅용으로 유지 (구조화 포맷은 stream만 일단 우선).
+configure_logging(level=settings.log_level)
 logger = setup_logging(settings.log_level, enable_file_logging=True)
 
 # Streamlit 페이지 설정
@@ -193,10 +196,29 @@ def _consume_analysis_stream(
 ) -> tuple[int, str]:
     """supervisor 스트림을 소비하며 카드/진행률을 실시간 갱신.
 
+    이 함수 안에서 발생하는 모든 로그는 `[s=<session> c=<symbol>]` 접두사를
+    얻는다 (bind_session으로 contextvar에 주입). 동시 사용자 두 명이 같은
+    프로세스 안에서 분석을 돌려도 로그가 서로 섞이지 않는다.
+
     Returns: (완료된 에이전트 수, 최종 보고서 텍스트)
     """
     completed = 0
     final_report = ""
+    with bind_session(stock_code=symbol):
+        return _consume_inner(
+            symbol, company_name, agent_states, containers, render_progress, completed, final_report
+        )
+
+
+def _consume_inner(
+    symbol: str,
+    company_name: str,
+    agent_states: dict,
+    containers: dict,
+    render_progress,
+    completed: int,
+    final_report: str,
+) -> tuple[int, str]:
     for chunk in stream_korean_stock_analysis(symbol, company_name):
         if "error" in chunk:
             st.error(f"분석 중 오류 발생: {chunk['error']}")
