@@ -5,14 +5,13 @@ Chat Session Manager
 """
 
 import logging
+import threading
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
-from config.settings import get_llm_model
+from config.llm_factory import build_llm
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +38,9 @@ class ChatSession:
         self.analysis_result = analysis_result
         self.created_at = datetime.now()
 
-        # 대화 히스토리
+        # 대화 히스토리 + 갱신 락 (Streamlit fragment/동시 입력 보호)
         self.messages: List[Dict[str, str]] = []
+        self._messages_lock = threading.Lock()
 
         # LLM 초기화
         self.llm = self._initialize_llm()
@@ -51,23 +51,9 @@ class ChatSession:
         logger.info(f"ChatSession created for {company_name} ({stock_code})")
 
     def _initialize_llm(self):
-        """LLM 초기화"""
+        """LLM 초기화 (통합 팩토리)."""
         try:
-            llm_config = get_llm_model(raise_on_missing=True)
-            llm_provider, llm_model_name, llm_api_key = llm_config
-
-            if llm_provider == "gemini":
-                return ChatGoogleGenerativeAI(
-                    model=llm_model_name,
-                    temperature=0.3,  # 약간 창의적
-                    google_api_key=llm_api_key
-                )
-            else:
-                return ChatOpenAI(
-                    model=llm_model_name,
-                    temperature=0.3,
-                    api_key=llm_api_key
-                )
+            return build_llm(temperature=0.3)
         except Exception as e:
             logger.error(f"LLM 초기화 실패: {e}")
             raise
@@ -145,36 +131,43 @@ class ChatSession:
             AI 답변
         """
         try:
-            # 대화 히스토리에 추가
-            self.messages.append({
-                "role": "user",
-                "content": user_question,
-                "timestamp": datetime.now().isoformat()
-            })
+            # 동시 입력 보호: messages 갱신과 스냅샷 채취를 한 lock 안에서 처리.
+            # LLM 호출 자체는 락 밖에서 (블로킹 길어도 다른 작업이 멈추지 않게).
+            with self._messages_lock:
+                self.messages.append({
+                    "role": "user",
+                    "content": user_question,
+                    "timestamp": datetime.now().isoformat()
+                })
+                # 최근 컨텍스트: user 메시지에서 시작하도록 정렬 (user→assistant 페어 보존).
+                # 짝수 페어 경계를 맞추지 않으면 LLM이 assistant→user→... 같이
+                # 끝나는 부자연스러운 컨텍스트를 받게 된다.
+                tail = self.messages[-10:]
+                while tail and tail[0]["role"] != "user":
+                    tail = tail[1:]
+                recent_messages = list(tail)
 
             # LangChain 메시지 구성
             langchain_messages = [
                 SystemMessage(content=self.system_prompt)
             ]
-
-            # 이전 대화 추가 (최근 10개만)
-            recent_messages = self.messages[-10:]
             for msg in recent_messages:
                 if msg["role"] == "user":
                     langchain_messages.append(HumanMessage(content=msg["content"]))
                 elif msg["role"] == "assistant":
                     langchain_messages.append(AIMessage(content=msg["content"]))
 
-            # LLM 호출
+            # LLM 호출 (락 밖)
             response = self.llm.invoke(langchain_messages)
             answer = response.content
 
             # 대화 히스토리에 답변 추가
-            self.messages.append({
-                "role": "assistant",
-                "content": answer,
-                "timestamp": datetime.now().isoformat()
-            })
+            with self._messages_lock:
+                self.messages.append({
+                    "role": "assistant",
+                    "content": answer,
+                    "timestamp": datetime.now().isoformat()
+                })
 
             logger.info(f"Question: {user_question[:50]}... | Answer length: {len(answer)}")
             return answer
@@ -185,12 +178,14 @@ class ChatSession:
             return error_msg
 
     def get_conversation_history(self) -> List[Dict[str, str]]:
-        """대화 히스토리 반환"""
-        return self.messages.copy()
+        """대화 히스토리 반환 (snapshot)."""
+        with self._messages_lock:
+            return self.messages.copy()
 
     def clear_history(self):
-        """대화 히스토리 초기화"""
-        self.messages = []
+        """대화 히스토리 초기화."""
+        with self._messages_lock:
+            self.messages = []
         logger.info("Conversation history cleared")
 
 
