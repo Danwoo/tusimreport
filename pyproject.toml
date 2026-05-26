@@ -44,6 +44,10 @@ ignore_missing_imports = true
 no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
+# core/, utils/ 디렉토리에 __init__.py를 두지 않는 namespace package 스타일을
+# 쓰기 때문에 mypy가 같은 파일을 "core.errors"와 "errors"로 두 번 보지 않도록
+# explicit_package_bases로 패키지 경계를 명시.
+explicit_package_bases = true
 exclude = [
     "^logs/",
     "^\\.venv/",
@@ -51,7 +55,13 @@ exclude = [
 
 # 새 모듈은 strict하게 유지 (TypedDict 도입한 곳)
 [[tool.mypy.overrides]]
-module = ["core.signals", "core.schemas", "config.llm_factory", "ui.cards", "data.base_client"]
+module = [
+    "core.signals", "core.schemas", "core.errors",
+    "config.llm_factory",
+    "ui.cards",
+    "data.base_client",
+    "utils.time", "utils.logging_context",
+]
 disallow_untyped_defs = true
 warn_return_any = true
 strict_equality = true
