@@ -21,7 +21,7 @@ repos:
     hooks:
       - id: mypy
         # 점진 도입: strict 대상 모듈만 검사. 전체 검사는 CI에서.
-        files: ^(core/(signals|schemas)\.py|config/llm_factory\.py|ui/cards\.py|data/base_client\.py)$
+        files: ^(core/(signals|schemas|errors)\.py|config/llm_factory\.py|ui/cards\.py|data/base_client\.py|utils/(time|logging_context)\.py)$
         additional_dependencies:
           - pydantic-settings>=2.0
           - types-requests
