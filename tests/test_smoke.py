@@ -3,9 +3,10 @@ Smoke Test - 기본 동작 확인
 시스템의 기본적인 기능이 작동하는지 확인하는 빠른 테스트
 """
 
-import pytest
 import sys
 from pathlib import Path
+
+import pytest
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -17,23 +18,27 @@ class TestImports:
     def test_import_config(self):
         """설정 모듈 import"""
         from config import settings
+
         assert settings is not None
 
     def test_import_utils(self):
         """유틸리티 모듈 import"""
         from utils import helpers
+
         assert helpers is not None
 
     def test_import_agents(self):
         """8개 에이전트 모듈 import"""
-        from agents import korean_context_agent
-        from agents import korean_sentiment_agent
-        from agents import korean_financial_react_agent
-        from agents import korean_advanced_technical_agent
-        from agents import korean_institutional_trading_agent
-        from agents import korean_comparative_agent
-        from agents import korean_esg_analysis_agent
-        from agents import korean_community_agent
+        from agents import (
+            korean_advanced_technical_agent,
+            korean_community_agent,
+            korean_comparative_agent,
+            korean_context_agent,
+            korean_esg_analysis_agent,
+            korean_financial_react_agent,
+            korean_institutional_trading_agent,
+            korean_sentiment_agent,
+        )
 
         assert korean_context_agent is not None
         assert korean_sentiment_agent is not None
@@ -46,11 +51,13 @@ class TestImports:
 
     def test_import_core(self):
         """코어 모듈 import"""
-        from core import korean_supervisor_langgraph
-        from core import progressive_supervisor
-        from core import context_manager
-        from core import signals
-        from core import chat_session
+        from core import (
+            chat_session,
+            context_manager,
+            korean_supervisor_langgraph,
+            progressive_supervisor,
+            signals,
+        )
 
         assert korean_supervisor_langgraph is not None
         assert progressive_supervisor is not None
@@ -60,13 +67,15 @@ class TestImports:
 
     def test_import_data_clients(self):
         """데이터 클라이언트 import"""
-        from data import bok_api_client
-        from data import dart_api_client
-        from data import naver_api_client
-        from data import tavily_api_client
-        from data import paxnet_crawl_client
-        from data import chart_generator
-        from data import sector_analysis_client
+        from data import (
+            bok_api_client,
+            chart_generator,
+            dart_api_client,
+            naver_api_client,
+            paxnet_crawl_client,
+            sector_analysis_client,
+            tavily_api_client,
+        )
 
         assert bok_api_client is not None
         assert dart_api_client is not None
@@ -83,6 +92,7 @@ class TestSettings:
     def test_settings_can_load(self):
         """Settings 클래스 로딩 가능"""
         from config.settings import Settings
+
         settings = Settings()
         assert settings is not None
 
@@ -91,22 +101,23 @@ class TestSettings:
         from config.settings import settings
 
         # LLM 설정
-        assert hasattr(settings, 'openai_api_key')
-        assert hasattr(settings, 'google_api_key')
-        assert hasattr(settings, 'use_gemini')
+        assert hasattr(settings, "openai_api_key")
+        assert hasattr(settings, "google_api_key")
+        assert hasattr(settings, "use_gemini")
 
         # 데이터 API 설정
-        assert hasattr(settings, 'dart_api_key')
-        assert hasattr(settings, 'ecos_api_key')
-        assert hasattr(settings, 'naver_client_id')
+        assert hasattr(settings, "dart_api_key")
+        assert hasattr(settings, "ecos_api_key")
+        assert hasattr(settings, "naver_client_id")
 
         # 앱 설정
-        assert hasattr(settings, 'debug')
-        assert hasattr(settings, 'log_level')
+        assert hasattr(settings, "debug")
+        assert hasattr(settings, "log_level")
 
     def test_get_llm_model_function_exists(self):
         """LLM 모델 선택 함수 존재"""
         from config.settings import get_llm_model
+
         assert callable(get_llm_model)
 
 
@@ -118,12 +129,12 @@ class TestProjectStructure:
         project_root = Path(__file__).parent.parent
 
         required_dirs = [
-            'agents',
-            'core',
-            'data',
-            'config',
-            'utils',
-            'tests',
+            "agents",
+            "core",
+            "data",
+            "config",
+            "utils",
+            "tests",
         ]
 
         for dir_name in required_dirs:
@@ -136,13 +147,13 @@ class TestProjectStructure:
         project_root = Path(__file__).parent.parent
 
         required_files = [
-            'main.py',
-            'requirements.txt',
-            'README.md',
-            'CLAUDE.md',
-            '.gitignore',
-            '.env.example',
-            'setup_check.py',
+            "main.py",
+            "requirements.txt",
+            "README.md",
+            "CLAUDE.md",
+            ".gitignore",
+            ".env.example",
+            "setup_check.py",
         ]
 
         for file_name in required_files:
@@ -153,17 +164,17 @@ class TestProjectStructure:
     def test_agents_count(self):
         """8개 에이전트 파일 존재"""
         project_root = Path(__file__).parent.parent
-        agents_dir = project_root / 'agents'
+        agents_dir = project_root / "agents"
 
         agent_files = [
-            'korean_context_agent.py',
-            'korean_sentiment_agent.py',
-            'korean_financial_react_agent.py',
-            'korean_advanced_technical_agent.py',
-            'korean_institutional_trading_agent.py',
-            'korean_comparative_agent.py',
-            'korean_esg_analysis_agent.py',
-            'korean_community_agent.py',  # v2.1
+            "korean_context_agent.py",
+            "korean_sentiment_agent.py",
+            "korean_financial_react_agent.py",
+            "korean_advanced_technical_agent.py",
+            "korean_institutional_trading_agent.py",
+            "korean_comparative_agent.py",
+            "korean_esg_analysis_agent.py",
+            "korean_community_agent.py",  # v2.1
         ]
 
         for agent_file in agent_files:
@@ -177,20 +188,22 @@ class TestBasicFunctionality:
     def test_stock_code_validation(self):
         """종목 코드 형식 검증 로직 테스트"""
         # 6자리 숫자 검증
-        valid_codes = ['005930', '035420', '000660']
-        invalid_codes = ['05930', 'abc123', '12345', '1234567']
+        valid_codes = ["005930", "035420", "000660"]
+        invalid_codes = ["05930", "abc123", "12345", "1234567"]
 
         for code in valid_codes:
             assert len(code) == 6, f"{code}는 6자리가 아닙니다"
             assert code.isdigit(), f"{code}는 숫자가 아닙니다"
 
         for code in invalid_codes:
-            assert not (len(code) == 6 and code.isdigit()), \
+            assert not (len(code) == 6 and code.isdigit()), (
                 f"{code}는 유효한 종목코드 형식입니다 (예상: 무효)"
+            )
 
     def test_logger_setup(self):
         """로거 설정 가능"""
         from utils.helpers import setup_logging
+
         logger = setup_logging("INFO", enable_file_logging=False)
         assert logger is not None
 
@@ -200,16 +213,15 @@ class TestBasicFunctionality:
         과거 dart_api_client.py에 키가 박혀있었으나 test에선 deepsearch만 봐서 놓쳤다.
         이번엔 data/ 디렉토리 전체를 grep 스타일로 스캔한다.
         """
-        from config.settings import settings
         import os
         import re
         from pathlib import Path
 
+        from config.settings import settings
+
         # 환경 변수에서 읽은 키만 허용
         if settings.deepsearch_api_key:
-            assert os.getenv("DEEPSEARCH_API_KEY") is not None, (
-                "deepsearch_api_key가 하드코딩되어 있습니다"
-            )
+            assert os.getenv("DEEPSEARCH_API_KEY") is not None, "deepsearch_api_key가 하드코딩되어 있습니다"
 
         # 40자 이상 hex 문자열은 거의 확실히 API 키. 코드에 있으면 안 된다.
         # 예외: 주석 안, docstring 안, 테스트 안, .env 예시.
@@ -220,9 +232,7 @@ class TestBasicFunctionality:
             text = py_file.read_text(encoding="utf-8")
             for match in hex_key_pattern.finditer(text):
                 offenders.append(f"{py_file.name}: {match.group(1)[:10]}...")
-        assert not offenders, (
-            "코드에 하드코딩된 API 키로 의심되는 hex 문자열 발견: " + ", ".join(offenders)
-        )
+        assert not offenders, "코드에 하드코딩된 API 키로 의심되는 hex 문자열 발견: " + ", ".join(offenders)
 
 
 class TestRequirements:
@@ -231,29 +241,28 @@ class TestRequirements:
     def test_requirements_file_exists(self):
         """requirements.txt 파일 존재"""
         project_root = Path(__file__).parent.parent
-        req_file = project_root / 'requirements.txt'
+        req_file = project_root / "requirements.txt"
         assert req_file.exists()
 
     def test_critical_packages_in_requirements(self):
         """필수 패키지가 requirements.txt에 있는지"""
         project_root = Path(__file__).parent.parent
-        req_file = project_root / 'requirements.txt'
+        req_file = project_root / "requirements.txt"
 
-        with open(req_file, 'r') as f:
+        with open(req_file) as f:
             content = f.read()
 
         critical_packages = [
-            'streamlit',
-            'langchain',
-            'pandas',
-            'pydantic-settings',
-            'selenium',  # v2.1
-            'pytest',
+            "streamlit",
+            "langchain",
+            "pandas",
+            "pydantic-settings",
+            "selenium",  # v2.1
+            "pytest",
         ]
 
         for package in critical_packages:
-            assert package in content, \
-                f"{package}가 requirements.txt에 없습니다"
+            assert package in content, f"{package}가 requirements.txt에 없습니다"
 
 
 if __name__ == "__main__":

@@ -12,8 +12,7 @@ NOTE: TypedDict는 runtime cost가 0이다 (단순 dict). 점진 도입 가능.
 
 from __future__ import annotations
 
-from typing import List, Literal, TypedDict
-
+from typing import Literal, TypedDict
 
 OpinionLabel = Literal["BUY", "HOLD", "SELL"]
 
@@ -40,14 +39,14 @@ class InvestmentOpinion(TypedDict, total=False):
     opinion: OpinionLabel
     confidence: int  # 0-100
     reasoning: str
-    key_positives: List[str]
-    key_risks: List[str]
+    key_positives: list[str]
+    key_risks: list[str]
     timeframe: str
     current_price: float
     target_price: float
     stop_loss: float
     risk_reward_ratio: float
-    split_buy_strategy: List[SplitBuyOrder]
+    split_buy_strategy: list[SplitBuyOrder]
     timestamp: str
 
 
@@ -72,13 +71,13 @@ class AgentResponse(TypedDict, total=False):
 
     # success 전용
     analysis: object
-    data_sources: List[str]  # create_success_message가 쓰는 복수형
+    data_sources: list[str]  # create_success_message가 쓰는 복수형
     data_source: str  # 7개 에이전트(esg/institutional/community/financial 등)가 쓰는 단수형
     # NOTE: data_source vs data_sources는 historical하게 둘 다 코드베이스에 박혀있다.
     # 둘 다 선언해서 TypedDict가 "거짓말"하지 않게 한다. 새 코드는 data_sources 권장.
 
     # limited/partial 전용
     available_data: object
-    missing_apis: List[str]
+    missing_apis: list[str]
     suggestion: str
     reason_ko: str

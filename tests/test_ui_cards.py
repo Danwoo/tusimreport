@@ -23,6 +23,7 @@ class TestAgentConfig:
 
     def test_all_agent_configs_match_signals(self):
         from core.signals import AGENT_TO_SIGNAL
+
         assert set(AGENT_CONFIGS.keys()) == set(AGENT_TO_SIGNAL.keys())
 
 
@@ -143,8 +144,11 @@ class TestXSSDefense:
             "reasoning": "<img src=x onerror='alert(1)'>",
             "key_positives": [],
             "key_risks": [],
-            "current_price": 100, "target_price": 110, "stop_loss": 95,
-            "risk_reward_ratio": 2.0, "split_buy_strategy": [],
+            "current_price": 100,
+            "target_price": 110,
+            "stop_loss": 95,
+            "risk_reward_ratio": 2.0,
+            "split_buy_strategy": [],
         }
         html = create_investment_opinion_card(opinion)
         # raw <img 태그가 살아있으면 안 됨 (escape된 &lt;img는 OK)
@@ -153,11 +157,16 @@ class TestXSSDefense:
 
     def test_llm_positives_html_is_escaped(self):
         opinion = {
-            "opinion": "BUY", "confidence": 60, "reasoning": "ok",
+            "opinion": "BUY",
+            "confidence": 60,
+            "reasoning": "ok",
             "key_positives": ["<b>fake bold</b>", "<script>x</script>"],
             "key_risks": [],
-            "current_price": 100, "target_price": 110, "stop_loss": 95,
-            "risk_reward_ratio": 2.0, "split_buy_strategy": [],
+            "current_price": 100,
+            "target_price": 110,
+            "stop_loss": 95,
+            "risk_reward_ratio": 2.0,
+            "split_buy_strategy": [],
         }
         html = create_investment_opinion_card(opinion)
         assert "<b>fake bold" not in html
@@ -168,10 +177,15 @@ class TestXSSDefense:
         # opinion 필드를 통한 클래스 인젝션 시도도 차단되어야 함
         opinion = {
             "opinion": '"><script>alert(1)</script>',
-            "confidence": 50, "reasoning": "r",
-            "key_positives": [], "key_risks": [],
-            "current_price": 100, "target_price": 110, "stop_loss": 95,
-            "risk_reward_ratio": 1.5, "split_buy_strategy": [],
+            "confidence": 50,
+            "reasoning": "r",
+            "key_positives": [],
+            "key_risks": [],
+            "current_price": 100,
+            "target_price": 110,
+            "stop_loss": 95,
+            "risk_reward_ratio": 1.5,
+            "split_buy_strategy": [],
         }
         html = create_investment_opinion_card(opinion)
         assert "<script>" not in html
@@ -181,10 +195,16 @@ class TestXSSDefense:
     def test_confidence_out_of_range_is_clamped(self):
         for bad in (-50, 150, "lol", None):
             opinion = {
-                "opinion": "BUY", "confidence": bad, "reasoning": "r",
-                "key_positives": [], "key_risks": [],
-                "current_price": 100, "target_price": 110, "stop_loss": 95,
-                "risk_reward_ratio": 1.5, "split_buy_strategy": [],
+                "opinion": "BUY",
+                "confidence": bad,
+                "reasoning": "r",
+                "key_positives": [],
+                "key_risks": [],
+                "current_price": 100,
+                "target_price": 110,
+                "stop_loss": 95,
+                "risk_reward_ratio": 1.5,
+                "split_buy_strategy": [],
             }
             html = create_investment_opinion_card(opinion)
             # 부정값/문자열이 width:{x}%로 흘러들어가도 깨지지 않고 0-100 사이로 clamp
@@ -196,14 +216,17 @@ class TestEscapeHtmlPublic:
 
     def test_escapes_script(self):
         from ui.cards import escape_html
+
         assert escape_html("<script>x</script>") == "&lt;script&gt;x&lt;/script&gt;"
 
     def test_handles_none(self):
         from ui.cards import escape_html
+
         assert escape_html(None) == ""
 
     def test_handles_non_string(self):
         from ui.cards import escape_html
+
         # int/float 같은 안전한 타입도 문자열로 변환 후 escape
         assert escape_html(123) == "123"
 
@@ -213,6 +236,7 @@ class TestThresholdHelpers:
 
     def test_confidence_class_boundaries(self):
         from ui.cards import _confidence_class
+
         assert _confidence_class(80) == "confidence-high"
         assert _confidence_class(79) == "confidence-medium"
         assert _confidence_class(60) == "confidence-medium"
@@ -223,6 +247,7 @@ class TestThresholdHelpers:
 
     def test_rr_label_boundaries(self):
         from ui.cards import _rr_label
+
         assert _rr_label(2.0) == "Very Good"
         assert _rr_label(1.99) == "Good"
         assert _rr_label(1.5) == "Good"

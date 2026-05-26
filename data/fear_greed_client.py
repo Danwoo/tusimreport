@@ -7,8 +7,8 @@ API Docs: https://production.dataviz.cnn.io/index/fearandgreed/graphdata
 """
 
 import logging
-from typing import Dict, Any, Optional
 from datetime import datetime
+from typing import Any
 
 from data.base_client import BaseAPIClient
 
@@ -22,7 +22,7 @@ class FearGreedClient(BaseAPIClient):
         super().__init__(api_key=None, cache_subdir="fear_greed_cache")
         self.api_url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
 
-    def get_current_index(self) -> Dict[str, Any]:
+    def get_current_index(self) -> dict[str, Any]:
         """
         현재 Fear & Greed Index 조회
 
@@ -57,7 +57,7 @@ class FearGreedClient(BaseAPIClient):
                     "previous_week": int(current.get("previous_1_week", 50)),
                     "previous_month": int(current.get("previous_1_month", 50)),
                     "previous_year": int(current.get("previous_1_year", 50)),
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now().isoformat(),
                 }
 
                 self.save_cache(cache_key, result)
@@ -70,7 +70,7 @@ class FearGreedClient(BaseAPIClient):
             logger.error(f"Fear & Greed Index 조회 실패: {str(e)}")
             return self._create_fallback_index()
 
-    def get_interpretation_korean(self, score: Optional[int] = None) -> str:
+    def get_interpretation_korean(self, score: int | None = None) -> str:
         """
         Fear & Greed Index를 한글로 해석
 
@@ -95,7 +95,7 @@ class FearGreedClient(BaseAPIClient):
         else:
             return f"극단적 탐욕 ({score}/100) - 투자자들이 매우 낙관적인 상태로, 고점 경계가 필요합니다."
 
-    def get_trend_analysis(self) -> Dict[str, Any]:
+    def get_trend_analysis(self) -> dict[str, Any]:
         """
         Fear & Greed Index 추세 분석
 
@@ -130,7 +130,7 @@ class FearGreedClient(BaseAPIClient):
                 "change_from_week": week_change,
                 "change_from_month": current - prev_month,
                 "interpretation_korean": self.get_interpretation_korean(current),
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
 
         except Exception as e:
@@ -141,10 +141,10 @@ class FearGreedClient(BaseAPIClient):
                 "change_from_week": 0,
                 "change_from_month": 0,
                 "interpretation_korean": "데이터 없음",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
 
-    def _create_fallback_index(self) -> Dict[str, Any]:
+    def _create_fallback_index(self) -> dict[str, Any]:
         """Fallback Fear & Greed Index (API 실패 시)"""
         return {
             "score": 50,
@@ -154,7 +154,7 @@ class FearGreedClient(BaseAPIClient):
             "previous_month": 50,
             "previous_year": 50,
             "timestamp": datetime.now().isoformat(),
-            "note": "⚠️ Fear & Greed Index API 연결 실패. 기본값을 사용합니다."
+            "note": "⚠️ Fear & Greed Index API 연결 실패. 기본값을 사용합니다.",
         }
 
 

@@ -9,12 +9,12 @@ Korean News RSS Client
 """
 
 import logging
-import requests
 import xml.etree.ElementTree as ET
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 from html.parser import HTMLParser
-import re
+from typing import Any
+
+import requests
 import urllib3
 
 # SSL 경고 억제 (verify=False 사용 시)
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 class HTMLStripper(HTMLParser):
     """HTML 태그 제거 파서"""
+
     def __init__(self):
         super().__init__()
         self.reset()
@@ -36,7 +37,7 @@ class HTMLStripper(HTMLParser):
         self.text.append(d)
 
     def get_data(self):
-        return ''.join(self.text)
+        return "".join(self.text)
 
 
 def strip_html_tags(html: str) -> str:
@@ -63,7 +64,7 @@ class KoreanNewsRSSClient:
                 "url_template": "https://news.google.com/rss/search?q={keyword}&hl=ko&gl=KR&ceid=KR:ko",
                 "name": "Google News",
                 "tested": False,
-                "dynamic": True  # 키워드 기반 동적 URL
+                "dynamic": True,  # 키워드 기반 동적 URL
             },
         }
 
@@ -76,7 +77,7 @@ class KoreanNewsRSSClient:
             "hankyung": "403 Forbidden",
             "maeil": "403 Forbidden",
             "seoul": "403 Forbidden",
-            "moneytoday": "403 Forbidden"
+            "moneytoday": "403 Forbidden",
         }
 
     def test_rss_feed(self, feed_key: str, test_keyword: str = "삼성전자") -> bool:
@@ -97,17 +98,17 @@ class KoreanNewsRSSClient:
                 return False
 
             # 동적 URL 생성 (Google News 등)
-            if feed_info.get('dynamic', False):
-                url = feed_info['url_template'].format(keyword=test_keyword)
+            if feed_info.get("dynamic", False):
+                url = feed_info["url_template"].format(keyword=test_keyword)
                 logger.info(f"🧪 테스트 시작: {feed_info['name']} (키워드: {test_keyword})")
                 logger.info(f"   URL: {url}")
             else:
-                url = feed_info['url']
+                url = feed_info["url"]
                 logger.info(f"🧪 테스트 시작: {feed_info['name']} ({url})")
 
             # RSS 피드 다운로드 (User-Agent 추가 - 봇 차단 우회)
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
             response = requests.get(url, headers=headers, timeout=10, verify=False)
             response.raise_for_status()
@@ -116,14 +117,14 @@ class KoreanNewsRSSClient:
             root = ET.fromstring(response.content)
 
             # RSS 또는 Atom 포맷 감지
-            if root.tag == 'rss':
+            if root.tag == "rss":
                 # RSS 2.0
-                items = root.findall('.//item')
-                logger.info(f"✅ RSS 2.0 포맷 감지")
-            elif root.tag.endswith('feed'):
+                items = root.findall(".//item")
+                logger.info("✅ RSS 2.0 포맷 감지")
+            elif root.tag.endswith("feed"):
                 # Atom
-                items = root.findall('.//{http://www.w3.org/2005/Atom}entry')
-                logger.info(f"✅ Atom 포맷 감지")
+                items = root.findall(".//{http://www.w3.org/2005/Atom}entry")
+                logger.info("✅ Atom 포맷 감지")
             else:
                 logger.error(f"❌ 알 수 없는 RSS 포맷: {root.tag}")
                 return False
@@ -136,22 +137,22 @@ class KoreanNewsRSSClient:
 
             # 첫 번째 엔트리 샘플 출력
             first_item = items[0]
-            title_elem = first_item.find('title') or first_item.find('{http://www.w3.org/2005/Atom}title')
-            title = title_elem.text if title_elem is not None else 'N/A'
+            title_elem = first_item.find("title") or first_item.find("{http://www.w3.org/2005/Atom}title")
+            title = title_elem.text if title_elem is not None else "N/A"
 
             logger.info(f"✅ RSS 피드 작동: {feed_info['name']}")
             logger.info(f"   - 총 기사 수: {entry_count}개")
             logger.info(f"   - 첫 번째 기사: {title[:50]}...")
 
             # 테스트 완료 표시
-            self.rss_feeds[feed_key]['tested'] = True
+            self.rss_feeds[feed_key]["tested"] = True
             return True
 
         except Exception as e:
             logger.error(f"❌ RSS 테스트 실패 ({feed_key}): {str(e)}")
             return False
 
-    def test_all_feeds(self) -> Dict[str, bool]:
+    def test_all_feeds(self) -> dict[str, bool]:
         """
         모든 RSS 피드 테스트
 
@@ -159,7 +160,7 @@ class KoreanNewsRSSClient:
             각 피드의 테스트 결과 (True/False)
         """
         results = {}
-        for feed_key in self.rss_feeds.keys():
+        for feed_key in self.rss_feeds:
             results[feed_key] = self.test_rss_feed(feed_key)
 
         # 요약 출력
@@ -169,12 +170,7 @@ class KoreanNewsRSSClient:
 
         return results
 
-    def fetch_news_from_feed(
-        self,
-        feed_key: str,
-        keyword: str,
-        days: int = 7
-    ) -> List[Dict[str, Any]]:
+    def fetch_news_from_feed(self, feed_key: str, keyword: str, days: int = 7) -> list[dict[str, Any]]:
         """
         특정 RSS 피드에서 뉴스 수집
 
@@ -195,14 +191,14 @@ class KoreanNewsRSSClient:
             logger.info(f"📰 뉴스 수집 시작: {feed_info['name']} (키워드: {keyword})")
 
             # 동적 URL 생성 (Google News 등)
-            if feed_info.get('dynamic', False):
-                url = feed_info['url_template'].format(keyword=keyword)
+            if feed_info.get("dynamic", False):
+                url = feed_info["url_template"].format(keyword=keyword)
             else:
-                url = feed_info['url']
+                url = feed_info["url"]
 
             # RSS 피드 다운로드 (User-Agent 추가)
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
             response = requests.get(url, headers=headers, timeout=10, verify=False)
             response.raise_for_status()
@@ -211,57 +207,58 @@ class KoreanNewsRSSClient:
             root = ET.fromstring(response.content)
 
             # RSS 또는 Atom 포맷 감지
-            if root.tag == 'rss':
-                items = root.findall('.//item')
-            elif root.tag.endswith('feed'):
-                items = root.findall('.//{http://www.w3.org/2005/Atom}entry')
+            if root.tag == "rss":
+                items = root.findall(".//item")
+            elif root.tag.endswith("feed"):
+                items = root.findall(".//{http://www.w3.org/2005/Atom}entry")
             else:
-                logger.error(f"❌ 알 수 없는 RSS 포맷")
+                logger.error("❌ 알 수 없는 RSS 포맷")
                 return []
 
-            # 날짜 필터링 기준
-            cutoff_date = datetime.now() - timedelta(days=days)
+            # 날짜 필터링은 추후 pubDate 파싱 개선과 함께 적용 (현재는 미사용)
+            _ = days
 
             news_list = []
             for item in items:
                 # 제목 추출
-                title_elem = item.find('title') or item.find('{http://www.w3.org/2005/Atom}title')
-                title = title_elem.text if title_elem is not None else ''
+                title_elem = item.find("title") or item.find("{http://www.w3.org/2005/Atom}title")
+                title = title_elem.text if title_elem is not None else ""
 
                 # 요약/설명 추출
-                desc_elem = (item.find('description') or
-                           item.find('summary') or
-                           item.find('{http://www.w3.org/2005/Atom}summary'))
-                description = desc_elem.text if desc_elem is not None else ''
+                desc_elem = (
+                    item.find("description")
+                    or item.find("summary")
+                    or item.find("{http://www.w3.org/2005/Atom}summary")
+                )
+                description = desc_elem.text if desc_elem is not None else ""
 
                 # 키워드 필터링
                 if keyword.lower() not in title.lower() and keyword.lower() not in description.lower():
                     continue
 
                 # URL 추출
-                link_elem = item.find('link') or item.find('{http://www.w3.org/2005/Atom}link')
+                link_elem = item.find("link") or item.find("{http://www.w3.org/2005/Atom}link")
                 if link_elem is not None:
                     if link_elem.text:
                         url = link_elem.text
                     else:
-                        url = link_elem.get('href', '')
+                        url = link_elem.get("href", "")
                 else:
-                    url = ''
+                    url = ""
 
-                # 발행일 추출 (간단히 현재 시간 사용, 추후 파싱 개선 가능)
-                pub_elem = item.find('pubDate') or item.find('{http://www.w3.org/2005/Atom}published')
-                published_at = datetime.now().isoformat()  # 일단 현재 시간
+                # 발행일은 추후 pubDate/Atom published 파싱 추가 예정 — 지금은 현재 시간 사용
+                published_at = datetime.now().isoformat()
 
                 # 본문 추출
-                content = strip_html_tags(description) if description else ''
+                content = strip_html_tags(description) if description else ""
 
                 news_item = {
                     "title": title,
                     "content": content,
                     "url": url,
-                    "source": feed_info['name'],
+                    "source": feed_info["name"],
                     "published_at": published_at,
-                    "summary": content[:200] if content else ''
+                    "summary": content[:200] if content else "",
                 }
 
                 news_list.append(news_item)
@@ -273,12 +270,7 @@ class KoreanNewsRSSClient:
             logger.error(f"❌ 뉴스 수집 실패 ({feed_key}): {str(e)}")
             return []
 
-    def fetch_all_news(
-        self,
-        keyword: str,
-        days: int = 7,
-        only_tested: bool = True
-    ) -> List[Dict[str, Any]]:
+    def fetch_all_news(self, keyword: str, days: int = 7, only_tested: bool = True) -> list[dict[str, Any]]:
         """
         모든 RSS 피드에서 뉴스 수집 (병렬)
 
@@ -294,7 +286,7 @@ class KoreanNewsRSSClient:
 
         for feed_key, feed_info in self.rss_feeds.items():
             # only_tested=True일 때 테스트 안 한 피드 건너뛰기
-            if only_tested and not feed_info.get('tested', False):
+            if only_tested and not feed_info.get("tested", False):
                 logger.warning(f"⏭️ 건너뜀 (테스트 안 함): {feed_info['name']}")
                 continue
 
@@ -305,12 +297,12 @@ class KoreanNewsRSSClient:
         seen_urls = set()
         unique_news = []
         for news in all_news:
-            if news['url'] not in seen_urls:
-                seen_urls.add(news['url'])
+            if news["url"] not in seen_urls:
+                seen_urls.add(news["url"])
                 unique_news.append(news)
 
         # 최신순 정렬
-        unique_news.sort(key=lambda x: x['published_at'], reverse=True)
+        unique_news.sort(key=lambda x: x["published_at"], reverse=True)
 
         logger.info(f"📊 총 {len(unique_news)}개 뉴스 수집 완료 (중복 제거 후)")
 
@@ -319,28 +311,24 @@ class KoreanNewsRSSClient:
 
 # 테스트 코드
 if __name__ == "__main__":
-    import json
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     client = KoreanNewsRSSClient()
 
     # Step 1: 모든 RSS 피드 테스트
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🧪 Step 1: 모든 RSS 피드 테스트")
-    print("="*80)
+    print("=" * 80)
     test_results = client.test_all_feeds()
 
     # Step 2: 성공한 피드로 실제 뉴스 수집 테스트
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("📰 Step 2: 실제 뉴스 수집 테스트 (삼성전자)")
-    print("="*80)
+    print("=" * 80)
     news_list = client.fetch_all_news(
         keyword="삼성전자",
         days=7,
-        only_tested=True  # 테스트 통과한 피드만 사용
+        only_tested=True,  # 테스트 통과한 피드만 사용
     )
 
     # 결과 출력

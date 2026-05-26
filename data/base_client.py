@@ -9,12 +9,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import tempfile
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
@@ -32,9 +33,9 @@ class BaseAPIClient:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        cache_subdir: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        api_key: str | None = None,
+        cache_subdir: str | None = None,
+        user_agent: str | None = None,
     ) -> None:
         self.api_key = api_key
         self.session = requests.Session()
@@ -44,7 +45,7 @@ class BaseAPIClient:
                 "Accept": "application/json",
             }
         )
-        self.cache_dir: Optional[str] = None
+        self.cache_dir: str | None = None
         if cache_subdir:
             # tempfile.gettempdir()로 cross-platform (/tmp on Linux/macOS, %TEMP% on Windows).
             self.cache_dir = os.path.join(tempfile.gettempdir(), cache_subdir)
@@ -70,7 +71,7 @@ class BaseAPIClient:
         self._validate_cache_key(key)
         return os.path.join(self.cache_dir, f"{key}.json")
 
-    def get_cached(self, key: str, max_age_hours: float) -> Optional[Any]:
+    def get_cached(self, key: str, max_age_hours: float) -> Any | None:
         """TTL 내 캐시가 있으면 반환, 없으면 None."""
         if not self.cache_dir:
             return None
@@ -82,7 +83,7 @@ class BaseAPIClient:
             logger.debug(f"cache expired: {key}")
             return None
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"cache read failed for {key}: {e}")
@@ -100,11 +101,9 @@ class BaseAPIClient:
         if not self.cache_dir:
             return
         target = self._cache_path(key)
-        tmp_path: Optional[str] = None
+        tmp_path: str | None = None
         try:
-            fd, tmp_path = tempfile.mkstemp(
-                prefix=f".{key}.", suffix=".tmp", dir=self.cache_dir
-            )
+            fd, tmp_path = tempfile.mkstemp(prefix=f".{key}.", suffix=".tmp", dir=self.cache_dir)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
             os.replace(tmp_path, target)
@@ -113,7 +112,5 @@ class BaseAPIClient:
             logger.warning(f"cache write failed for {key}: {e}")
         finally:
             if tmp_path and os.path.exists(tmp_path):
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(tmp_path)
-                except OSError:
-                    pass

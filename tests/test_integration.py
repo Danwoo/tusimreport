@@ -3,9 +3,10 @@
 API 키 없이도 시스템이 graceful하게 동작하는지 확인
 """
 
-import pytest
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -86,7 +87,7 @@ class TestAPIKeyGracefulDegradation:
         assert "naver" in status
 
         # 상태 메시지 형식 확인
-        for key, msg in status.items():
+        for _key, msg in status.items():
             assert isinstance(msg, str)
             assert any(emoji in msg for emoji in ["✅", "❌", "⚠️", "ℹ️"])
 
@@ -131,7 +132,7 @@ class TestAgentHelpers:
             company_name="삼성전자",
             stock_code="005930",
             reason="API 키 없음",
-            data_source="Test API"
+            data_source="Test API",
         )
 
         assert msg["status"] == "limited"
@@ -161,7 +162,7 @@ class TestAgentHelpers:
             company_name="네이버",
             stock_code="035420",
             analysis_result={"score": 85},
-            data_sources=["API1", "API2"]
+            data_sources=["API1", "API2"],
         )
 
         assert msg["status"] == "success"
@@ -191,7 +192,7 @@ class TestSettingsValidation:
         assert "naver" in validation
 
         # 불린 값
-        for key, value in validation.items():
+        for _key, value in validation.items():
             assert isinstance(value, bool)
 
     def test_is_valid_api_key_function(self):
@@ -215,15 +216,17 @@ class TestWorkflowIntegration:
     def test_settings_import(self):
         """설정을 import할 수 있는지"""
         from config.settings import settings
+
         assert settings is not None
 
     def test_helpers_import(self):
         """헬퍼를 import할 수 있는지"""
         from utils.agent_helpers import (
             create_fallback_message,
+            format_error_message_korean,
             validate_stock_code,
-            format_error_message_korean
         )
+
         assert create_fallback_message is not None
         assert validate_stock_code is not None
         assert format_error_message_korean is not None
@@ -249,11 +252,7 @@ class TestWorkflowIntegration:
 
         @safe_agent_execution("Test Agent", "Test API")
         def success_function(company_name, stock_code):
-            return {
-                "status": "success",
-                "company_name": company_name,
-                "data": "분석 결과"
-            }
+            return {"status": "success", "company_name": company_name, "data": "분석 결과"}
 
         result = success_function("네이버", "035420")
 

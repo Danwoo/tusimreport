@@ -2,8 +2,9 @@
 """Naver News API 클라이언트."""
 
 import logging
+from typing import Any
+
 import requests
-from typing import Any, Dict, List
 
 from config.settings import settings
 
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 _NAVER_NEWS_URL = "https://openapi.naver.com/v1/search/news.json"
 
 
-def _auth_headers() -> Dict[str, str] | None:
+def _auth_headers() -> dict[str, str] | None:
     """Naver API 인증 헤더. 자격 증명 없으면 None."""
     client_id = settings.naver_client_id
     client_secret = settings.naver_client_secret
@@ -25,7 +26,7 @@ def _auth_headers() -> Dict[str, str] | None:
     }
 
 
-def fetch_naver_news(query: str, display: int = 50) -> Dict[str, Any]:
+def fetch_naver_news(query: str, display: int = 50) -> dict[str, Any]:
     """Naver News API를 호출하여 뉴스 검색 결과(raw JSON)를 반환."""
     try:
         headers = _auth_headers()
@@ -56,9 +57,7 @@ def build_display_search_query(company_name: str) -> str:
     return f"{company_name} 주식"
 
 
-def fetch_naver_news_for_display(
-    company_name: str, display: int = 10
-) -> List[Dict[str, str]]:
+def fetch_naver_news_for_display(company_name: str, display: int = 10) -> list[dict[str, str]]:
     """UI 표시용 정제된 뉴스 리스트.
 
     `<b>` 강조 태그를 제거하고 title/url/pub_date 필드만 노출한다.
