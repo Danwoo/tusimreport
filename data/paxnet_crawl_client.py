@@ -208,7 +208,8 @@ class PaxnetCrawlClient:
                         content = content_elements[0].text.strip()
                         if len(content) > 20:
                             return content[:1000]  # 1000자 제한
-                except:
+                except Exception as e:
+                    logger.debug(f"Paxnet selector {selector} 실패, 다음 selector 시도: {e}")
                     continue
 
             # 기본 body 텍스트 추출
