@@ -5,105 +5,90 @@ ordered by how badly they would bite production. The point of having this
 file is that the gaps are *known*, not denied. Items move out as they get
 addressed.
 
-## Tier 1 — would block production but not yet fixed
+## Resolved since the first audit
 
-### 1. Agent-level unit tests are still mostly smoke tests
+- ✅ ~~Agent-level smoke-only tests~~ — `tests/agents/` now covers
+  `technical_agent` (4), `comparative_agent` (3), `financial_react_agent` (5),
+  and `investment_opinion` (10) with PyKRX / FDR / LLM monkeypatching.
+- ✅ ~~No cache invalidation~~ — `BaseAPIClient.get_cached(force_refresh=True)`
+  bypasses live cache, and `_evict_if_over_limit()` LRU-trims when
+  `MAX_CACHE_ENTRIES=256` is exceeded. Tested in
+  `test_base_client_cache_policy.py`.
+- ✅ ~~Partial `datetime.now()` migration~~ — ~50 sites migrated to
+  `kst_isoformat()` / `kst_today_compact()` / `kst_year()` /
+  `kst_month_compact()`. The only `datetime.now()` left is in
+  `BaseAPIClient.get_cached` for mtime comparison (intentional — the OS
+  writes mtime in system clock, mixing it with KST would create negative
+  deltas).
+- ✅ ~~Streamlit `session_state` race~~ — verified that no code outside
+  `main.py` (which is single-threaded under Streamlit's ScriptRunContext)
+  writes to `session_state`. The `ThreadPoolExecutor` in
+  `progressive_supervisor` only emits via generator yields, no shared
+  mutable state. The earlier worry was theoretical.
+- ✅ ~~LLM thread-safety assumed but not documented~~ — assumption is now
+  documented in `config/llm_factory.py` docstring (requests.Session
+  pool guarantees + LangChain creates per-call requests, so sharing one
+  instance across threads is safe).
+- ✅ ~~Timestamp datatype inconsistency~~ — all `timestamp` / `last_updated`
+  / `created_at` keys in result dicts now come from `kst_isoformat()`,
+  producing ISO 8601 strings with `+09:00` offset.
 
-We have unit tests for the data clients that go through `BaseAPIClient`
-(`alpha_vantage`, `coingecko`, `fear_greed`) using `responses` to mock
-HTTP. The 9 agents themselves, however, are exercised only by import-smoke
-tests. We do not yet have:
+## Tier 1 — would block production but not yet fully fixed
 
-- Per-agent tests that mock `pykrx` / `FinanceDataReader` (these are not
-  HTTP — they are library calls — so `responses` alone does not cut it;
-  needs `monkeypatch.setattr` against the library functions).
-- A LangGraph supervisor end-to-end test that drives `stream_korean_stock_analysis`
-  with a stubbed LLM and asserts the final report shape.
-- Property-based tests (e.g. with Hypothesis) for `_clamp_price`,
-  cache-key validation, and other pure helpers.
-
-Until those land, "all 9 agents return sane outputs" is verified only by
-manual Streamlit testing.
-
-### 2. PyKRX / DART responses are not schema-validated
+### 1. PyKRX / DART responses are not schema-validated
 
 `pykrx.stock.get_market_fundamental(...)` returns a DataFrame whose
 columns are Korean strings (`"시가총액"`, `"PER"`, ...). If the upstream
 library changes those names (it has happened before) every downstream
-agent silently degrades to fallback values without raising. The clean
-fix is a Pydantic model per external response shape; we have not done
-this and the cost is real.
+agent silently degrades to fallback values without raising. The agent
+tests now pin the *expected* shape with stub DataFrames, but there is no
+production-time validator. The clean fix is a Pydantic model per external
+response shape with `strict=True`.
 
-### 3. Caching strategy is too coarse
+### 2. Coverage is 33% — `agents/` is barely 25%
 
-`data/cache_ttl.py` defines per-data-class TTLs now, but the cache key
-is `f"{symbol}_{period}"` style — there is no invalidation when a user
-explicitly asks for "fresh data right now", and no LRU eviction. A
-shared Streamlit deployment with hundreds of users would steadily grow
-the cache directory without bound.
+Per-module coverage is uneven: pure helpers (`core.signals`, `ui.cards`,
+`utils.time`) sit around 80-100%, but the 9 agent files average ~25%
+because we only test their internal `_logic` functions and not their
+LangChain ReAct loops (those need full LLM mocking, which has not been
+written yet).
 
-### 4. `datetime.now()` migration is partial
+### 3. Coverage gate is at 30%
 
-`utils/time.py` and the KST helpers exist. We migrated the
-PyKRX-facing call sites (financial agent, BOK, DART, comparative,
-context) but ~30 other call sites in `agents/`, `data/` and `core/`
-still use the timezone-naive `datetime.now().isoformat()`. The ISO
-strings end up in result dicts that flow to the UI and to the chat
-context — inconsistent, but not actively broken.
-
-### 5. Streamlit `session_state` race conditions
-
-Streamlit isolates `session_state` per browser session, but our
-analysis flow writes to keys like `chart_{symbol}` and
-`news_sources_{symbol}` from helper threads spun up by
-`ThreadPoolExecutor`. The current code relies on the assumption that
-Streamlit's `session_state` is thread-safe enough for "write-from-one-
-thread-read-from-main"; that assumption is undocumented. A reviewer
-will rightly ask for either an explicit `threading.Lock` around the
-write site or a switch to a queue.
-
-### 6. LLM thread-safety is assumed but not verified
-
-`progressive_supervisor` parallelises 7 agents and each call eventually
-hits the same `ChatGoogleGenerativeAI` / `ChatOpenAI` instance built
-once in `build_llm`. The LangChain docs are vague about whether sharing
-one instance across threads is supported; in practice we have not seen
-corruption but we also have not done concurrent stress testing.
+CI fails on coverage < 30%. Current measured coverage is ~33%. We move
+this floor up by ~5%p per test-suite addition; reaching 50% is still a
+stated goal.
 
 ## Tier 2 — would be nice but not blocking
 
-### 7. Agent result timestamps are not uniform
+### 4. No transitive lockfile
 
-Some agents return `datetime` objects, some return ISO strings, some
-return epoch ints. Consumers (UI, chat context) coerce on read. A
-TypedDict-driven schema (`core.schemas.AgentResponse`) exists but is
-not strictly enforced across all agents.
+`requirements.in` / `requirements-dev.in` are checked in. The pip-compile
+generated `requirements.txt` with transitive pins has not been generated
+yet — the sandboxed CI build couldn't reach PyPI to produce one. The
+direct deps are still minor-pinned via `~=`, so the build is mostly
+deterministic, but a `pip install -r requirements.txt` two months from
+now could pull a newer transitive dep.
 
-### 8. Coverage gate is at 20%
-
-CI fails on coverage <20%. Current measured coverage is ~23%. We move
-this floor up by ~5%p per test-suite addition; reaching 50% is a stated
-goal and requires the Tier-1 #1 work above.
-
-### 9. No lockfile (only `~=` minor pins)
-
-`requirements.in` / `requirements-dev.in` are checked in but no
-pip-compile generated lockfile with transitive pins yet. The
-sandboxed CI build couldn't reach PyPI to generate one; this needs to
-run on a developer machine and be committed.
-
-### 10. No load testing / cost monitoring
+### 5. No cost / load numbers
 
 We have no numbers for "what does one analysis cost in LLM tokens"
 or "at what concurrency does a single Streamlit process saturate". A
 serious deployment plan would need both.
 
-### 11. ESG agent's data source is thin
+### 6. ESG agent's data source is thin
 
 Only DART filings; doesn't compare against MSCI / Sustainalytics scores
 or to peers. The "ESG score" displayed is more of a "disclosure
 completeness score". Acceptable for an MVP, not for a customer-facing
 ESG product.
+
+### 7. Cache `cache_dir` lives in `tempfile.gettempdir()`
+
+Containers usually mount `/tmp` as tmpfs (memory-backed). That's fine for
+the small 256-entry cache but means a restart loses the working set. The
+Docker compose recipe mounts a named volume at `/tmp` to survive
+restarts, but a user not using compose loses the cache.
 
 ## Tier 3 — explicit non-goals (right now)
 
