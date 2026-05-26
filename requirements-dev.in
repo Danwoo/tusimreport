@@ -1,0 +1,27 @@
+# Developer / CI tooling.
+#
+# Separate from requirements.in so the production image does not need them.
+# Install with:
+#   pip install -r requirements-dev.txt
+# (or pip install -r requirements.txt -r requirements-dev.txt)
+#
+# Regenerate the pinned dev lockfile with:
+#   pip-compile --resolver=backtracking requirements-dev.in -o requirements-dev.txt
+
+# Lint / format
+ruff>=0.15.0
+
+# Type checking
+mypy>=1.19.0
+types-requests
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+responses>=0.25.0
+
+# Security
+pip-audit>=2.7.0
+
+# Git hooks
+pre-commit>=3.0.0

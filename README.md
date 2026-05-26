@@ -17,6 +17,30 @@ LangGraph Supervisor 아키텍처 기반의 AI 멀티 에이전트 시스템. **
 - **XSS 방어**: 모든 LLM/외부 문자열은 ui.cards.escape_html을 거쳐 렌더링, javascript:/data: URL 차단
 - **Graceful Degradation**: API 키 누락/외부 실패 시 한글 에러 메시지로 폴백, 분석 절반 이상 성공하면 의견 게이트 통과
 
+## 🛡️ Production-grade 안전장치
+
+- **도메인 예외 계층** (`core/errors.py`): RateLimitError / AuthenticationError / DataSourceUnavailableError 등으로 외부 실패를 타입화 — 재시도 정책을 호출자가 분기 가능
+- **자동 retry/backoff**: `BaseAPIClient`가 urllib3 Retry로 429/5xx에 지수 백오프(0.5s, 1.0s, 2.0s) 3회 시도
+- **상태→예외 매핑**: `request_json()`이 401/403→Auth, 429→RateLimit, 5xx→Unavailable로 자동 변환
+- **KST 타임존 명시**: PyKRX/DART 거래일 인자는 `kst_yesterday_compact()` 등 `utils.time`을 통해 한국 시간 기준 산출 (UTC 컨테이너에서 9시간 어긋남 방지)
+- **TLS verify 화이트리스트**: `verify=False`는 `_ALLOWED_INSECURE_HOSTS`에 명시된 호스트에만 적용 (RSS 인증서 깨진 매체 한정)
+- **Path-safe 캐시 키**: `^[A-Za-z0-9_-][A-Za-z0-9_.-]*$` 화이트리스트 — NUL/UNC/hidden file 차단
+- **Atomic cache write**: `tempfile.mkstemp + os.replace`로 동시 쓰기 race 방지
+- **Structured logging**: `contextvars` 기반 `bind_session(stock_code=...)` — 모든 로그에 `[s=<sid> c=<symbol>]` 접두사 자동 주입, 멀티 사용자 환경에서 로그 demux
+- **명시적 캐시 TTL** (`data/cache_ttl.py`): 시세 5분, 환율 1시간, F&G 6시간, BOK/DART 12시간 — 매직 넘버 제거
+- **타입 검증**: `core.signals`, `core.schemas`, `core.errors`, `config.llm_factory`, `ui.cards`, `data.base_client`, `utils.time`, `utils.logging_context` 8개 모듈은 mypy strict
+- **CI 게이트**: Python 3.11/3.12 matrix → ruff lint + format + mypy strict + pytest (커버리지 ≥20% baseline) + pip-audit + gitleaks 시크릿 스캔
+
+## 🐳 Docker로 실행
+
+```bash
+cp .env.example .env   # API 키 채우기 (Gemini 또는 OpenAI 필수)
+docker compose up --build
+# → http://localhost:8501
+```
+
+Dockerfile은 multi-stage: builder는 wheel 빌드만, runtime은 chromium + 한글 폰트 + tini로 슬림. non-root user(uid=1000)로 실행. healthcheck는 `/_stcore/health`.
+
 ---
 
 ## 🏗️ 시스템 아키텍처
