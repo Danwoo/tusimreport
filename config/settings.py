@@ -1,69 +1,61 @@
 import os
 from pathlib import Path
 from typing import Optional
-from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
 class Settings(BaseSettings):
-    """한국 주식 분석 시스템 설정"""
+    """한국 주식 분석 시스템 설정.
+
+    pydantic-settings v2 스타일. env_var 매핑은 alias_priority로 통일.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore",
+    )
 
     # LLM API 키 (OpenAI 또는 Google)
-    openai_api_key: Optional[str] = Field(None, env="OPENAI_API_KEY")
-    google_api_key: Optional[str] = Field(None, env="GOOGLE_API_KEY")
+    openai_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
 
     # LLM 설정
-    use_gemini: bool = Field(
-        False, env="USE_GEMINI"
-    )  # Gemini 할당량 초과로 OpenAI로 변경
-    gemini_model: str = Field("gemini-2.0-flash-lite", env="GEMINI_MODEL")
-    openai_model: str = Field("gpt-4.1-nano", env="OPENAI_MODEL")
+    use_gemini: bool = False  # Gemini 할당량 초과 시 OpenAI fallback
+    gemini_model: str = "gemini-2.0-flash-lite"
+    openai_model: str = "gpt-4.1-nano"
 
     # 한국 뉴스 API 키 (선택사항)
-    naver_client_id: Optional[str] = Field(None, env="NAVER_CLIENT_ID")
-    naver_client_secret: Optional[str] = Field(None, env="NAVER_CLIENT_SECRET")
+    naver_client_id: Optional[str] = None
+    naver_client_secret: Optional[str] = None
 
     # Tavily Search API 키 (글로벌 뉴스 검색)
-    tavily_api_key: Optional[str] = Field(None, env="TAVILY_API_KEY")
+    tavily_api_key: Optional[str] = None
 
-    # 딥서치 뉴스 API 키 (월 20회 제한)
-    # Function Call API: https://api.deepsearch.com/note/v1/function
-    # 주의: 월 20회 호출 제한으로 인해 현재 비활성화됨
-    # 보안: API 키는 환경 변수로만 설정
-    deepsearch_api_key: Optional[str] = Field(None, env="DEEPSEARCH_API_KEY")
+    # 딥서치 뉴스 API (월 20회 제한으로 현재 비활성화 — env 전용)
+    deepsearch_api_key: Optional[str] = None
 
-    # KOSIS 국가통계포털 서비스 키 (무료)
-    # 경제지표, 인구통계, 고용통계, 소비자물가지수 등
-    # 134,586종 국가통계 데이터 제공
-    kosis_service_key: Optional[str] = Field(None, env="KOSIS_SERVICE_KEY")
+    # KOSIS 국가통계포털 서비스 키
+    kosis_service_key: Optional[str] = None
 
-    # DART API 키 (무료)
-    # 금융감독원 전자공시시스템 기업정보
-    dart_api_key: Optional[str] = Field(None, env="DART_API_KEY")
+    # DART (금융감독원 전자공시) API 키
+    dart_api_key: Optional[str] = None
 
-    # ECOS API 키 (한국은행 경제통계시스템)
-    # 거시경제 지표 데이터
-    ecos_api_key: Optional[str] = Field(None, env="ECOS_API_KEY")
+    # ECOS (한국은행 경제통계시스템) API 키
+    ecos_api_key: Optional[str] = None
 
-    # 🆕 P1-3: 실시간 데이터 통합
-    # Alpha Vantage API 키 (글로벌 시장 데이터)
-    # 무료: 25 requests/day → 캐싱 필수
-    alpha_vantage_api_key: Optional[str] = Field(None, env="ALPHA_VANTAGE_API_KEY")
+    # Alpha Vantage (글로벌 시장 데이터). 무료 25req/day → 캐싱 필수
+    alpha_vantage_api_key: Optional[str] = None
 
     # 애플리케이션 설정
-    debug: bool = Field(True, env="DEBUG")
-    log_level: str = Field("INFO", env="LOG_LEVEL")
+    debug: bool = True
+    log_level: str = "INFO"
 
     # 경로 설정
     project_root: Path = Path(__file__).parent.parent
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-        extra = "ignore"  # 추가 필드 무시
 
 
 settings = Settings()
