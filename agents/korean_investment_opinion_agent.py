@@ -7,12 +7,13 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any
+
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
-from langchain_core.messages import SystemMessage, HumanMessage
 
 from config.llm_factory import build_llm
-from core.types import InvestmentOpinion
+from core.schemas import InvestmentOpinion
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +39,7 @@ def _clamp_price(raw: Any, current_price: float, default_mult: float) -> int:
 
 @tool
 def generate_investment_opinion(
-    company_name: str,
-    stock_code: str,
-    agent_results: Dict[str, Any],
-    current_price: Optional[float] = None
+    company_name: str, stock_code: str, agent_results: dict[str, Any], current_price: float | None = None
 ) -> InvestmentOpinion:
     """
     🔧 P1-1: Level 3 투자 의견 생성 (목표가, 손절가, R/R 비율, 분할 매수 전략)
@@ -185,10 +183,7 @@ def generate_investment_opinion(
 """
 
         # LLM 호출
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt)
-        ]
+        messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
 
         response = llm.invoke(messages)
         response_text = response.content.strip()
@@ -217,12 +212,8 @@ def generate_investment_opinion(
 
         # 가격/비율도 생성지점에서 합리적 범위로 clamp.
         # LLM이 target=-5000이나 999999999를 뱉으면 UI에서 % 계산이 깨지므로 막아야 함.
-        target_price = _clamp_price(
-            opinion_data.get("target_price"), current_price, default_mult=1.1
-        )
-        stop_loss = _clamp_price(
-            opinion_data.get("stop_loss"), current_price, default_mult=0.9
-        )
+        target_price = _clamp_price(opinion_data.get("target_price"), current_price, default_mult=1.1)
+        stop_loss = _clamp_price(opinion_data.get("stop_loss"), current_price, default_mult=0.9)
         try:
             rr_ratio = round(float(opinion_data.get("risk_reward_ratio", 1.5)), 1)
         except (TypeError, ValueError):
@@ -245,17 +236,37 @@ def generate_investment_opinion(
             "target_price": target_price,
             "stop_loss": stop_loss,
             "risk_reward_ratio": rr_ratio,
-            "split_buy_strategy": opinion_data.get("split_buy_strategy", [
-                {"order": "1차", "price_range": f"{int(current_price*0.98):,}-{int(current_price*1.02):,}", "weight": "30%", "timing": "현재가 근처"},
-                {"order": "2차", "price_range": f"{int(current_price*0.94):,}-{int(current_price*0.97):,}", "weight": "40%", "timing": "조정 시"},
-                {"order": "3차", "price_range": f"{int(current_price*0.89):,}-{int(current_price*0.92):,}", "weight": "30%", "timing": "추가 하락 시"}
-            ])
+            "split_buy_strategy": opinion_data.get(
+                "split_buy_strategy",
+                [
+                    {
+                        "order": "1차",
+                        "price_range": f"{int(current_price * 0.98):,}-{int(current_price * 1.02):,}",
+                        "weight": "30%",
+                        "timing": "현재가 근처",
+                    },
+                    {
+                        "order": "2차",
+                        "price_range": f"{int(current_price * 0.94):,}-{int(current_price * 0.97):,}",
+                        "weight": "40%",
+                        "timing": "조정 시",
+                    },
+                    {
+                        "order": "3차",
+                        "price_range": f"{int(current_price * 0.89):,}-{int(current_price * 0.92):,}",
+                        "weight": "30%",
+                        "timing": "추가 하락 시",
+                    },
+                ],
+            ),
         }
 
         result["timestamp"] = datetime.now().isoformat()
 
         logger.info(f"✅ Level 3 투자 의견 생성: {result['opinion']} (신뢰도: {result['confidence']}%)")
-        logger.info(f"   목표가: {result['target_price']:,}원, 손절가: {result['stop_loss']:,}원, R/R: {result['risk_reward_ratio']}")
+        logger.info(
+            f"   목표가: {result['target_price']:,}원, 손절가: {result['stop_loss']:,}원, R/R: {result['risk_reward_ratio']}"
+        )
         return result
 
     except json.JSONDecodeError as e:
@@ -268,7 +279,7 @@ def generate_investment_opinion(
         return _create_fallback_opinion(company_name, stock_code, str(e), current_price)
 
 
-def _summarize_agent_results(agent_results: Dict[str, Any]) -> str:
+def _summarize_agent_results(agent_results: dict[str, Any]) -> str:
     """
     8개 에이전트 결과를 텍스트로 요약
 
@@ -281,20 +292,27 @@ def _summarize_agent_results(agent_results: Dict[str, Any]) -> str:
 
     # 에이전트명 매핑
     agent_labels = {
-        'context_expert': '🌍 **시장 환경 분석**',
-        'sentiment_expert': '📰 **뉴스 여론 분석**',
-        'financial_expert': '💰 **재무 상태 분석**',
-        'advanced_technical_expert': '📈 **기술적 분석**',
-        'institutional_trading_expert': '🏦 **기관 수급 분석**',
-        'comparative_expert': '⚖️ **상대 가치 분석**',
-        'esg_expert': '🌱 **ESG 분석**',
-        'community_expert': '💬 **커뮤니티 투자 심리**'
+        "context_expert": "🌍 **시장 환경 분석**",
+        "sentiment_expert": "📰 **뉴스 여론 분석**",
+        "financial_expert": "💰 **재무 상태 분석**",
+        "advanced_technical_expert": "📈 **기술적 분석**",
+        "institutional_trading_expert": "🏦 **기관 수급 분석**",
+        "comparative_expert": "⚖️ **상대 가치 분석**",
+        "esg_expert": "🌱 **ESG 분석**",
+        "community_expert": "💬 **커뮤니티 투자 심리**",
     }
 
     # 각 에이전트 결과를 순서대로 추가
-    for agent_name in ['context_expert', 'sentiment_expert', 'financial_expert',
-                       'advanced_technical_expert', 'institutional_trading_expert',
-                       'comparative_expert', 'esg_expert', 'community_expert']:
+    for agent_name in [
+        "context_expert",
+        "sentiment_expert",
+        "financial_expert",
+        "advanced_technical_expert",
+        "institutional_trading_expert",
+        "comparative_expert",
+        "esg_expert",
+        "community_expert",
+    ]:
         if agent_name in agent_results and agent_results[agent_name]:
             content = agent_results[agent_name]
             # 텍스트가 너무 길면 앞부분만 (LLM 컨텍스트 제한)
@@ -306,7 +324,7 @@ def _summarize_agent_results(agent_results: Dict[str, Any]) -> str:
     return "\n".join(summary_parts)
 
 
-def _extract_current_price(stock_code: str, agent_results: Dict[str, Any]) -> float:
+def _extract_current_price(stock_code: str, agent_results: dict[str, Any]) -> float:
     """
     🆕 P1-1: 현재가 추출
 
@@ -323,14 +341,14 @@ def _extract_current_price(stock_code: str, agent_results: Dict[str, Any]) -> fl
             if isinstance(content, str):
                 # "현재가: 65,000원" 같은 패턴 찾기
                 price_patterns = [
-                    r'현재가[:\s]+([0-9,]+)원?',
-                    r'종가[:\s]+([0-9,]+)원?',
-                    r'Close[:\s]+([0-9,]+)'
+                    r"현재가[:\s]+([0-9,]+)원?",
+                    r"종가[:\s]+([0-9,]+)원?",
+                    r"Close[:\s]+([0-9,]+)",
                 ]
                 for pattern in price_patterns:
                     match = re.search(pattern, content)
                     if match:
-                        price_str = match.group(1).replace(',', '')
+                        price_str = match.group(1).replace(",", "")
                         price = float(price_str)
                         logger.info(f"현재가 추출 성공 ({agent_name}에서): {price:,}원")
                         return price
@@ -338,9 +356,10 @@ def _extract_current_price(stock_code: str, agent_results: Dict[str, Any]) -> fl
         # 2. FinanceDataReader로 직접 조회
         logger.info("agent_results에서 현재가 없음. FinanceDataReader로 조회 중...")
         import FinanceDataReader as fdr
+
         df = fdr.DataReader(stock_code, end=None)  # 최근 데이터
         if df is not None and not df.empty:
-            current_price = float(df['Close'].iloc[-1])
+            current_price = float(df["Close"].iloc[-1])
             logger.info(f"FinanceDataReader로 현재가 조회 성공: {current_price:,}원")
             return current_price
 
@@ -354,11 +373,8 @@ def _extract_current_price(stock_code: str, agent_results: Dict[str, Any]) -> fl
 
 
 def _create_fallback_opinion(
-    company_name: str,
-    stock_code: str,
-    error_msg: str,
-    current_price: float = 100000.0
-) -> Dict[str, Any]:
+    company_name: str, stock_code: str, error_msg: str, current_price: float = 100000.0
+) -> dict[str, Any]:
     """🔧 P1-1: Level 3 fallback 투자 의견 (에러 발생 시)"""
     return {
         "company_name": company_name,
@@ -377,10 +393,10 @@ def _create_fallback_opinion(
         "split_buy_strategy": [
             {"order": "1차", "price_range": "데이터 부족", "weight": "30%", "timing": "분석 불가"},
             {"order": "2차", "price_range": "데이터 부족", "weight": "40%", "timing": "분석 불가"},
-            {"order": "3차", "price_range": "데이터 부족", "weight": "30%", "timing": "분석 불가"}
+            {"order": "3차", "price_range": "데이터 부족", "weight": "30%", "timing": "분석 불가"},
         ],
         "timestamp": datetime.now().isoformat(),
-        "error": error_msg
+        "error": error_msg,
     }
 
 
@@ -390,59 +406,40 @@ def test_investment_opinion():
 
     # 샘플 에이전트 결과 (실제로는 8개 에이전트에서 받음)
     sample_results = {
-        'context': {
-            'kospi_index': '2,500',
-            'base_rate': '3.50%',
-            'market_outlook': '안정적'
+        "context": {"kospi_index": "2,500", "base_rate": "3.50%", "market_outlook": "안정적"},
+        "sentiment": {
+            "overall_sentiment": "positive",
+            "positive_count": 15,
+            "negative_count": 5,
+            "key_topics": ["신제품 출시", "실적 개선", "시장 점유율 증가"],
         },
-        'sentiment': {
-            'overall_sentiment': 'positive',
-            'positive_count': 15,
-            'negative_count': 5,
-            'key_topics': ['신제품 출시', '실적 개선', '시장 점유율 증가']
+        "financial": {
+            "debt_ratio": "45%",
+            "roe": "12.5%",
+            "operating_margin": "15.3%",
+            "financial_health": "우수",
         },
-        'financial': {
-            'debt_ratio': '45%',
-            'roe': '12.5%',
-            'operating_margin': '15.3%',
-            'financial_health': '우수'
+        "technical": {"rsi": "65", "macd_signal": "매수", "bollinger_signal": "중립", "trend": "상승"},
+        "institutional": {"recent_trend": "순매수", "net_buying": "+50억원", "supply_outlook": "긍정적"},
+        "comparative": {
+            "per": "12.5",
+            "sector_avg_per": "15.2",
+            "pbr": "1.8",
+            "sector_avg_pbr": "2.1",
+            "valuation": "저평가",
         },
-        'technical': {
-            'rsi': '65',
-            'macd_signal': '매수',
-            'bollinger_signal': '중립',
-            'trend': '상승'
+        "esg": {"esg_grade": "A", "governance": "우수", "sustainability": "양호"},
+        "community": {
+            "overall_sentiment": "positive",
+            "positive_count": 25,
+            "negative_count": 10,
+            "key_topics": ["매수 추천", "기술력 우수", "성장 기대"],
         },
-        'institutional': {
-            'recent_trend': '순매수',
-            'net_buying': '+50억원',
-            'supply_outlook': '긍정적'
-        },
-        'comparative': {
-            'per': '12.5',
-            'sector_avg_per': '15.2',
-            'pbr': '1.8',
-            'sector_avg_pbr': '2.1',
-            'valuation': '저평가'
-        },
-        'esg': {
-            'esg_grade': 'A',
-            'governance': '우수',
-            'sustainability': '양호'
-        },
-        'community': {
-            'overall_sentiment': 'positive',
-            'positive_count': 25,
-            'negative_count': 10,
-            'key_topics': ['매수 추천', '기술력 우수', '성장 기대']
-        }
     }
 
-    result = generate_investment_opinion.invoke({
-        'company_name': '삼성전자',
-        'stock_code': '005930',
-        'agent_results': sample_results
-    })
+    result = generate_investment_opinion.invoke(
+        {"company_name": "삼성전자", "stock_code": "005930", "agent_results": sample_results}
+    )
 
     print("=== 투자 의견 생성 결과 ===")
     print(f"종목: {result['company_name']} ({result['stock_code']})")
@@ -450,11 +447,11 @@ def test_investment_opinion():
     print(f"신뢰도: {result['confidence']}%")
     print(f"투자 기간: {result['timeframe']}")
     print(f"\n근거:\n{result['reasoning']}")
-    print(f"\n긍정 요인:")
-    for pos in result['key_positives']:
+    print("\n긍정 요인:")
+    for pos in result["key_positives"]:
         print(f"  - {pos}")
-    print(f"\n주요 리스크:")
-    for risk in result['key_risks']:
+    print("\n주요 리스크:")
+    for risk in result["key_risks"]:
         print(f"  - {risk}")
 
 

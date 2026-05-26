@@ -5,20 +5,17 @@
 """
 
 import logging
-from typing import Dict, Any, Callable, Optional
+from collections.abc import Callable
 from functools import wraps
+from typing import Any
 
-from core.types import AgentResponse
+from core.schemas import AgentResponse
 
 logger = logging.getLogger(__name__)
 
 
 def create_fallback_message(
-    agent_name: str,
-    company_name: str,
-    stock_code: str,
-    reason: str,
-    data_source: Optional[str] = None
+    agent_name: str, company_name: str, stock_code: str, reason: str, data_source: str | None = None
 ) -> AgentResponse:
     """
     API 실패 시 반환할 fallback 메시지 생성
@@ -84,11 +81,7 @@ def format_error_message_korean(error: Exception, context: str = "") -> str:
         return f"❌ {error_type_ko}: {error_msg}"
 
 
-def safe_agent_execution(
-    agent_name: str,
-    data_source: Optional[str] = None,
-    fallback_on_error: bool = True
-):
+def safe_agent_execution(agent_name: str, data_source: str | None = None, fallback_on_error: bool = True):
     """
     에이전트 실행을 안전하게 감싸는 데코레이터
 
@@ -102,9 +95,10 @@ def safe_agent_execution(
         def get_sentiment_analysis(company_name, stock_code):
             ...
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
-        def wrapper(*args, **kwargs) -> Dict[str, Any]:
+        def wrapper(*args, **kwargs) -> dict[str, Any]:
             try:
                 # 에이전트 실행
                 logger.info(f"{agent_name} 실행 시작")
@@ -126,13 +120,14 @@ def safe_agent_execution(
                         company_name=company_name,
                         stock_code=stock_code,
                         reason=error_msg,
-                        data_source=data_source
+                        data_source=data_source,
                     )
                 else:
                     # 에러 재발생
                     raise
 
         return wrapper
+
     return decorator
 
 
@@ -161,8 +156,8 @@ def create_limited_analysis_message(
     agent_name: str,
     company_name: str,
     stock_code: str,
-    available_data: Dict[str, Any],
-    missing_apis: list[str]
+    available_data: dict[str, Any],
+    missing_apis: list[str],
 ) -> AgentResponse:
     """
     제한적 분석 메시지 생성 (일부 API만 사용 가능할 때)
@@ -189,7 +184,7 @@ def create_limited_analysis_message(
     }
 
 
-def get_demo_mode_message(agent_name: str) -> Dict[str, Any]:
+def get_demo_mode_message(agent_name: str) -> dict[str, Any]:
     """
     데모 모드 메시지 생성
 
@@ -238,11 +233,7 @@ def validate_stock_code(stock_code: str) -> tuple[bool, str]:
 
 
 def create_success_message(
-    agent_name: str,
-    company_name: str,
-    stock_code: str,
-    analysis_result: Any,
-    data_sources: list[str]
+    agent_name: str, company_name: str, stock_code: str, analysis_result: Any, data_sources: list[str]
 ) -> AgentResponse:
     """
     성공 메시지 생성 (표준화)
