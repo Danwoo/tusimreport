@@ -1,0 +1,80 @@
+[project]
+name = "tusimreport"
+description = "Korean stock multi-agent analysis with conversational AI"
+requires-python = ">=3.11"
+dynamic = ["version"]
+
+# 패키지 메타데이터/빌드는 streamlit 앱이라 단순. 설정의 본문은 아래 [tool.*]들.
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["logs", ".venv", "venv"]
+
+[tool.ruff.lint]
+# 점진 도입: 시끄러운 규칙은 빼고 진짜 버그를 잡는 규칙만 켠다.
+# 한국어 docstring/주석이 많아 D, S, ICN 등 스타일/문체 규칙은 의도적 제외.
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes (unused imports, undefined names)
+    "W",    # pycodestyle warnings
+    "B",    # flake8-bugbear (real bug patterns)
+    "UP",   # pyupgrade (use modern Python syntax)
+    "SIM",  # flake8-simplify
+    "I",    # isort (import ordering)
+]
+ignore = [
+    "E501",  # line too long; black-style soft-wrap, not worth churning the codebase
+    "B008",  # function call in default arg (FastAPI/typer-style is fine for our settings)
+    "SIM108", # ternary suggestion is often less readable
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 테스트는 unused-import/long-line이 일부러 있을 수 있음
+"tests/*" = ["F401", "F811"]
+# __init__는 re-export 패턴 허용
+"**/__init__.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.11"
+# 점진 도입 모드: 코드베이스 전체를 한 번에 strict로 바꾸면 회귀가 폭발한다.
+# - 새로 작성된/타입 힌트가 있는 코드만 검사한다 (no_implicit_optional만 켜고 나머지는 느슨).
+# - 패키지 단위로 점차 strict로 좁힌다.
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+exclude = [
+    "^logs/",
+    "^\\.venv/",
+]
+
+# 새 모듈은 strict하게 유지 (TypedDict 도입한 곳)
+[[tool.mypy.overrides]]
+module = ["core.signals", "core.schemas", "config.llm_factory", "ui.cards", "data.base_client"]
+disallow_untyped_defs = true
+warn_return_any = true
+strict_equality = true
+ignore_missing_imports = true
+
+# LangChain/Streamlit/FinanceDataReader 등 외부 라이브러리 stubs 없음
+[[tool.mypy.overrides]]
+module = [
+    "FinanceDataReader.*", "pykrx.*", "selenium.*", "streamlit.*",
+    "langchain.*", "langchain_core.*", "langchain_openai.*", "langchain_google_genai.*",
+    "langgraph.*", "langgraph_supervisor.*", "tiktoken.*",
+    "requests.*", "chromedriver_autoinstaller.*", "webdriver_manager.*",
+    "matplotlib.*", "mplfinance.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+# 외부 네트워크 호출이 있는 마커는 명시적으로 분리
+markers = [
+    "integration: tests that touch external APIs (run manually)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:pykrx.*",
+]
