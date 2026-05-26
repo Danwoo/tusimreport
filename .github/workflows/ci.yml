@@ -13,25 +13,31 @@ concurrency:
 
 jobs:
   lint-type-test:
-    name: Lint, type-check, and test
+    name: Lint, type-check, and test (py${{ matrix.python }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 (현재 명시 타깃), 3.12 (StrEnum/from __future__ 회귀 방지).
+        # 3.13은 아직 일부 라이브러리(pykrx/FinanceDataReader) 미검증이라 보류.
+        python: ["3.11", "3.12"]
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
           cache: pip
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff mypy pytest types-requests
+          pip install pytest-cov types-requests
 
       - name: Ruff (lint)
         run: ruff check .
@@ -40,14 +46,62 @@ jobs:
         run: ruff format --check .
 
       - name: Mypy (strict modules only)
-        # pyproject.toml 의 override가 strict 영역을 지정한다. 나머지는 점진 도입.
+        # pyproject.toml override가 strict 영역을 지정한다.
+        # 나머지는 점진 도입.
         run: |
           mypy --config-file pyproject.toml \
             core/signals.py \
             core/schemas.py \
+            core/errors.py \
             config/llm_factory.py \
             ui/cards.py \
-            data/base_client.py
+            data/base_client.py \
+            utils/time.py \
+            utils/logging_context.py
 
-      - name: Pytest
-        run: pytest -q
+      - name: Pytest with coverage
+        # 현재 baseline ~23%. fail-under는 회귀 방지선이라 일부러 baseline보다
+        # 살짝 아래(20%)에 둔다. 단위 테스트가 추가되는 대로 5%p씩 상향한다.
+        run: |
+          pytest -q \
+            --cov=core \
+            --cov=ui \
+            --cov=utils \
+            --cov=data \
+            --cov-report=term-missing \
+            --cov-fail-under=20
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # 의존성 감사는 lint/test와 독립적으로 돌린다 (실패해도 머지를 막진 않게
+    # `continue-on-error: true`. 알림을 받기 위해 잡은 유지).
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit installed dependencies for known CVEs
+        # requirements.txt를 그대로 감사. lockfile이 없어 transitive까지는
+        # 못 잡지만 직접 의존성의 알려진 취약점은 잡힌다.
+        run: pip-audit -r requirements.txt --strict || true
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 전체 히스토리 스캔
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
