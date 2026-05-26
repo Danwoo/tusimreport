@@ -8,7 +8,6 @@ import logging
 import json
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
-import tiktoken
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -29,16 +28,30 @@ class EnterpriseContextManager:
 
     def __init__(self, model_name: str = "gpt-4"):
         self.model_name = model_name
-        self.encoding = tiktoken.encoding_for_model("gpt-4")
+        # tiktoken encoding은 처음 호출 시 lazy load — import 시점 네트워크 의존성 회피
+        self._encoding = None
         self.window = ContextWindow()
         self.agent_summaries = {}
         self.data_cache = {}
 
         logger.info(f"Context Manager 초기화: 최대 {self.window.max_tokens:,} 토큰")
 
+    @property
+    def encoding(self):
+        """tiktoken encoding을 lazy-load. 처음 호출 시에만 다운로드한다."""
+        if self._encoding is None:
+            import tiktoken
+            self._encoding = tiktoken.encoding_for_model(self.model_name)
+        return self._encoding
+
     def count_tokens(self, text: str) -> int:
-        """정확한 토큰 수 계산"""
-        return len(self.encoding.encode(text))
+        """정확한 토큰 수 계산 (tiktoken 불가 시 대략적 추정으로 fallback)."""
+        try:
+            return len(self.encoding.encode(text))
+        except Exception as e:
+            # 네트워크 없는 환경에선 tiktoken 인코딩 다운로드 불가 → 문자 수 / 4로 근사
+            logger.warning(f"tiktoken encoding 로드 실패, 대략 추정 사용: {e}")
+            return len(text) // 4
 
     def preserve_agent_output(self, agent_name: str, full_output: str) -> str:
         """에이전트 출력 완전 보존 - 압축/요약 없음"""
@@ -169,9 +182,20 @@ class EnterpriseContextManager:
             "timestamp": datetime.now().isoformat()
         }
 
-# 전역 컨텍스트 매니저 인스턴스
-enterprise_context_manager = EnterpriseContextManager()
+# 전역 컨텍스트 매니저 인스턴스 (lazy singleton)
+_enterprise_context_manager: "EnterpriseContextManager | None" = None
+
 
 def get_context_manager() -> EnterpriseContextManager:
-    """전역 컨텍스트 매니저 접근"""
-    return enterprise_context_manager
+    """전역 컨텍스트 매니저 접근 (lazy singleton)."""
+    global _enterprise_context_manager
+    if _enterprise_context_manager is None:
+        _enterprise_context_manager = EnterpriseContextManager()
+    return _enterprise_context_manager
+
+
+def __getattr__(name):
+    """PEP 562: `enterprise_context_manager` 접근 시 lazy 빌드."""
+    if name == "enterprise_context_manager":
+        return get_context_manager()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
