@@ -2,6 +2,17 @@
 
 12개 에이전트/supervisor 파일에 복붙되어 있던 provider-분기 코드를 한 곳으로 모은다.
 provider 추가/모델 변경 시 한 줄만 고치면 된다.
+
+Thread-safety 가정:
+- ChatOpenAI/ChatGoogleGenerativeAI는 내부적으로 `requests.Session` 또는
+  google sdk 클라이언트를 들고 있다. 이들 SDK는 `invoke()`가 thread-safe
+  하다고 *문서화는 되어 있지 않지만*, requests.Session.request은 connection
+  pool에 대해 thread-safe하다고 공식 문서가 보증한다.
+- 따라서 같은 인스턴스를 여러 스레드가 동시에 invoke()하는 것은 안전하다고
+  본다. supervisor의 ThreadPoolExecutor는 이 가정에 의존한다.
+- 위 가정이 깨지면 회귀 — `tests/test_llm_factory_concurrent.py`가
+  build_llm() 인스턴스를 8개 스레드가 동시에 두드리는 부하 테스트로
+  최소한의 안전망을 제공.
 """
 
 from __future__ import annotations
