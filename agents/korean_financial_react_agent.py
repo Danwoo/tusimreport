@@ -1,30 +1,31 @@
 import logging
-from datetime import datetime, timedelta
 from typing import Any
 
-# matplotlib backend 설정 (GUI 경고 방지)
+# matplotlib backend는 pyplot import 전에 set해야 적용된다.
+# isort가 import 순서를 재배열하지 않도록 별도 블록으로 묶는다.
 import matplotlib
-import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
-import pandas as pd
-from matplotlib import font_manager
 
 matplotlib.use("Agg")
 
 # 한국 주식 데이터 라이브러리
-import FinanceDataReader as fdr
-import pykrx.stock as stock
-from langchain_core.messages import HumanMessage
-from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
+import FinanceDataReader as fdr  # noqa: E402
+import matplotlib.dates as mdates  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+import pandas as pd  # noqa: E402
+import pykrx.stock as stock  # noqa: E402
+from langchain_core.messages import HumanMessage  # noqa: E402
+from langchain_core.tools import tool  # noqa: E402
+from langgraph.prebuilt import create_react_agent  # noqa: E402
+from matplotlib import font_manager  # noqa: E402
 
-from config.llm_factory import build_llm
-from core.signals import AgentSignal
-from data.bok_api_client import get_macro_economic_indicators
-from data.dart_api_client import get_comprehensive_company_data
-from data.sector_analysis_client import analyze_sector_relative_performance
-from utils.agent_helpers import create_fallback_message, format_error_message_korean
-from utils.helpers import convert_numpy_types
+from config.llm_factory import build_llm  # noqa: E402
+from core.signals import AgentSignal  # noqa: E402
+from data.bok_api_client import get_macro_economic_indicators  # noqa: E402
+from data.dart_api_client import get_comprehensive_company_data  # noqa: E402
+from data.sector_analysis_client import analyze_sector_relative_performance  # noqa: E402
+from utils.agent_helpers import create_fallback_message, format_error_message_korean  # noqa: E402
+from utils.helpers import convert_numpy_types  # noqa: E402
+from utils.time import kst_days_ago_compact, kst_isoformat, kst_yesterday_compact  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ def get_korean_stock_data(stock_code: str) -> dict[str, Any]:
                 ),
             },
             "data_points": len(df),
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": kst_isoformat(),
         }
 
         return convert_numpy_types(result)
@@ -103,8 +104,10 @@ def get_pykrx_market_data(stock_code: str) -> dict[str, Any]:
     try:
         logger.info(f"Fetching PyKRX market data for {stock_code}")
 
-        # 어제 날짜 (장 마감 후 가장 최근 거래일 추정용)
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        # 거래일 인자는 한국 시장 기준이어야 한다 (utils.time.KST 참고).
+        # UTC 컨테이너에서 `datetime.now()`를 쓰면 KOSPI 마감 직후 시간대에
+        # 어제 날짜가 그제로 밀려 PyKRX가 휴장 응답을 돌려준다.
+        yesterday = kst_yesterday_compact()
 
         # 종목 기본 정보
         try:
@@ -121,8 +124,8 @@ def get_pykrx_market_data(stock_code: str) -> dict[str, Any]:
                     }
                     break
 
-            # 시가총액 및 기본 지표 (날짜 범위로 조회)
-            week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
+            # 시가총액 및 기본 지표 (KST 기준 -7일 ~ 어제)
+            week_ago = kst_days_ago_compact(7)
             fundamental_data = stock.get_market_fundamental(week_ago, yesterday, stock_code)
 
             result = {
@@ -130,7 +133,7 @@ def get_pykrx_market_data(stock_code: str) -> dict[str, Any]:
                 "fundamental_data": {},
                 "market_data": {
                     "data_source": "PyKRX",
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": kst_isoformat(),
                 },
             }
 
@@ -160,7 +163,7 @@ def get_pykrx_market_data(stock_code: str) -> dict[str, Any]:
                 "company_info": {"name": "Unknown", "market": "Unknown"},
                 "fundamental_data": {},
                 "market_data": {"data_source": "PyKRX", "error": str(e)},
-                "last_updated": datetime.now().isoformat(),
+                "last_updated": kst_isoformat(),
             }
 
     except Exception as e:
@@ -240,7 +243,7 @@ def save_stock_chart(stock_code: str, chart_data: dict | None = None) -> dict[st
             "chart_path": chart_filename,
             "chart_type": "price_volume",
             "data_points": len(df),
-            "created_at": datetime.now().isoformat(),
+            "created_at": kst_isoformat(),
             "message": f"Chart saved as {chart_filename} for stock {stock_code}",
         }
 
@@ -318,7 +321,7 @@ def get_dart_company_data(stock_code: str) -> dict[str, Any]:
             "financial_summary": financial_summary,
             "recent_disclosures": disclosure_summary,
             "data_source": "DART OpenAPI",
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": kst_isoformat(),
         }
 
     except Exception as e:
@@ -456,7 +459,7 @@ def get_financial_analysis_logic(stock_code: str, company_name: str = None) -> d
             "agent": "korean_financial_agent",
             "messages": result["messages"],
             "analysis_complete": True,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": kst_isoformat(),
         }
 
     except Exception as e:
