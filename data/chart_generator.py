@@ -8,7 +8,7 @@ import base64
 import io
 import logging
 import warnings
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import FinanceDataReader as fdr
@@ -16,6 +16,8 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import font_manager
+
+from utils.time import kst_now
 
 warnings.filterwarnings("ignore")
 
@@ -45,7 +47,7 @@ def setup_korean_font():
 def fetch_stock_data(symbol: str, period: int = 252) -> pd.DataFrame:
     """주식 데이터 가져오기 (FinanceDataReader 사용)"""
     try:
-        end_date = datetime.now()
+        end_date = kst_now()
         start_date = end_date - timedelta(days=period + 30)  # 여유분 추가
 
         # 종목 코드 정리 (앞의 0 제거하지 않음)

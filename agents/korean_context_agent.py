@@ -9,7 +9,7 @@ Korean Market & Economic Context Agent
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 import FinanceDataReader as fdr
@@ -22,7 +22,7 @@ from core.signals import AgentSignal
 from data.bok_api_client import get_macro_economic_indicators
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
 from utils.helpers import convert_numpy_types
-from utils.time import kst_isoformat, kst_today_compact
+from utils.time import kst_isoformat, kst_now, kst_today_compact
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ def get_market_and_economic_context_logic(stock_code: str, company_name: str) ->
 
         # 1. 주식 현재 시세 (FinanceDataReader)
         try:
-            df = fdr.DataReader(stock_code, start=datetime.now() - timedelta(days=30))
+            df = fdr.DataReader(stock_code, start=kst_now() - timedelta(days=30))
             if not df.empty:
                 latest = df.iloc[-1]
                 context_data["stock_price"] = {
