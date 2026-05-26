@@ -1,0 +1,44 @@
+# 5분 reproducible 실행 목표:
+#
+#   cp .env.example .env   # API 키 채우기
+#   docker compose up --build
+#   → http://localhost:8501
+#
+# 캐시 볼륨은 BaseAPIClient가 tempfile.gettempdir() 아래에 쓰는 데이터를
+# 컨테이너 재시작 후에도 살리기 위함. 지우고 싶으면 `docker compose down -v`.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tusimreport:local
+    container_name: tusimreport-app
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    # API 키는 .env 파일에서 읽는다. 호스트 .env가 없으면 빈 값으로 부팅돼
+    # graceful degradation 경로(사이드바 API 상태 표시)로 빠진다.
+    # required: false — 클론한 직후 .env 만들기 전에도 `docker compose config`/
+    # `--build`가 동작하도록.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # 컴포즈 레벨에서 추가 오버라이드가 필요할 때 여기. 비워둠.
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      # 캐시(파일 TTL 캐시) 영속화 — 같은 종목 재분석 시 외부 호출을 아낀다.
+      - api_cache:/tmp
+    # 컨테이너 안에서 Selenium이 chromium을 띄울 때 /dev/shm이 부족하면
+      # SessionNotCreatedException이 나는 게 흔하다. 2gb로 설정.
+    shm_size: "2gb"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  api_cache:
