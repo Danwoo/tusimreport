@@ -1,0 +1,11 @@
+# Dev / CI tooling. Regenerate with:
+#   pip-compile --resolver=backtracking requirements-dev.in -o requirements-dev.txt
+
+ruff>=0.15.0
+mypy>=1.19.0
+types-requests
+pytest>=7.4.0
+pytest-cov>=4.1.0
+responses>=0.25.0
+pip-audit>=2.7.0
+pre-commit>=3.0.0
