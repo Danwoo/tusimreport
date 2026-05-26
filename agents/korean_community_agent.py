@@ -15,12 +15,12 @@ from typing import Dict, Any, List
 from datetime import datetime
 
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage
 
-from config.settings import get_llm_model, settings
+from config.llm_factory import build_llm
+from config.settings import settings
+from core.signals import AgentSignal
 from data.paxnet_crawl_client import fetch_paxnet_discussions
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
 
@@ -85,16 +85,7 @@ def _fetch_paxnet_community_data(stock_code: str) -> Dict[str, Any]:
 def _analyze_community_sentiment(company_name: str, stock_code: str, paxnet_data: Dict) -> Dict[str, Any]:
     """커뮤니티 데이터 감정 분석"""
     try:
-        # LLM 초기화
-        llm_provider, llm_model_name, llm_api_key = get_llm_model()
-        if llm_provider == "gemini":
-            sentiment_llm = ChatGoogleGenerativeAI(
-                model=llm_model_name, temperature=0.0, google_api_key=llm_api_key
-            )
-        else:
-            sentiment_llm = ChatOpenAI(
-                model=llm_model_name, temperature=0.0, api_key=llm_api_key
-            )
+        sentiment_llm = build_llm(temperature=0.0)
 
         # 커뮤니티 게시글 텍스트 준비
         community_texts = []
@@ -180,19 +171,7 @@ community_tools = [get_community_sentiment_analysis]
 
 def create_community_agent():
     """Community Sentiment Analysis Agent 생성 함수"""
-    # 🔧 Phase 3 개선: Graceful degradation
-    llm_config = get_llm_model(raise_on_missing=False)
-    if llm_config is None:
-        logger.error("❌ LLM API 키가 설정되지 않았습니다.")
-        raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
-
-    llm_provider, llm_model_name, llm_api_key = llm_config
-    if llm_provider == "gemini":
-        llm = ChatGoogleGenerativeAI(
-            model=llm_model_name, temperature=0.1, google_api_key=llm_api_key
-        )
-    else:
-        llm = ChatOpenAI(model=llm_model_name, temperature=0.1, api_key=llm_api_key)
+    llm = build_llm(temperature=0.1)
 
     prompt = (
         "당신은 한국 투자 커뮤니티의 여론과 심리를 분석하는 전문가입니다. "
@@ -228,7 +207,8 @@ def create_community_agent():
         "커뮤니티 특유의 감정적 반응이나 편향성도 있을 수 있음을 고려하여 해석해주세요.\n\n"
 
         "참고: 이 분석은 투자자 여론 참고자료이며 투자 추천이 아닙니다. 커뮤니티 의견의 객관적 분석을 목적으로 합니다.\n\n"
-        "🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 'COMMUNITY_ANALYSIS_COMPLETE'라고 정확히 적어주세요. 이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
+        f"🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 '{AgentSignal.COMMUNITY.value}'라고 정확히 적어주세요. "
+        "이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
     )
 
     return create_react_agent(model=llm, tools=community_tools, prompt=prompt, name="community_expert")
