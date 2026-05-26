@@ -45,3 +45,12 @@ build/
 # Note: 차트 이미지는 필요시 추적 가능
 # 현재는 캐시용으로 제외
 korean_stock_chart.png
+
+# 개인 작업 노트. 로컬에서만 보고 git에 push하지 않는다 — 시스템 약점/면접
+# 대비 메모/할일 같은 메타 문서가 들어간다. 이 repo는 도구 자체지
+# 도구를 만든 사람의 노트가 아니다.
+docs/KNOWN_LIMITATIONS.md
+docs/INTERVIEW_QA.md
+docs/NOTES.md
+docs/TODO.md
+docs/private/
