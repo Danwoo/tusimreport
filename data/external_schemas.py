@@ -110,6 +110,43 @@ PYKRX_FUNDAMENTAL_COLUMN_MAP: dict[str, str] = {
     "BPS": "bps",
 }
 
+# PyKRX index OHLCV (KOSPI/KOSDAQ 시계열) 컬럼.
+PYKRX_INDEX_OHLCV_COLUMNS: frozenset[str] = frozenset({"시가", "고가", "저가", "종가", "거래량"})
+
+# PyKRX investor trading value (외국인/기관/개인) 컬럼.
+PYKRX_TRADING_VALUE_COLUMNS: frozenset[str] = frozenset({"매도", "매수", "순매수"})
+
+# PyKRX 시가총액 (get_market_cap) 컬럼.
+PYKRX_MARKET_CAP_COLUMNS: frozenset[str] = frozenset({"시가총액", "거래량", "거래대금", "상장주식수"})
+
+
+def assert_pykrx_columns(
+    actual_columns: list[str] | tuple[str, ...] | frozenset[str],
+    *,
+    expected: frozenset[str],
+    source: str,
+    min_overlap: int = 1,
+) -> None:
+    """PyKRX DataFrame의 컬럼이 예상 셋과 최소 1개라도 겹치는지 검증.
+
+    라이브러리가 컬럼명을 통째로 영문화하거나 누락한 경우 (예: '종가' → 'Close')
+    silent fallback 대신 DataQualityError를 raise한다.
+
+    Args:
+        actual_columns: DataFrame.columns (또는 동등한 iterable).
+        expected: 우리가 기대하는 컬럼 셋.
+        source: 어느 PyKRX 함수에서 왔는지 — 로그/예외 메시지에 표시.
+        min_overlap: 최소 몇 개가 겹쳐야 OK인지. 기본 1 (한 컬럼만 살아 있으면 부분 처리 가능).
+    """
+    actual = set(actual_columns)
+    overlap = actual & expected
+    if len(overlap) < min_overlap:
+        raise DataQualityError(
+            f"{source} columns drifted: expected at least {min_overlap} of "
+            f"{sorted(expected)!r}, got {sorted(actual)!r}",
+            source=source,
+        )
+
 
 def validate_pykrx_fundamental(row_dict: dict[str, Any]) -> PykrxFundamentalRow:
     """PyKRX get_market_fundamental의 한 행을 검증.
