@@ -7,80 +7,26 @@ API Docs: https://www.coingecko.com/en/api/documentation
 """
 
 import logging
-import requests
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
-import json
-import os
+from datetime import datetime
+
+from data.base_client import BaseAPIClient
 
 logger = logging.getLogger(__name__)
 
 
-class CoinGeckoClient:
-    """CoinGecko API 클라이언트 - 암호화폐 데이터"""
+class CoinGeckoClient(BaseAPIClient):
+    """CoinGecko API 클라이언트 - 암호화폐 데이터 (인증 불필요)"""
 
     def __init__(self):
-        """
-        클라이언트 초기화
-
-        Note: CoinGecko free API는 API 키 불필요
-        """
+        super().__init__(api_key=None, cache_subdir="coingecko_cache")
         self.base_url = "https://api.coingecko.com/api/v3"
-        self.cache_dir = "/tmp/coingecko_cache"
-
-        # 캐시 디렉토리 생성
-        os.makedirs(self.cache_dir, exist_ok=True)
-
-    def _get_cache_path(self, cache_key: str) -> str:
-        """캐시 파일 경로 생성"""
-        return os.path.join(self.cache_dir, f"{cache_key}.json")
 
     def _get_cached_data(self, cache_key: str, max_age_minutes: int = 5) -> Optional[Dict[str, Any]]:
-        """
-        캐시에서 데이터 가져오기
-
-        Args:
-            cache_key: 캐시 키
-            max_age_minutes: 최대 캐시 유지 시간 (분)
-
-        Returns:
-            캐시된 데이터 또는 None
-        """
-        try:
-            cache_path = self._get_cache_path(cache_key)
-            if not os.path.exists(cache_path):
-                return None
-
-            # 캐시 파일 수정 시간 확인
-            file_modified = datetime.fromtimestamp(os.path.getmtime(cache_path))
-            if datetime.now() - file_modified > timedelta(minutes=max_age_minutes):
-                logger.info(f"캐시 만료: {cache_key}")
-                return None
-
-            with open(cache_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                logger.info(f"✅ 캐시 사용: {cache_key}")
-                return data
-
-        except Exception as e:
-            logger.error(f"캐시 읽기 오류: {str(e)}")
-            return None
+        return self.get_cached(cache_key, max_age_hours=max_age_minutes / 60.0)
 
     def _save_to_cache(self, cache_key: str, data: Dict[str, Any]) -> None:
-        """
-        데이터를 캐시에 저장
-
-        Args:
-            cache_key: 캐시 키
-            data: 저장할 데이터
-        """
-        try:
-            cache_path = self._get_cache_path(cache_key)
-            with open(cache_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            logger.info(f"✅ 캐시 저장: {cache_key}")
-        except Exception as e:
-            logger.error(f"캐시 저장 오류: {str(e)}")
+        self.save_cache(cache_key, data)
 
     def get_market_overview(self) -> Dict[str, Any]:
         """
@@ -118,7 +64,7 @@ class CoinGeckoClient:
                 "include_24hr_change": "true"
             }
 
-            response = requests.get(
+            response = self.session.get(
                 f"{self.base_url}/simple/price",
                 params=params,
                 timeout=10
@@ -165,7 +111,7 @@ class CoinGeckoClient:
             }
         """
         try:
-            response = requests.get(f"{self.base_url}/global", timeout=10)
+            response = self.session.get(f"{self.base_url}/global", timeout=10)
             response.raise_for_status()
             data = response.json()
 
@@ -275,6 +221,8 @@ class CoinGeckoClient:
 
 # 테스트 코드
 if __name__ == "__main__":
+    import json
+
     logging.basicConfig(level=logging.INFO)
 
     client = CoinGeckoClient()
