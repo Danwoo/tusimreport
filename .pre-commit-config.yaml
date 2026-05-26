@@ -1,0 +1,38 @@
+# pre-commit hooks: 로컬 커밋 시점에 lint/type 검증을 실행하여
+# CI에서야 잡히는 회귀를 줄인다.
+#
+# 설치:
+#   pip install pre-commit
+#   pre-commit install
+#
+# 한 번 모든 파일에 돌리기:
+#   pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.8
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        # 점진 도입: strict 대상 모듈만 검사. 전체 검사는 CI에서.
+        files: ^(core/(signals|schemas)\.py|config/llm_factory\.py|ui/cards\.py|data/base_client\.py)$
+        additional_dependencies:
+          - pydantic-settings>=2.0
+          - types-requests
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: detect-private-key
