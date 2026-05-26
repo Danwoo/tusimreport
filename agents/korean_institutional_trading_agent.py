@@ -9,12 +9,11 @@ from datetime import datetime, timedelta
 
 import pykrx.stock as stock
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage
 
-from config.settings import get_llm_model
+from config.llm_factory import build_llm
+from core.signals import AgentSignal
 from utils.helpers import convert_numpy_types
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
 
@@ -71,17 +70,7 @@ institutional_trading_tools = [get_investor_trading_analysis]
 
 def create_institutional_trading_agent():
     """Institutional Trading Agent 생성 함수"""
-    # 🔧 Phase 3 개선: Graceful degradation
-    llm_config = get_llm_model(raise_on_missing=False)
-    if llm_config is None:
-        logger.error("❌ LLM API 키가 설정되지 않았습니다.")
-        raise ValueError("❌ LLM API 키가 필요합니다. .env 파일을 확인해주세요.")
-
-    llm_provider, llm_model_name, llm_api_key = llm_config
-    if llm_provider == "gemini":
-        llm = ChatGoogleGenerativeAI(model=llm_model_name, temperature=0.1, google_api_key=llm_api_key)
-    else:
-        llm = ChatOpenAI(model=llm_model_name, temperature=0.1, api_key=llm_api_key)
+    llm = build_llm(temperature=0.1)
 
     prompt = (
         "당신은 기관투자자들의 매매 패턴을 분석하는 수급 분석 전문가입니다. "
@@ -125,7 +114,8 @@ def create_institutional_trading_agent():
         "마치 증권사 직원이 고객에게 친근하게 설명해주는 것처럼 작성해주세요.\n\n"
 
         "참고: 이 분석은 수급 분석 참고자료이며 매매 추천이 아닙니다. 투자 시에는 신중히 판단하세요.\n\n"
-        "🚨 매우 중요 🚨: 분석을 완전히 마친 후 새로운 줄에서 반드시 'INSTITUTIONAL_TRADING_ANALYSIS_COMPLETE'라고 정확히 적어주세요. 이 신호가 없으면 시스템이 분석을 완료된 것으로 인식하지 못합니다. 절대 잊지 마세요!"
+        f"🚨 매우 중요 🚨: 분석을 완전히 마친 후 새로운 줄에서 반드시 '{AgentSignal.INSTITUTIONAL.value}'라고 정확히 적어주세요. "
+        "이 신호가 없으면 시스템이 분석을 완료된 것으로 인식하지 못합니다."
     )
     
     return create_react_agent(model=llm, tools=institutional_trading_tools, prompt=prompt, name="institutional_trading_expert")
