@@ -117,20 +117,26 @@ def _extract_message_content(msg) -> str:
 
 
 def _handle_running_signal(
-    current_stage: str, agent_states: dict, containers: dict, render_progress, completed: int
+    running_agent: str, agent_states: dict, containers: dict, render_progress, completed: int
 ) -> None:
-    """`current_stage`에 에이전트명이 보이면 해당 카드를 running으로 갱신."""
-    if "분석 시작" not in current_stage:
+    """supervisor가 표시한 `running_agent` 키를 보고 해당 카드를 running으로 갱신.
+
+    이전 버전은 한글 stage_name(예: '시장/경제 분석')에서 영문 에이전트 키
+    ('context_expert')를 substring 매칭으로 찾으려 했는데, 두 문자열에는
+    공통 부분이 없어 결과적으로 카드를 한 번도 running으로 못 바꾸는
+    dead code였다. 이제 supervisor가 명시적 'running_agent' 키를 보내고,
+    UI는 그 키만 본다.
+    """
+    if not running_agent or running_agent not in agent_states:
         return
-    for agent_name in AGENT_NAMES:
-        if agent_name in current_stage:
-            agent_states[agent_name]["status"] = "running"
-            containers[agent_name].markdown(
-                create_result_card(agent_name, get_agent_config(agent_name), "running"),
-                unsafe_allow_html=True,
-            )
-            render_progress(completed, agent_name)
-            return
+    if agent_states[running_agent]["status"] != "waiting":
+        return
+    agent_states[running_agent]["status"] = "running"
+    containers[running_agent].markdown(
+        create_result_card(running_agent, get_agent_config(running_agent), "running"),
+        unsafe_allow_html=True,
+    )
+    render_progress(completed, running_agent)
 
 
 def _extract_final_report(messages, progressive_mode: bool) -> str:
@@ -230,7 +236,7 @@ def _consume_inner(
 
         messages = supervisor_data.get("messages", [])
         _handle_running_signal(
-            supervisor_data.get("current_stage", ""),
+            supervisor_data.get("running_agent", ""),
             agent_states,
             containers,
             render_progress,
