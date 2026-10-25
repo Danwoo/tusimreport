@@ -5,55 +5,98 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from agents.korean_community_agent import get_community_sentiment_analysis_logic
 from agents.korean_esg_analysis_agent import get_esg_analysis_logic
-
-
-def _stub_llm(text: str) -> MagicMock:
-    stub = MagicMock()
-    response = MagicMock()
-    response.content = text
-    stub.invoke.return_value = response
-    return stub
-
 
 # ----------------------------------------------------------------------
 # ESG agent
 # ----------------------------------------------------------------------
 
 
+def _dart_payload(disclosure_titles: list[str], ceo: str | None = "한종희") -> dict:
+    """`get_comprehensive_company_data`가 실제로 돌려주는 모양."""
+    return {
+        "stock_code": "005930",
+        "corp_code": "00126380",
+        "company_info": {
+            "corp_name": "삼성전자(주)",
+            "stock_name": "삼성전자",
+            "ceo_nm": ceo,
+            "corp_cls": "Y",
+            "induty_code": "264",
+            "est_dt": "19690113",
+        },
+        "financial_statements": {
+            "current_year": {"error": "not found"},
+            "previous_year": {"error": "not found"},
+        },
+        "recent_disclosures": [
+            {"rcept_no": f"2025111700{i:04d}", "report_nm": title, "rcept_dt": "20251117"}
+            for i, title in enumerate(disclosure_titles)
+        ],
+        "data_source": "DART OpenAPI",
+        "last_updated": "2025-11-17T10:00:00+09:00",
+    }
+
+
 class TestESGAgent:
-    def test_structures_dart_payload_into_esg_pillars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_maps_real_dart_fields_into_pillars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "agents.korean_esg_analysis_agent.get_comprehensive_company_data",
-            lambda _code: {
-                "basic_info": {"corp_name": "삼성전자"},
-                "ceo_info": {"name": "한종희"},
-                "board_info": {"members": 10},
-                "audit_opinion": "적정",
-                "shareholders": [{"name": "이재용", "ratio": 0.18}],
-                "dividend_info": {"yield": 0.022},
-                "employee_info": {"count": 120000},
-                "business_info": {"segment": "반도체"},
-                "business_nature": "반도체 제조",
-                "environmental_info": {"emissions": "공시"},
-            },
+            lambda _code: _dart_payload(
+                [
+                    "임원ㆍ주요주주특정증권등소유상황보고서",
+                    "지속가능경영보고서등관련사항(자율공시)",
+                    "온실가스 배출량 검증 결과(자율공시)",
+                    "분기보고서 (2025.09)",
+                ]
+            ),
         )
 
         result = get_esg_analysis_logic("005930", "삼성전자")
 
         assert result["status"] == "success"
         assert result["company_name"] == "삼성전자"
-        # 3 pillar 모두 채워졌는지
-        assert result["governance"]["audit_opinion"] == "적정"
-        assert result["social"]["employee_info"]["count"] == 120000
-        assert result["environmental"]["business_nature"] == "반도체 제조"
+        assert result["basic_info"]["ceo_nm"] == "한종희"
+        assert result["basic_info"]["induty_code"] == "264"
+        assert result["disclosures_reviewed"] == 4
+
+        governance = result["governance"]
+        assert governance["available"] is True
+        assert governance["ceo_name"] == "한종희"
+        assert [d["title"] for d in governance["related_disclosures"]] == [
+            "임원ㆍ주요주주특정증권등소유상황보고서"
+        ]
+
+        assert result["social"]["available"] is True
+        assert result["social"]["related_disclosures"][0]["title"].startswith("지속가능경영보고서")
+
+        env_titles = [d["title"] for d in result["environmental"]["related_disclosures"]]
+        assert "온실가스 배출량 검증 결과(자율공시)" in env_titles
+        assert "분기보고서 (2025.09)" not in env_titles
         # ISO timestamp + KST offset
         assert "+09:00" in result["last_updated"]
+
+    def test_pillars_without_dart_evidence_are_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "agents.korean_esg_analysis_agent.get_comprehensive_company_data",
+            lambda _code: _dart_payload(["분기보고서 (2025.09)"], ceo=None),
+        )
+
+        result = get_esg_analysis_logic("005930", "삼성전자")
+
+        assert result["status"] == "no_data"
+        for pillar in ("governance", "social", "environmental"):
+            assert result[pillar]["available"] is False, pillar
+            assert result[pillar]["related_disclosures"] == []
+            assert "1건" in result[pillar]["reason"]
+        assert "ceo_name" not in result["governance"]
+        # 점수·등급을 지어내지 않는다.
+        assert result["esg_rating"] is None
+        for invented in ("esg_score", "audit_opinion", "employee_info", "board_composition"):
+            assert invented not in str(result), invented
 
     def test_dart_unavailable_returns_error_dict(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -65,6 +108,20 @@ class TestESGAgent:
         assert "error" in result
         # 호출자가 진단할 수 있도록 원인 echo
         assert "DART" in result.get("details", "") or "DART" in result.get("error", "")
+
+    def test_dart_error_details_do_not_carry_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """DART 요청 예외 문자열은 crtfc_key가 든 URL을 담는다 — 도구 출력(LLM 입력)에 실리면 안 된다."""
+        monkeypatch.setattr(
+            "agents.korean_esg_analysis_agent.get_comprehensive_company_data",
+            lambda _code: {
+                "error": "Company info error: 500 Server Error for url: "
+                "https://opendart.fss.or.kr/api/company.json?corp_code=00126380&crtfc_key=DARTKEY12345"
+            },
+        )
+
+        result = get_esg_analysis_logic("005930", "삼성전자")
+        assert "DARTKEY12345" not in str(result)
+        assert "crtfc_key=***" in result["details"]
 
     def test_dart_raises_falls_back_korean(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def boom(_code: str) -> dict:
@@ -85,35 +142,29 @@ class TestESGAgent:
 
 
 class TestCommunityAgent:
-    def test_processes_paxnet_posts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_returns_truncated_posts_without_calling_an_llm(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "agents.korean_community_agent.fetch_paxnet_discussions",
             lambda _code, max_posts=10: {
                 "posts": [
-                    {"title": "삼성 호재", "content": "실적 좋다 " * 60},
-                    {"title": "조정 의견", "content": "단기 매도세 " * 60},
+                    {"title": "삼성 호재", "content": "실적 좋다 " * 60, "url": "https://paxnet/1"},
+                    {"title": "조정 의견", "content": "단기 매도세 " * 60, "url": "https://paxnet/2"},
                 ],
                 "total_posts": 2,
             },
         )
         monkeypatch.setattr(
             "agents.korean_community_agent.build_llm",
-            lambda **_kw: _stub_llm(
-                "Community Sentiment: Mixed\n"
-                "Sentiment Score: 0.1\n"
-                "Hot Topics: 실적, 매도세\n"
-                "Bullish Headline: 실적 좋다\n"
-                "Bearish Headline: 단기 매도세\n"
-                "Investor Mindset: Cautious"
-            ),
+            lambda **_kw: pytest.fail("the tool must not call an LLM"),
         )
 
         result = get_community_sentiment_analysis_logic("삼성전자", "005930")
 
-        assert result["status"] in ("success", None) or "error" not in result
-        # 게시글 카운트 정확
-        if "data_sources" in result:
-            assert result["data_sources"].get("total_posts", 0) == 2
+        assert result["status"] == "success"
+        assert result["total_posts"] == 2
+        assert [post["title"] for post in result["posts"]] == ["삼성 호재", "조정 의견"]
+        assert all(len(post["content"]) <= 300 for post in result["posts"])
+        assert "sentiment_analysis" not in result
 
     def test_no_posts_returns_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(

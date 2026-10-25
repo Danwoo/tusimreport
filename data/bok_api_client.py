@@ -16,6 +16,9 @@ from utils.time import kst_days_ago_compact, kst_isoformat, kst_month_compact, k
 
 logger = logging.getLogger(__name__)
 
+# 722Y001 also holds other policy rates (정부대출금금리, 총액한도대출금리, ...).
+BASE_RATE_ITEM_CODE = "0101000"
+
 
 class BOKAPIClient:
     """한국은행 경제통계 API 클라이언트"""
@@ -66,8 +69,9 @@ class BOKAPIClient:
         start_date: str = None,
         end_date: str = None,
         max_retries: int = 3,
+        item_code: str | None = None,
     ) -> dict[str, Any]:
-        """API 요청 재시도 로직 포함"""
+        """API 요청 재시도 로직 포함. item_code를 주면 통계표 안의 그 항목만 받는다."""
         if not end_date:
             end_date = kst_today_compact()
         if not start_date:
@@ -78,6 +82,8 @@ class BOKAPIClient:
             return {"error": f"ECOS API 키 미설정 - {stat_code}", "status": "invalid_api_key"}
 
         url = f"{self.base_url}/StatisticSearch/{self.api_key}/json/kr/1/1000/{stat_code}/{cycle}/{start_date}/{end_date}"
+        if item_code:
+            url += f"/{item_code}"
 
         for attempt in range(max_retries):
             try:
@@ -117,26 +123,25 @@ class BOKAPIClient:
             end_date: 종료일 (YYYYMMDD), 기본값은 오늘
         """
         try:
-            result = self._make_request_with_retry("722Y001", "D", start_date, end_date)
+            result = self._make_request_with_retry(
+                "722Y001", "D", start_date, end_date, item_code=BASE_RATE_ITEM_CODE
+            )
 
             if result.get("StatisticSearch") and result["StatisticSearch"].get("row"):
                 rates = []
-                seen_dates = set()  # 중복 날짜 방지
+                seen_dates = set()
 
                 for item in result["StatisticSearch"]["row"]:
+                    if item.get("ITEM_CODE1", BASE_RATE_ITEM_CODE) != BASE_RATE_ITEM_CODE:
+                        continue
                     try:
                         date = item.get("TIME")
-                        rate_value = float(item.get("DATA_VALUE", 0))
-
-                        # 기준금리만 선택 (보통 3.0% 근처의 값)
-                        # 날짜별로 첫 번째 유효한 금리만 선택
-                        if date not in seen_dates and 1.0 <= rate_value <= 5.0:
-                            rates.append(
-                                {"date": date, "rate": rate_value, "unit": item.get("UNIT_NAME", "%")}
-                            )
-                            seen_dates.add(date)
-                    except (ValueError, TypeError):
+                        rate_value = float(item["DATA_VALUE"])
+                    except (KeyError, ValueError, TypeError):
                         continue
+                    if date not in seen_dates:
+                        rates.append({"date": date, "rate": rate_value, "unit": item.get("UNIT_NAME", "%")})
+                        seen_dates.add(date)
 
                 # 최대 30개만 반환 (긴 리스트 방지)
                 rates = rates[-30:] if len(rates) > 30 else rates

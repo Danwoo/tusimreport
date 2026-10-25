@@ -25,6 +25,8 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from utils.redaction import SecretRedactionFilter, install_record_redaction
+
 _session_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("session_id", default=None)
 _stock_code: contextvars.ContextVar[str | None] = contextvars.ContextVar("stock_code", default=None)
 
@@ -43,8 +45,12 @@ def configure_logging(level: str = "INFO") -> None:
 
     `level`은 string("INFO"/"DEBUG"). pyproject나 .env에서 LOG_LEVEL로
     제어할 수 있도록 string으로 받는다.
+
+    API 키 마스킹(`utils.redaction`)은 이 핸들러뿐 아니라 이후에 붙는 모든
+    핸들러(main.py의 `setup_logging()` 파일 핸들러 포함)에 적용된다.
     """
     fmt = "%(asctime)s [%(levelname)s] [s=%(session_id)s c=%(stock_code)s] %(name)s: %(message)s"
+    install_record_redaction()
     root = logging.getLogger()
     # 기존 핸들러 정리 후 표준 핸들러 1개만 부착. Streamlit이 자체적으로
     # 핸들러를 추가하기 전에 호출하면 중복 출력 방지에 효과적.
@@ -52,6 +58,7 @@ def configure_logging(level: str = "INFO") -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter(fmt))
     handler.addFilter(KSTContextFilter())
+    handler.addFilter(SecretRedactionFilter())
     root.addHandler(handler)
     root.setLevel(level.upper())
 

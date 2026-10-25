@@ -36,8 +36,8 @@ def get_community_sentiment_analysis_logic(company_name: str, stock_code: str) -
         # 1. Paxnet 커뮤니티 데이터 수집
         paxnet_data = _fetch_paxnet_community_data(stock_code)
 
-        # 2. 커뮤니티 데이터 감정 분석
-        return _analyze_community_sentiment(company_name, stock_code, paxnet_data)
+        # 2. 에이전트 LLM이 읽을 게시글 원문 정리
+        return _summarize_posts(company_name, stock_code, paxnet_data)
 
     except Exception as e:
         error_msg = format_error_message_korean(e, "커뮤니티 분석")
@@ -80,89 +80,36 @@ def _fetch_paxnet_community_data(stock_code: str) -> dict[str, Any]:
         return {"error": str(e), "posts": []}
 
 
-def _analyze_community_sentiment(company_name: str, stock_code: str, paxnet_data: dict) -> dict[str, Any]:
-    """커뮤니티 데이터 감정 분석"""
-    try:
-        sentiment_llm = build_llm(temperature=0.0)
+MAX_POST_CHARS = 300
 
-        # 커뮤니티 게시글 텍스트 준비
-        community_texts = []
-        if paxnet_data.get("posts"):
-            community_texts = [
-                f"[게시글 {i + 1}] 제목: {post['title']}\n내용: {post['content'][:300]}..."
-                for i, post in enumerate(paxnet_data["posts"])
-            ]
 
-        if not community_texts:
-            return {"error": "수집된 커뮤니티 데이터가 없습니다."}
+def _summarize_posts(company_name: str, stock_code: str, paxnet_data: dict) -> dict[str, Any]:
+    """게시글을 잘라 그대로 돌려준다. 심리 판단은 에이전트 LLM이 원문을 보고 한다.
 
-        # 커뮤니티 특화 분석 프롬프트
-        analysis_prompt = f"""
-다음은 {company_name}({stock_code}) 관련 한국 투자 커뮤니티(Paxnet 종목토론)에서 수집한 실제 투자자들의 게시글입니다.
+    도구 안에서 LLM을 다시 부르면 그 결과(심리 점수 등)가 '도구 데이터'처럼 보여
+    근거 대조가 불가능해지고, 호출 수도 에이전트 밖에서 늘어난다.
+    """
+    posts = paxnet_data.get("posts") or []
+    if not posts:
+        return {"error": paxnet_data.get("error") or "수집된 커뮤니티 데이터가 없습니다."}
 
-[커뮤니티 게시글 데이터]
-{chr(10).join(community_texts)}
-
-[분석 요구사항]
-투자 커뮤니티 특성을 고려하여 다음을 분석해주세요:
-
-1. 전체적인 투자 심리를 '매우 긍정', '긍정', '중립', '부정', '매우 부정' 중 하나로 평가
-2. 투자 심리 점수를 -1.0 (매우 부정) ~ 1.0 (매우 긍정) 사이 수치로 계산
-3. 투자자들이 주로 관심 갖는 핵심 이슈 3가지를 키워드로 요약
-4. 가장 긍정적/부정적 의견 각 1개씩 선정
-5. 투자자들의 주요 관심사 (기술적 분석, 펀더멘털, 시장 이슈 등)
-6. 커뮤니티 특유의 투자 정보나 루머, 추측 내용 파악
-
-[출력 형식]
-- Overall Investor Sentiment: [평가 결과]
-- Sentiment Score: [점수]
-- Key Investment Issues: [이슈1, 이슈2, 이슈3]
-- Most Positive Opinion: [의견]
-- Most Negative Opinion: [의견]
-- Main Concerns: [투자자들의 주요 관심사]
-- Community Insights: [커뮤니티 특유의 정보나 관점]
-"""
-
-        # LLM 분석 실행
-        llm_response = sentiment_llm.invoke(analysis_prompt)
-
-        # 응답 파싱
-        lines = llm_response.content.strip().split("\n")
-        parsed_result = {}
-        for line in lines:
-            if ":" in line:
-                key, value = line.split(":", 1)
-                parsed_result[key.strip()] = value.strip()
-
-        # 커뮤니티 게시글 소스 정보
-        community_sources = []
-        if paxnet_data.get("posts"):
-            for i, post in enumerate(paxnet_data["posts"]):
-                community_sources.append(
-                    {
-                        "post_number": i + 1,
-                        "title": post.get("title", ""),
-                        "url": post.get("url", ""),
-                        "source": "Paxnet 종목토론",
-                        "type": "community_post",
-                    }
-                )
-
-        return {
-            "status": "success",
-            "company_name": company_name,
-            "stock_code": stock_code,
-            "data_source": "Paxnet 종목토론",
-            "analysis_type": "Community Sentiment Analysis",
-            "total_posts_analyzed": len(community_texts),
-            "sentiment_analysis": parsed_result,
-            "community_sources": community_sources,
-            "last_updated": kst_isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"커뮤니티 감정 분석 오류: {str(e)}")
-        return {"error": str(e)}
+    return {
+        "status": "success",
+        "company_name": company_name,
+        "stock_code": stock_code,
+        "data_source": "Paxnet 종목토론",
+        "total_posts": len(posts),
+        "posts": [
+            {
+                "post_number": i + 1,
+                "title": post.get("title", ""),
+                "content": (post.get("content") or "")[:MAX_POST_CHARS],
+                "url": post.get("url", ""),
+            }
+            for i, post in enumerate(posts)
+        ],
+        "last_updated": kst_isoformat(),
+    }
 
 
 # 도구 목록
@@ -176,11 +123,11 @@ def create_community_agent():
     prompt = (
         "당신은 한국 투자 커뮤니티의 여론과 심리를 분석하는 전문가입니다. "
         "실제 개인 투자자들의 의견과 토론을 통해 시장의 생생한 분위기를 파악하고 분석해주세요.\n\n"
-        "먼저 `get_community_sentiment_analysis` 도구를 사용해서 최신 커뮤니티 감정 분석 데이터를 수집한 후, "
-        "다음과 같이 투자자 친화적으로 설명해주세요:\n\n"
+        "먼저 `get_community_sentiment_analysis` 도구로 최근 종목토론 게시글(제목·본문 일부)을 받은 뒤, "
+        "게시글 내용만 근거로 다음과 같이 투자자 친화적으로 설명해주세요:\n\n"
         "1. 현재 이 종목에 대한 투자자들의 분위기가 어떤지 요약해주세요\n"
         "   - 전체적으로 긍정적인지, 부정적인지, 관망세인지\n"
-        "   - 투자 심리 점수를 쉬운 말로 설명해주세요\n\n"
+        "   - 그렇게 판단한 근거가 된 게시글 번호를 함께 적어주세요\n\n"
         "2. 투자자들이 가장 관심 갖는 이슈들을 알려주세요\n"
         "   - 어떤 종류의 정보나 이슈에 집중하고 있는지\n"
         "   - 기술적 분석, 기업 실적, 시장 이슈 등 어떤 관점이 많은지\n"

@@ -17,9 +17,21 @@ import requests
 
 from core.errors import DataQualityError
 from data.external_schemas import validate_dart_envelope
+from utils.redaction import redact
 from utils.time import kst_days_ago_compact, kst_isoformat, kst_today_compact, kst_year
 
 logger = logging.getLogger(__name__)
+
+# OpenDART reprt_code. 11014 is the Q3 report, not the annual one.
+REPORT_NAMES: dict[str, str] = {
+    "11013": "1분기보고서",
+    "11012": "반기보고서",
+    "11014": "3분기보고서",
+    "11011": "사업보고서",
+}
+ANNUAL_REPORT = "11011"
+# fnlttSinglAcnt returns consolidated (CFS) and separate (OFS) rows in one list.
+_FS_DIV_PREFERENCE = ("CFS", "OFS")
 
 
 class DARTAPIClient:
@@ -74,8 +86,10 @@ class DARTAPIClient:
             return payload
 
         except Exception as e:
-            logger.error(f"DART API request failed: {str(e)}")
-            return {"status": "error", "message": str(e)}
+            # requests exceptions carry the full URL, including crtfc_key.
+            message = redact(str(e))
+            logger.error(f"DART API request failed: {message}")
+            return {"status": "error", "message": message}
 
     def get_corp_code(self, corp_name: str) -> str | None:
         """기업명으로 고유번호(corp_code) 조회"""
@@ -133,12 +147,16 @@ class DARTAPIClient:
     def get_financial_statements(
         self, corp_code: str, bsns_year: str, reprt_code: str = "11013"
     ) -> dict[str, Any]:
-        """재무제표 조회
+        """단일회사 주요계정 조회.
+
+        연결재무제표(CFS)가 있으면 연결, 없으면 별도(OFS) 행만 쓴다. 두 기준의 같은
+        계정명을 한 dict에 섞으면 뒤에 온 별도 수치가 연결 수치를 덮는다.
+        금액이 비었거나 '-'인 계정은 0으로 채우지 않고 뺀다.
 
         Args:
             corp_code: 고유번호
             bsns_year: 사업연도 (YYYY)
-            reprt_code: 보고서 코드 (11013: 1분기보고서, 11012: 반기보고서, 11011: 3분기보고서, 11014: 사업보고서)
+            reprt_code: 보고서 코드 (`REPORT_NAMES` 참고. 사업보고서는 11011)
         """
         try:
             params = {
@@ -150,21 +168,29 @@ class DARTAPIClient:
             result = self._make_request("fnlttSinglAcnt.json", params)
 
             if result.get("status") == "000" and result.get("list"):
-                financial_data = {}
+                rows = result["list"]
+                divisions = {item.get("fs_div") for item in rows}
+                fs_div = next((d for d in _FS_DIV_PREFERENCE if d in divisions), None)
+                selected = [item for item in rows if item.get("fs_div") == fs_div] if fs_div else rows
 
-                for item in result["list"]:
+                financial_data: dict[str, float] = {}
+                for item in selected:
                     account_nm = item.get("account_nm", "")
-                    thstrm_amount = item.get("thstrm_amount", "0").replace(",", "")
-
+                    raw = str(item.get("thstrm_amount") or "").replace(",", "").strip()
                     try:
-                        amount = float(thstrm_amount) if thstrm_amount != "-" else 0
-                        financial_data[account_nm] = amount
-                    except (ValueError, TypeError):
-                        financial_data[account_nm] = 0
+                        financial_data[account_nm] = float(raw)
+                    except ValueError:
+                        continue
 
+                first = selected[0]
                 return {
                     "year": bsns_year,
                     "report_code": reprt_code,
+                    "report_name": REPORT_NAMES.get(reprt_code, reprt_code),
+                    "fs_div": fs_div,
+                    "fs_name": first.get("fs_nm"),
+                    "period": first.get("thstrm_dt"),
+                    "rcept_no": first.get("rcept_no"),
                     "financial_data": financial_data,
                     "last_updated": kst_isoformat(),
                 }
@@ -296,7 +322,7 @@ class DARTAPIClient:
             params = {
                 "corp_code": corp_code,
                 "bsns_year": bsns_year,
-                "reprt_code": "11011",  # 3분기보고서
+                "reprt_code": ANNUAL_REPORT,
             }
 
             result = self._make_request("hyslrSttus.json", params)
@@ -337,7 +363,7 @@ class DARTAPIClient:
             if not bsns_year:
                 bsns_year = str(kst_year(-1))
 
-            params = {"corp_code": corp_code, "bsns_year": bsns_year, "reprt_code": "11011"}
+            params = {"corp_code": corp_code, "bsns_year": bsns_year, "reprt_code": ANNUAL_REPORT}
 
             result = self._make_request("exctvSttus.json", params)
 
@@ -379,7 +405,7 @@ class DARTAPIClient:
             if not bsns_year:
                 bsns_year = str(kst_year(-1))
 
-            params = {"corp_code": corp_code, "bsns_year": bsns_year, "reprt_code": "11011"}
+            params = {"corp_code": corp_code, "bsns_year": bsns_year, "reprt_code": ANNUAL_REPORT}
 
             result = self._make_request("alotMatter.json", params)
 
@@ -415,7 +441,7 @@ class DARTAPIClient:
             if not bsns_year:
                 bsns_year = str(kst_year(-1))
 
-            params = {"corp_code": corp_code, "bsns_year": bsns_year, "reprt_code": "11011"}
+            params = {"corp_code": corp_code, "bsns_year": bsns_year, "reprt_code": ANNUAL_REPORT}
 
             result = self._make_request("acntAudpnOp.json", params)
 
@@ -562,12 +588,9 @@ def get_comprehensive_company_data(stock_code: str) -> dict[str, Any]:
         if company_info.get("error"):
             return {"error": f"Company info error: {company_info['error']}"}
 
-        # 3. 최근 재무제표 조회 (최근 연도)
-        current_year = str(kst_year())
-        prev_year = str(kst_year(-1))
-
-        financial_current = dart_client.get_financial_statements(corp_code, current_year, "11014")
-        financial_prev = dart_client.get_financial_statements(corp_code, prev_year, "11014")
+        # 3. 최근 사업보고서 재무제표. 올해 사업보고서는 이듬해 3월에 나오므로 작년부터 찾는다.
+        latest_annual = dart_client.get_financial_statements(corp_code, str(kst_year(-1)), ANNUAL_REPORT)
+        prior_annual = dart_client.get_financial_statements(corp_code, str(kst_year(-2)), ANNUAL_REPORT)
 
         # 4. 최근 공시 조회
         recent_disclosures = dart_client.get_recent_disclosures(corp_code, 20)
@@ -577,8 +600,8 @@ def get_comprehensive_company_data(stock_code: str) -> dict[str, Any]:
             "corp_code": corp_code,
             "company_info": company_info,
             "financial_statements": {
-                "current_year": financial_current,
-                "previous_year": financial_prev,
+                "latest_annual": latest_annual,
+                "prior_annual": prior_annual,
             },
             "recent_disclosures": recent_disclosures,
             "data_source": "DART OpenAPI",
