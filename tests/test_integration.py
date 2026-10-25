@@ -21,11 +21,13 @@ class TestAPIKeyGracefulDegradation:
         # 기존 키 백업
         original_google = settings.google_api_key
         original_openai = settings.openai_api_key
+        original_base_url = settings.llm_base_url
 
         try:
             # 키 제거
             settings.google_api_key = None
             settings.openai_api_key = None
+            settings.llm_base_url = None
 
             # raise_on_missing=False면 None 반환
             result = get_llm_model(raise_on_missing=False)
@@ -35,6 +37,7 @@ class TestAPIKeyGracefulDegradation:
             # 복원
             settings.google_api_key = original_google
             settings.openai_api_key = original_openai
+            settings.llm_base_url = original_base_url
 
     def test_get_llm_model_without_keys_raises(self):
         """API 키 없을 때 한글 에러 (raise_on_missing=True)"""
@@ -42,10 +45,12 @@ class TestAPIKeyGracefulDegradation:
 
         original_google = settings.google_api_key
         original_openai = settings.openai_api_key
+        original_base_url = settings.llm_base_url
 
         try:
             settings.google_api_key = None
             settings.openai_api_key = None
+            settings.llm_base_url = None
 
             with pytest.raises(ValueError) as exc_info:
                 get_llm_model(raise_on_missing=True)
@@ -58,6 +63,7 @@ class TestAPIKeyGracefulDegradation:
         finally:
             settings.google_api_key = original_google
             settings.openai_api_key = original_openai
+            settings.llm_base_url = original_base_url
 
     def test_check_minimum_requirements(self):
         """최소 요구사항 체크"""
