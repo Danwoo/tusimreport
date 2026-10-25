@@ -8,8 +8,12 @@ __pycache__/
 *.pyd
 .Python
 
-# Claude workspace (로컬 설정)
-.claude/
+# Claude Code 로컬 설정. 공유 설정·hook·skill(.claude/settings.json, hooks/, skills/)은 추적한다.
+.claude/settings.local.json
+
+# 가상환경
+.venv/
+venv/
 
 # IDE settings
 .vscode/
