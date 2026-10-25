@@ -4,16 +4,77 @@ Alpha Vantage API Client
 
 Free Tier: 25 requests/day → 캐싱 필수
 API Docs: https://www.alphavantage.co/documentation/
+
+받지 못한 값은 숫자를 지어내지 않는다: 값은 None, `available: False`,
+`reason`에 한국어 사유를 담아 돌려주고 캐시에 쓰지 않는다. 실패 결과에만
+붙는 `note`는 `"note" in result`로 실패를 가리는 기존 호출자(scripts/check_sources.py)용이다.
 """
 
 import logging
 from typing import Any
 
+from core.errors import (
+    AuthenticationError,
+    DataQualityError,
+    DataSourceUnavailableError,
+    RateLimitError,
+)
 from data.base_client import BaseAPIClient
 from data.cache_ttl import FX_RATE_HOURS, GLOBAL_QUOTE_HOURS
+from utils.agent_helpers import format_error_message_korean
+from utils.redaction import redact
 from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
+
+# (결과 키, 심볼, 표시 이름). 지수 자체가 아니라 지수 추종 ETF 시세다.
+INDEX_ETFS = (
+    ("sp500", "SPY", "S&P 500 추종 ETF(SPY)"),
+    ("nasdaq", "QQQ", "NASDAQ-100 추종 ETF(QQQ)"),
+    ("dow", "DIA", "다우존스 추종 ETF(DIA)"),
+)
+
+NO_KEY_REASON = "Alpha Vantage API 키(ALPHA_VANTAGE_API_KEY)가 설정되지 않았습니다."
+
+
+def _to_float(value: Any) -> float | None:
+    try:
+        return float(str(value).replace("%", "").replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_int(value: Any) -> int | None:
+    number = _to_float(value)
+    return int(number) if number is not None else None
+
+
+def _raise_for_soft_error(data: Any, what: str) -> None:
+    """HTTP 200으로 오는 Alpha Vantage 에러 본문을 도메인 예외로 바꾼다.
+
+    호출 한도 초과는 `Note`(구) 또는 `Information`(현행) 키로 온다.
+    """
+    if not isinstance(data, dict):
+        raise DataQualityError(
+            f"{what}: unexpected payload type {type(data).__name__}", source="alpha_vantage"
+        )
+    if "Note" in data or "Information" in data:
+        raise RateLimitError(f"{what}: Alpha Vantage quota reply", source="alpha_vantage", status_code=200)
+    if "Error Message" in data:
+        raise DataQualityError(f"{what}: {data['Error Message']}", source="alpha_vantage")
+
+
+def _unavailable_reason(error: Exception) -> str:
+    """도구 출력·LLM 프롬프트에 실리는 사유. 예외 문자열은 URL(키 포함)을 담을 수 있어 가린다."""
+    if isinstance(error, RateLimitError):
+        return "Alpha Vantage 호출 한도 초과(무료 25회/일) 또는 이용 제한 응답 — 잠시 후 다시 시도하세요."
+    if isinstance(error, AuthenticationError):
+        return "Alpha Vantage가 API 키를 거부했습니다."
+    if isinstance(error, DataSourceUnavailableError):
+        return "Alpha Vantage 서버에 연결하지 못했습니다."
+    if isinstance(error, DataQualityError):
+        return redact(f"Alpha Vantage 응답에 사용할 값이 없습니다: {error}")
+    return redact(format_error_message_korean(error, "Alpha Vantage 조회"))
 
 
 class AlphaVantageClient(BaseAPIClient):
@@ -30,73 +91,76 @@ class AlphaVantageClient(BaseAPIClient):
 
     def get_global_market_overview(self) -> dict[str, Any]:
         """
-        글로벌 주요 지수 현황 조회 (S&P 500, NASDAQ, 다우존스)
+        글로벌 주요 지수 추종 ETF 현황 조회 (SPY, QQQ, DIA)
 
         Returns:
             {
-                "sp500": {"symbol": "SPY", "price": 450.12, "change_percent": 0.5},
-                "nasdaq": {"symbol": "QQQ", "price": 380.45, "change_percent": 0.8},
-                "dow": {"symbol": "DIA", "price": 350.23, "change_percent": 0.3},
-                "timestamp": "2025-11-17T10:30:00"
+                "sp500": {"symbol": "SPY", "price": 450.12, "change_percent": 0.5, "available": True, ...},
+                "nasdaq": {"symbol": "QQQ", "price": None, "change_percent": None,
+                           "available": False, "reason": "..."},
+                "dow": {...},
+                "available": True,  # 하나라도 받았으면 True
+                "timestamp": "2025-11-17T10:30:00+09:00"
             }
         """
         cache_key = "global_market_overview"
         cached = self.get_cached(cache_key, max_age_hours=GLOBAL_QUOTE_HOURS)
-        if cached:
+        if isinstance(cached, dict) and self._is_complete_overview(cached):
             return cached
 
         if not self.api_key:
-            return self._create_fallback_market_overview()
+            return self._unavailable_overview(NO_KEY_REASON)
 
-        try:
-            # SPY (S&P 500 ETF) 조회
-            result = {
-                "sp500": self._get_quote("SPY"),
-                "nasdaq": self._get_quote("QQQ"),
-                "dow": self._get_quote("DIA"),
-                "timestamp": kst_isoformat(),
-            }
+        result: dict[str, Any] = {key: self._get_quote(symbol) for key, symbol, _label in INDEX_ETFS}
+        result["available"] = any(result[key]["available"] for key, _s, _l in INDEX_ETFS)
+        result["timestamp"] = kst_isoformat()
+        if not result["available"]:
+            result["reason"] = result[INDEX_ETFS[0][0]].get("reason", "")
+            result["note"] = f"⚠️ {result['reason']}"
 
+        # 부분 실패(예: 두 번째 호출에서 한도 초과)를 캐시하면 실패가 TTL 동안 데이터로 남는다.
+        if self._is_complete_overview(result):
             self.save_cache(cache_key, result)
-            return result
-
-        except Exception as e:
-            logger.error(f"글로벌 시장 데이터 조회 실패: {str(e)}")
-            return self._create_fallback_market_overview()
+        return result
 
     def _get_quote(self, symbol: str) -> dict[str, Any]:
         """
-        개별 종목 시세 조회
-
-        Args:
-            symbol: 종목 심볼 (예: "SPY", "AAPL")
+        개별 종목 시세 조회. 실패해도 raise하지 않고 unavailable 항목을 돌려준다.
 
         Returns:
-            {"symbol": "SPY", "price": 450.12, "change_percent": 0.5}
+            {"symbol": "SPY", "price": 450.12, "change_percent": 0.5, "available": True, ...}
+            또는 {"symbol": "SPY", "price": None, "change_percent": None, "available": False, "reason": str}
         """
         try:
-            params = {"function": "GLOBAL_QUOTE", "symbol": symbol, "apikey": self.api_key}
-
-            response = self.session.get(self.base_url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-
-            if "Global Quote" not in data:
-                logger.warning(f"Invalid response for {symbol}: {data}")
-                return {"symbol": symbol, "price": 0.0, "change_percent": 0.0}
-
-            quote = data["Global Quote"]
-            return {
-                "symbol": symbol,
-                "price": float(quote.get("05. price", 0)),
-                "change_percent": float(quote.get("10. change percent", "0").replace("%", "")),
-                "volume": int(quote.get("06. volume", 0)),
-                "latest_trading_day": quote.get("07. latest trading day", ""),
-            }
-
+            return self._fetch_quote(symbol)
         except Exception as e:
-            logger.error(f"Quote 조회 실패 ({symbol}): {str(e)}")
-            return {"symbol": symbol, "price": 0.0, "change_percent": 0.0}
+            logger.warning(f"Quote 조회 실패 ({symbol}): {redact(str(e))}")
+            return self._unavailable_quote(symbol, _unavailable_reason(e))
+
+    def _fetch_quote(self, symbol: str) -> dict[str, Any]:
+        """GLOBAL_QUOTE 한 건. 한도 초과·스키마 불일치·HTTP 실패는 TusimError로 raise."""
+        params = {"function": "GLOBAL_QUOTE", "symbol": symbol, "apikey": self.api_key}
+        data = self.request_json("GET", self.base_url, params=params)
+        _raise_for_soft_error(data, f"GLOBAL_QUOTE {symbol}")
+
+        quote = data.get("Global Quote")
+        if not isinstance(quote, dict) or not quote:
+            raise DataQualityError(
+                f"GLOBAL_QUOTE {symbol}: 'Global Quote' missing or empty", source="alpha_vantage"
+            )
+
+        price = _to_float(quote.get("05. price"))
+        if price is None or price <= 0:
+            raise DataQualityError(f"GLOBAL_QUOTE {symbol}: no usable price", source="alpha_vantage")
+
+        return {
+            "symbol": symbol,
+            "price": price,
+            "change_percent": _to_float(quote.get("10. change percent")),
+            "volume": _to_int(quote.get("06. volume")),
+            "latest_trading_day": quote.get("07. latest trading day") or None,
+            "available": True,
+        }
 
     def get_exchange_rate(self, from_currency: str = "USD", to_currency: str = "KRW") -> dict[str, Any]:
         """
@@ -107,75 +171,92 @@ class AlphaVantageClient(BaseAPIClient):
             to_currency: 대상 통화 (default: KRW)
 
         Returns:
-            {
-                "from": "USD",
-                "to": "KRW",
-                "rate": 1320.50,
-                "timestamp": "2025-11-17T10:30:00"
-            }
+            {"from": "USD", "to": "KRW", "rate": 1320.50, "bid": ..., "ask": ...,
+             "available": True, "timestamp": "..."}
+            실패 시 rate=None, available=False, reason=str
         """
         cache_key = f"exchange_rate_{from_currency}_{to_currency}"
         cached = self.get_cached(cache_key, max_age_hours=FX_RATE_HOURS)
-        if cached:
+        if isinstance(cached, dict) and cached.get("available") is True and cached.get("rate"):
             return cached
 
         if not self.api_key:
-            return self._create_fallback_exchange_rate(from_currency, to_currency)
+            return self._unavailable_exchange_rate(from_currency, to_currency, NO_KEY_REASON)
 
         try:
-            params = {
-                "function": "CURRENCY_EXCHANGE_RATE",
-                "from_currency": from_currency,
-                "to_currency": to_currency,
-                "apikey": self.api_key,
-            }
-
-            response = self.session.get(self.base_url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-
-            if "Realtime Currency Exchange Rate" not in data:
-                logger.warning(f"Invalid response for {from_currency}/{to_currency}: {data}")
-                return self._create_fallback_exchange_rate(from_currency, to_currency)
-
-            rate_data = data["Realtime Currency Exchange Rate"]
-            result = {
-                "from": from_currency,
-                "to": to_currency,
-                "rate": float(rate_data.get("5. Exchange Rate", 0)),
-                "timestamp": rate_data.get("6. Last Refreshed", kst_isoformat()),
-                "bid": float(rate_data.get("8. Bid Price", 0)),
-                "ask": float(rate_data.get("9. Ask Price", 0)),
-            }
-
-            self.save_cache(cache_key, result)
-            return result
-
+            result = self._fetch_exchange_rate(from_currency, to_currency)
         except Exception as e:
-            logger.error(f"환율 조회 실패: {str(e)}")
-            return self._create_fallback_exchange_rate(from_currency, to_currency)
+            logger.warning(f"환율 조회 실패 ({from_currency}/{to_currency}): {redact(str(e))}")
+            return self._unavailable_exchange_rate(from_currency, to_currency, _unavailable_reason(e))
 
-    def _create_fallback_market_overview(self) -> dict[str, Any]:
-        """Fallback 글로벌 시장 데이터 (API 키 없을 때)"""
-        return {
-            "sp500": {"symbol": "SPY", "price": 0.0, "change_percent": 0.0},
-            "nasdaq": {"symbol": "QQQ", "price": 0.0, "change_percent": 0.0},
-            "dow": {"symbol": "DIA", "price": 0.0, "change_percent": 0.0},
-            "timestamp": kst_isoformat(),
-            "note": "⚠️ Alpha Vantage API 키가 설정되지 않았습니다. 실시간 데이터를 사용할 수 없습니다.",
+        self.save_cache(cache_key, result)
+        return result
+
+    def _fetch_exchange_rate(self, from_currency: str, to_currency: str) -> dict[str, Any]:
+        params = {
+            "function": "CURRENCY_EXCHANGE_RATE",
+            "from_currency": from_currency,
+            "to_currency": to_currency,
+            "apikey": self.api_key,
         }
+        what = f"CURRENCY_EXCHANGE_RATE {from_currency}/{to_currency}"
+        data = self.request_json("GET", self.base_url, params=params)
+        _raise_for_soft_error(data, what)
 
-    def _create_fallback_exchange_rate(self, from_currency: str, to_currency: str) -> dict[str, Any]:
-        """Fallback 환율 데이터 (API 키 없을 때)"""
-        # 기본값: 1 USD = 1,320 KRW (대략적인 값)
-        default_rate = 1320.0 if from_currency == "USD" and to_currency == "KRW" else 0.0
+        rate_data = data.get("Realtime Currency Exchange Rate")
+        if not isinstance(rate_data, dict) or not rate_data:
+            raise DataQualityError(f"{what}: payload missing", source="alpha_vantage")
+
+        rate = _to_float(rate_data.get("5. Exchange Rate"))
+        if rate is None or rate <= 0:
+            raise DataQualityError(f"{what}: no usable rate", source="alpha_vantage")
 
         return {
             "from": from_currency,
             "to": to_currency,
-            "rate": default_rate,
+            "rate": rate,
+            "timestamp": rate_data.get("6. Last Refreshed") or kst_isoformat(),
+            "bid": _to_float(rate_data.get("8. Bid Price")),
+            "ask": _to_float(rate_data.get("9. Ask Price")),
+            "available": True,
+        }
+
+    @staticmethod
+    def _is_complete_overview(data: Any) -> bool:
+        """세 ETF 모두 실제 가격을 가진 새 형식 결과인지. 구버전 캐시(0.0 가격)는 거른다."""
+        if not isinstance(data, dict) or data.get("available") is not True:
+            return False
+        for key, _symbol, _label in INDEX_ETFS:
+            entry = data.get(key)
+            if not isinstance(entry, dict) or entry.get("available") is not True or not entry.get("price"):
+                return False
+        return True
+
+    @staticmethod
+    def _unavailable_quote(symbol: str, reason: str) -> dict[str, Any]:
+        return {"symbol": symbol, "price": None, "change_percent": None, "available": False, "reason": reason}
+
+    def _unavailable_overview(self, reason: str) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            key: self._unavailable_quote(symbol, reason) for key, symbol, _label in INDEX_ETFS
+        }
+        result.update(
+            {"available": False, "reason": reason, "note": f"⚠️ {reason}", "timestamp": kst_isoformat()}
+        )
+        return result
+
+    @staticmethod
+    def _unavailable_exchange_rate(from_currency: str, to_currency: str, reason: str) -> dict[str, Any]:
+        return {
+            "from": from_currency,
+            "to": to_currency,
+            "rate": None,
+            "bid": None,
+            "ask": None,
+            "available": False,
+            "reason": reason,
+            "note": f"⚠️ {reason}",
             "timestamp": kst_isoformat(),
-            "note": "⚠️ Alpha Vantage API 키가 설정되지 않았습니다. 실시간 환율을 사용할 수 없습니다.",
         }
 
 

@@ -87,3 +87,19 @@ def test_network_error_wrapped_in_error_envelope(monkeypatch: pytest.MonkeyPatch
     result = client._make_request("company.json", {"corp_code": "x"})
     assert result["status"] == "error"
     assert "dns" in result["message"]
+
+
+def test_request_error_message_does_not_carry_the_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _make_client()
+    client.api_key = "DARTKEY12345"
+
+    def fail(*_a: object, **_kw: object) -> None:
+        raise requests.ConnectionError(
+            "Max retries exceeded with url: /api/company.json?corp_code=1&crtfc_key=DARTKEY12345"
+        )
+
+    monkeypatch.setattr(client.session, "get", fail)
+    result = client._make_request("company.json", {"corp_code": "1"})
+
+    assert result["status"] == "error"
+    assert "DARTKEY12345" not in result["message"]

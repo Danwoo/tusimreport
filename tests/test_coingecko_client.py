@@ -67,10 +67,10 @@ def test_parses_simple_price_and_global(
     assert isinstance(result["global"], dict)
 
 
-def test_5xx_falls_back_silently(
+def test_5xx_is_unavailable_with_reason_and_not_cached(
     mocked_responses_loose: responses.RequestsMock, isolated_cache_dir: Path
 ) -> None:
-    """coingecko가 503을 돌려도 except 블록에서 fallback이 잡아낸다."""
+    """503이면 0.0 가격이 아니라 available=False와 사유를 돌려주고 캐시하지 않는다."""
     mocked_responses_loose.add(
         responses.GET,
         "https://api.coingecko.com/api/v3/simple/price",
@@ -80,15 +80,49 @@ def test_5xx_falls_back_silently(
     client = CoinGeckoClient()
     result = client.get_market_overview()
 
-    # fallback 형태 확인. 정확한 키는 _create_fallback_market_overview()에
-    # 잠겨 있지만 dict이고 timestamp 또는 status가 있어야 한다.
-    assert isinstance(result, dict)
+    assert result["available"] is False
+    assert "503" in result["reason"]
+    assert result["bitcoin"] == {}
+    assert client.get_cached("crypto_market_overview", max_age_hours=1) is None
+
+
+def test_missing_fields_are_none_not_zero(
+    mocked_responses: responses.RequestsMock, isolated_cache_dir: Path
+) -> None:
+    mocked_responses.add(
+        responses.GET,
+        "https://api.coingecko.com/api/v3/simple/price",
+        json={"bitcoin": {"usd": 65000.0}, "ethereum": {"krw": 3300000.0}},
+    )
+    mocked_responses.add(responses.GET, "https://api.coingecko.com/api/v3/global", status=500)
+
+    result = CoinGeckoClient().get_market_overview()
+
+    assert result["available"] is True
+    assert result["bitcoin"]["price_change_24h"] is None
+    assert result["bitcoin"]["current_price_krw"] is None
+    # A coin without a USD price is left out rather than reported at 0.
+    assert "ethereum" not in result
+    assert result["global"] == {}
+
+
+def test_response_without_requested_coins_is_unavailable(
+    mocked_responses: responses.RequestsMock, isolated_cache_dir: Path
+) -> None:
+    mocked_responses.add(responses.GET, "https://api.coingecko.com/api/v3/simple/price", json={})
+
+    client = CoinGeckoClient()
+    result = client.get_market_overview()
+
+    assert result["available"] is False
+    assert client.get_cached("crypto_market_overview", max_age_hours=1) is None
 
 
 def test_cache_short_circuits_external_call(isolated_cache_dir: Path) -> None:
     client = CoinGeckoClient()
     cached = {
         "bitcoin": {"current_price_usd": 99999.0},
+        "available": True,
         "timestamp": "2025-11-17T00:00:00",
     }
     client.save_cache("crypto_market_overview", cached)
@@ -98,3 +132,20 @@ def test_cache_short_circuits_external_call(isolated_cache_dir: Path) -> None:
         result = client.get_market_overview()
         assert result["bitcoin"]["current_price_usd"] == 99999.0
         assert len(rsps.calls) == 0
+
+
+def test_legacy_cache_without_available_flag_is_refetched(
+    mocked_responses: responses.RequestsMock, isolated_cache_dir: Path
+) -> None:
+    """구버전은 실패 결과(0.0 가격)도 캐시할 수 있었으므로 available 표시가 없는 캐시는 버린다."""
+    client = CoinGeckoClient()
+    client.save_cache("crypto_market_overview", {"bitcoin": {"current_price_usd": 0.0}})
+    mocked_responses.add(
+        responses.GET, "https://api.coingecko.com/api/v3/simple/price", json=_SIMPLE_PRICE_BODY
+    )
+    mocked_responses.add(responses.GET, "https://api.coingecko.com/api/v3/global", json=_GLOBAL_BODY)
+
+    result = client.get_market_overview()
+
+    assert result["bitcoin"]["current_price_usd"] == 65000.0
+    assert result["global"]["bitcoin_dominance"] == 45.2

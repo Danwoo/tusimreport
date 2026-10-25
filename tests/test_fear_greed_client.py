@@ -1,4 +1,4 @@
-"""FearGreedClient: 응답 파싱과 한글 해석 검증."""
+"""FearGreedClient: 응답 파싱, unavailable 처리, 한글 해석 검증."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import responses
 
-from data.fear_greed_client import FearGreedClient
+from data.fear_greed_client import UNAVAILABLE_INTERPRETATION, FearGreedClient
 
 CNN_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
 
@@ -34,20 +34,98 @@ def test_parses_index_payload(mocked_responses: responses.RequestsMock, isolated
     assert result["score"] == 32
     assert result["rating"] == "Fear"
     assert result["previous_week"] == 40
+    assert result["available"] is True
+    assert client.get_cached("fear_greed_index", max_age_hours=1)["score"] == 32
 
 
-def test_fallback_when_schema_missing(
+def test_schema_change_is_unavailable_not_neutral(
     mocked_responses_loose: responses.RequestsMock, isolated_cache_dir: Path
 ) -> None:
-    """CNN이 응답 포맷을 바꿔서 'fear_and_greed' 키가 사라진 경우."""
+    """CNN이 응답 포맷을 바꿔 'fear_and_greed'가 사라지면 중립 50이 아니라 unavailable."""
     mocked_responses_loose.add(responses.GET, CNN_URL, json={"unexpected": "shape"}, status=200)
 
     client = FearGreedClient()
     result = client.get_current_index()
-    # fallback은 score 키를 갖는 dict이고 합리적 디폴트(0-100 사이)여야 한다.
-    assert isinstance(result, dict)
-    assert "score" in result
-    assert 0 <= int(result["score"]) <= 100
+
+    assert result["available"] is False
+    assert result["score"] is None
+    assert result["rating"] is None
+    assert result["previous_week"] is None
+    assert result["reason"]
+    assert client.get_cached("fear_greed_index", max_age_hours=1) is None
+
+
+def test_missing_score_is_unavailable(
+    mocked_responses_loose: responses.RequestsMock, isolated_cache_dir: Path
+) -> None:
+    mocked_responses_loose.add(
+        responses.GET, CNN_URL, json={"fear_and_greed": {"rating": "Neutral"}}, status=200
+    )
+
+    result = FearGreedClient().get_current_index()
+    assert result["available"] is False
+    assert result["score"] is None
+
+
+def test_http_error_is_unavailable(
+    mocked_responses_loose: responses.RequestsMock, isolated_cache_dir: Path
+) -> None:
+    mocked_responses_loose.add(responses.GET, CNN_URL, json={}, status=418)
+
+    result = FearGreedClient().get_current_index()
+    assert result["available"] is False
+    assert result["score"] is None
+
+
+def test_missing_previous_values_stay_none(
+    mocked_responses_loose: responses.RequestsMock, isolated_cache_dir: Path
+) -> None:
+    mocked_responses_loose.add(
+        responses.GET, CNN_URL, json={"fear_and_greed": {"score": 61, "rating": "Greed"}}, status=200
+    )
+
+    client = FearGreedClient()
+    index_data = client.get_current_index()
+    assert index_data["previous_week"] is None
+
+    trend = client.get_trend_analysis(index_data)
+    assert trend["current_score"] == 61
+    assert trend["trend"] is None
+    assert trend["change_from_week"] is None
+    assert trend["change_from_month"] is None
+
+
+def test_trend_analysis_when_unavailable_has_no_numbers(isolated_cache_dir: Path) -> None:
+    client = FearGreedClient()
+    unavailable = client._unavailable_index("CNN 연결 실패")
+
+    trend = client.get_trend_analysis(unavailable)
+    assert trend["available"] is False
+    assert trend["current_score"] is None
+    assert trend["trend"] is None
+    assert trend["change_from_week"] is None
+    assert trend["interpretation_korean"] == UNAVAILABLE_INTERPRETATION
+    assert "/100" not in trend["interpretation_korean"]
+
+
+def test_interpretation_without_data_does_not_invent_score(
+    mocked_responses_loose: responses.RequestsMock, isolated_cache_dir: Path
+) -> None:
+    mocked_responses_loose.add(responses.GET, CNN_URL, json={}, status=500)
+
+    text = FearGreedClient().get_interpretation_korean()
+    assert text == UNAVAILABLE_INTERPRETATION
+    assert "50" not in text
+
+
+def test_trend_computed_from_previous_week(isolated_cache_dir: Path) -> None:
+    client = FearGreedClient()
+    trend = client.get_trend_analysis(
+        {"score": 30, "previous_week": 45, "previous_month": 20, "available": True}
+    )
+    assert trend["trend"] == "worsening"
+    assert trend["change_from_week"] == -15
+    assert trend["change_from_month"] == 10
 
 
 def test_korean_interpretation_buckets(isolated_cache_dir: Path) -> None:
@@ -77,6 +155,7 @@ def test_cache_short_circuits_call(isolated_cache_dir: Path) -> None:
             "previous_week": 70,
             "previous_month": 65,
             "previous_year": 60,
+            "available": True,
             "timestamp": "2025-11-17T00:00:00",
         },
     )

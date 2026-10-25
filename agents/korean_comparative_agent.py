@@ -5,8 +5,10 @@ Korean Comparative Analysis Agent
 """
 
 import logging
+import math
 from typing import Any
 
+import pandas as pd
 import pykrx.stock as stock
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
@@ -20,150 +22,226 @@ from utils.time import kst_today_compact
 logger = logging.getLogger(__name__)
 
 
+# 업종 매핑 (KRX 업종 분류). 같은 업종끼리 경쟁사로 묶는다.
+INDUSTRY_MAPPING = {
+    "005380": "자동차 및 트레일러",  # 현대차
+    "000660": "전자부품, 컴퓨터, 영상, 음향 및 통신장비",  # SK하이닉스
+    "005930": "전자부품, 컴퓨터, 영상, 음향 및 통신장비",  # 삼성전자
+    "035420": "출판, 영상, 방송통신 및 정보서비스업",  # 네이버
+    "207940": "의료용 물질 및 의약품",  # 삼성바이오로직스
+    "006400": "전기장비",  # 삼성SDI
+    "051910": "화학물질 및 화학제품",  # LG화학
+    "028260": "건설업",  # 삼성물산
+    "012330": "자동차 및 트레일러",  # 현대모비스
+    "096770": "화학물질 및 화학제품",  # SK이노베이션
+    "068270": "의료용 물질 및 의약품",  # 셀트리온
+    "373220": "전기장비",  # LG에너지솔루션
+    "000270": "자동차 및 트레일러",  # 기아
+    "024110": "금융업",  # 기업은행
+}
+
+METRICS = ("PER", "PBR", "EPS", "BPS")
+
+
+def _latest_business_day() -> str:
+    """가장 최근 KRX 영업일 (YYYYMMDD). 휴장일·장 시작 전이면 직전 영업일.
+
+    PyKRX의 전종목 조회는 휴장일에 빈/0 결과를 준다. 조회에 실패하면 오늘(KST)로 둔다.
+    """
+    today = kst_today_compact()
+    try:
+        day = stock.get_nearest_business_day_in_a_week(today, prev=True)
+        if day:
+            return str(day)
+    except Exception as e:
+        logger.warning(f"최근 영업일 조회 실패, 오늘 날짜 사용: {e}")
+    return today
+
+
+def _metric(value: Any) -> float | None:
+    """PyKRX는 값이 없으면 0(또는 NaN)을 준다 — 0을 실제 값으로 쓰지 않는다."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number) or number == 0:
+        return None
+    return number
+
+
+def _peer_average(peer_group: pd.DataFrame, column: str) -> float | None:
+    values = [v for v in (_metric(x) for x in peer_group[column]) if v is not None]
+    return sum(values) / len(values) if values else None
+
+
+def _sector_analysis(
+    df_info: pd.DataFrame,
+    stock_code: str,
+    sector: str | None,
+    peer_codes: list[str],
+    trading_day: str,
+    empty_reason: str | None = None,
+) -> dict[str, Any]:
+    if df_info.empty:
+        return {"available": False, "reason": empty_reason or f"{trading_day} PyKRX 전종목 지표가 비어 있음"}
+    if stock_code not in df_info.index:
+        return {"available": False, "reason": f"{trading_day} PyKRX 지표에 {stock_code} 없음"}
+    if not sector:
+        return {"available": False, "reason": "업종 매핑에 없는 종목 (경쟁사 비교 불가)"}
+    missing = [m for m in METRICS if m not in df_info.columns]
+    if missing:
+        return {"available": False, "reason": f"PyKRX 지표 컬럼 없음: {', '.join(missing)}"}
+
+    peer_group = df_info[df_info.index.isin(peer_codes + [stock_code])]
+    if len(peer_group) <= 1:
+        return {"available": False, "sector_name": sector, "reason": "같은 업종 경쟁사 지표 없음"}
+
+    return {
+        "available": True,
+        "sector_name": sector,
+        "peer_count": len(peer_group),
+        "target_metrics": {m: _metric(df_info.loc[stock_code, m]) for m in METRICS},
+        "peer_averages": {m: _peer_average(peer_group, m) for m in METRICS},
+    }
+
+
+def _competitive_advantages(sector_analysis: dict[str, Any]) -> list[str]:
+    target = sector_analysis["target_metrics"]
+    peers = sector_analysis["peer_averages"]
+
+    def both(metric: str) -> bool:
+        return target[metric] is not None and peers[metric] is not None
+
+    advantages = []
+    if both("PER") and target["PER"] < peers["PER"]:
+        advantages.append("PER이 업종 평균보다 낮아 상대적으로 저평가")
+    if both("PBR") and target["PBR"] < peers["PBR"]:
+        advantages.append("PBR이 업종 평균보다 낮아 자산 대비 저평가")
+    if both("EPS") and target["EPS"] > peers["EPS"]:
+        advantages.append("EPS가 업종 평균보다 높아 수익성 우수")
+    return advantages
+
+
+def _market_position(stock_code: str, trading_day: str) -> dict[str, Any]:
+    """시가총액 순위. FinanceDataReader → PyKRX 순으로 시도하고, 둘 다 없으면 unavailable."""
+    import FinanceDataReader as fdr
+
+    target_cap = None
+    rank = None
+    total_stocks = None
+    try:
+        market_data = fdr.StockListing("KRX")
+        if "Marcap" in market_data.columns:
+            valid_stocks = (
+                market_data[market_data["Marcap"] > 0]
+                .sort_values("Marcap", ascending=False)
+                .reset_index(drop=True)
+            )
+            target_rank_df = valid_stocks[valid_stocks["Code"] == stock_code]
+            if not target_rank_df.empty:
+                target_cap = target_rank_df.iloc[0]["Marcap"]
+                rank = int(target_rank_df.index[0]) + 1
+                total_stocks = len(valid_stocks)
+    except Exception as e:
+        logger.warning(f"FinanceDataReader 시가총액 조회 실패: {e}")
+
+    if rank is None:
+        try:
+            market_cap_df = stock.get_market_cap(trading_day)
+            if stock_code in market_cap_df.index and "시가총액" in market_cap_df.columns:
+                ranked = market_cap_df[market_cap_df["시가총액"] > 0].sort_values(
+                    by="시가총액", ascending=False
+                )
+                if stock_code in ranked.index:
+                    target_cap = ranked.loc[stock_code, "시가총액"]
+                    rank = list(ranked.index).index(stock_code) + 1
+                    total_stocks = len(ranked)
+        except Exception as e:
+            logger.warning(f"PyKRX 시가총액 조회 실패: {e}")
+
+    if rank is None or not total_stocks or target_cap is None:
+        return {"available": False, "reason": "FinanceDataReader·PyKRX 모두에서 시가총액 순위를 받지 못함"}
+
+    if rank <= 10:
+        cap_category = "대형주 (Top 10)"
+    elif rank <= 50:
+        cap_category = "대형주 (Top 50)"
+    elif rank <= 200:
+        cap_category = "중형주"
+    else:
+        cap_category = "소형주"
+
+    return {
+        "available": True,
+        "rank": rank,
+        "total_stocks": total_stocks,
+        "market_cap": float(target_cap),
+        "category": cap_category,
+        "percentile": round((1 - rank / total_stocks) * 100, 1),
+    }
+
+
 def get_comparative_analysis_logic(stock_code: str, company_name: str) -> dict[str, Any]:
     """업종 내 경쟁사 비교 및 전체 시장 내 순위 분석을 통합적으로 수행하는 로직"""
     try:
         logger.info(f"Performing comprehensive comparative analysis for {stock_code}")
-        today_str = kst_today_compact()
+        trading_day = _latest_business_day()
 
-        analysis_result = {}
-        insights = []
+        analysis_result: dict[str, Any] = {}
+        insights: list[str] = []
 
-        # 정확한 업종 매핑 (실제 한국 기업 업종 분류)
-        INDUSTRY_MAPPING = {
-            "005380": "자동차 및 트레일러",  # 현대차
-            "000660": "전자부품, 컴퓨터, 영상, 음향 및 통신장비",  # SK하이닉스
-            "005930": "전자부품, 컴퓨터, 영상, 음향 및 통신장비",  # 삼성전자
-            "035420": "출판, 영상, 방송통신 및 정보서비스업",  # 네이버
-            "207940": "의료용 물질 및 의약품",  # 삼성바이오로직스
-            "006400": "전기장비",  # 삼성SDI
-            "051910": "화학물질 및 화학제품",  # LG화학
-            "028260": "건설업",  # 삼성물산
-            "012330": "자동차 및 트레일러",  # 현대모비스
-            "096770": "화학물질 및 화학제품",  # SK이노베이션
-            "068270": "건설업",  # 셀트리온
-            "373220": "의료용 물질 및 의약품",  # LG에너지솔루션
-            "000270": "운수 및 창고업",  # 기아
-            "024110": "건설업",  # 기업은행
-        }
+        sector = INDUSTRY_MAPPING.get(stock_code)
+        peer_codes = [
+            code
+            for code, industry in INDUSTRY_MAPPING.items()
+            if sector and industry == sector and code != stock_code
+        ]
 
-        # 1. 업종 비교 분석 (확장)
-        df_info = stock.get_market_fundamental(today_str)
-        if stock_code in df_info.index:
-            # 정확한 업종 분류 사용
-            sector = INDUSTRY_MAPPING.get(stock_code, "기타 제조업")
-
-            # 같은 업종의 경쟁사들 찾기
-            peer_codes = [
-                code
-                for code, industry in INDUSTRY_MAPPING.items()
-                if industry == sector and code != stock_code
-            ]
-            peer_group = df_info[df_info.index.isin(peer_codes + [stock_code])]
-
-            if len(peer_group) > 1:
-                # 주요 지표 비교
-                target_data = {
-                    "PER": df_info.loc[stock_code, "PER"] if "PER" in df_info.columns else 15.0,
-                    "PBR": df_info.loc[stock_code, "PBR"] if "PBR" in df_info.columns else 1.3,
-                    "EPS": df_info.loc[stock_code, "EPS"] if "EPS" in df_info.columns else 5000,
-                    "BPS": df_info.loc[stock_code, "BPS"] if "BPS" in df_info.columns else 58000,
-                }
-
-                peer_averages = {
-                    "PER": peer_group["PER"].mean() if "PER" in peer_group.columns else 20.0,
-                    "PBR": peer_group["PBR"].mean() if "PBR" in peer_group.columns else 1.5,
-                    "EPS": peer_group["EPS"].mean() if "EPS" in peer_group.columns else 3000,
-                    "BPS": peer_group["BPS"].mean() if "BPS" in peer_group.columns else 40000,
-                }
-
-                analysis_result["sector_analysis"] = {
-                    "sector_name": sector,
-                    "peer_count": len(peer_group),
-                    "target_metrics": target_data,
-                    "peer_averages": peer_averages,
-                }
-
-                # 경쟁 우위 분석
-                competitive_advantages = []
-                if target_data["PER"] < peer_averages["PER"]:
-                    competitive_advantages.append("PER이 업종 평균보다 낮아 상대적으로 저평가")
-                if target_data["PBR"] < peer_averages["PBR"]:
-                    competitive_advantages.append("PBR이 업종 평균보다 낮아 자산 대비 저평가")
-                if target_data["EPS"] > peer_averages["EPS"]:
-                    competitive_advantages.append("EPS가 업종 평균보다 높아 수익성 우수")
-
-                analysis_result["competitive_advantages"] = competitive_advantages
-                insights.extend(competitive_advantages)
-
-        # 2. 시가총액 순위 및 규모 분석 (FinanceDataReader 사용 - 더 정확함)
-        import FinanceDataReader as fdr
-
+        # 1. 업종 비교 분석 — KOSPI·KOSDAQ 전종목.
+        # PyKRX는 KRX가 빈 응답을 주면(휴장일·로그인 없음) 내부에서 KeyError를 낸다.
+        fundamental_error = None
         try:
-            market_data = fdr.StockListing("KRX")
-            target_stock = market_data[market_data["Code"] == stock_code]
-
-            if not target_stock.empty and "Marcap" in market_data.columns:
-                target_cap = target_stock.iloc[0]["Marcap"]  # 백만원 단위
-
-                # 유효한 시가총액을 가진 기업들만 필터링하고 정렬
-                valid_stocks = (
-                    market_data[market_data["Marcap"] > 0]
-                    .sort_values("Marcap", ascending=False)
-                    .reset_index(drop=True)
-                )
-
-                # 순위 계산
-                target_rank_df = valid_stocks[valid_stocks["Code"] == stock_code]
-                if not target_rank_df.empty:
-                    rank = target_rank_df.index[0] + 1
-                    total_stocks = len(valid_stocks)
-                else:
-                    rank = 999
-                    total_stocks = len(valid_stocks)
-            else:
-                # FinanceDataReader 실패시 PyKRX 사용
-                market_cap_df = stock.get_market_cap(today_str)
-                if stock_code in market_cap_df.index:
-                    market_cap_df = market_cap_df.sort_values(by="시가총액", ascending=False).reset_index()
-                    target_cap = market_cap_df[market_cap_df["티커"] == stock_code]["시가총액"].iloc[0]
-                    rank = market_cap_df[market_cap_df["티커"] == stock_code].index[0] + 1
-                    total_stocks = len(market_cap_df)
-                else:
-                    target_cap = 0
-                    rank = 999
-                    total_stocks = 1000
+            df_info = stock.get_market_fundamental(trading_day, market="ALL")
         except Exception as e:
-            logger.warning(f"Market cap analysis error: {str(e)}")
-            target_cap = 0
-            rank = 999
-            total_stocks = 1000
+            fundamental_error = format_error_message_korean(e, f"{trading_day} PyKRX 지표 조회")
+            logger.warning(fundamental_error)
+            df_info = None
+        if df_info is None:
+            df_info = pd.DataFrame()
 
-        # 시가총액 규모 분류
-        if rank <= 10:
-            cap_category = "대형주 (Top 10)"
-        elif rank <= 50:
-            cap_category = "대형주 (Top 50)"
-        elif rank <= 200:
-            cap_category = "중형주"
-        else:
-            cap_category = "소형주"
-
-        analysis_result["market_position"] = {
-            "rank": rank,
-            "total_stocks": total_stocks,
-            "market_cap": float(target_cap),
-            "category": cap_category,
-            "percentile": round((1 - rank / total_stocks) * 100, 1),
-        }
-
-        insights.append(
-            f"시가총액 순위: {rank}위/{total_stocks}개 (상위 {round((1 - rank / total_stocks) * 100, 1)}%)"
+        sector_analysis = _sector_analysis(
+            df_info, stock_code, sector, peer_codes, trading_day, empty_reason=fundamental_error
         )
-        insights.append(f"시가총액 규모: {cap_category}")
+        analysis_result["sector_analysis"] = sector_analysis
+        if sector_analysis["available"]:
+            competitive_advantages = _competitive_advantages(sector_analysis)
+            analysis_result["competitive_advantages"] = competitive_advantages
+            insights.extend(competitive_advantages)
+
+        # 2. 시가총액 순위 및 규모 분석
+        market_position = _market_position(stock_code, trading_day)
+        analysis_result["market_position"] = market_position
+        if market_position["available"]:
+            insights.append(
+                f"시가총액 순위: {market_position['rank']}위/{market_position['total_stocks']}개 "
+                f"(상위 {market_position['percentile']}%)"
+            )
+            insights.append(f"시가총액 규모: {market_position['category']}")
+        else:
+            insights.append(f"시가총액 순위: 데이터 없음 ({market_position['reason']})")
+
+        if not sector_analysis["available"] and not market_position["available"]:
+            return create_fallback_message(
+                agent_name="Korean Comparative Agent",
+                company_name=company_name,
+                stock_code=stock_code,
+                reason=f"업종 비교: {sector_analysis['reason']} / 시가총액: {market_position['reason']}",
+                data_source="FinanceDataReader, PyKRX",
+            )
 
         # 3. 주요 경쟁사 식별 (업종별)
-        if len(peer_codes) > 0:
+        sector_label = sector or "업종 미분류"
+        if peer_codes:
             competitor_analysis = {}
             competitor_names = []
 
@@ -173,12 +251,12 @@ def get_comparative_analysis_logic(stock_code: str, company_name: str) -> dict[s
                         comp_name = stock.get_market_ticker_name(comp_code)
                         competitor_analysis[comp_code] = {
                             "name": comp_name,
-                            "PER": float(df_info.loc[comp_code, "PER"])
-                            if "PER" in df_info.columns and df_info.loc[comp_code, "PER"] > 0
-                            else 0,
-                            "PBR": float(df_info.loc[comp_code, "PBR"])
-                            if "PBR" in df_info.columns and df_info.loc[comp_code, "PBR"] > 0
-                            else 0,
+                            "PER": _metric(df_info.loc[comp_code, "PER"])
+                            if "PER" in df_info.columns
+                            else None,
+                            "PBR": _metric(df_info.loc[comp_code, "PBR"])
+                            if "PBR" in df_info.columns
+                            else None,
                         }
                         competitor_names.append(comp_name)
                     except Exception as e:
@@ -186,11 +264,11 @@ def get_comparative_analysis_logic(stock_code: str, company_name: str) -> dict[s
 
             if competitor_analysis:
                 analysis_result["key_competitors"] = competitor_analysis
-                insights.append(f"주요 경쟁사: {', '.join(competitor_names)} ({sector})")
+                insights.append(f"주요 경쟁사: {', '.join(competitor_names)} ({sector_label})")
             else:
-                insights.append(f"업종: {sector} (경쟁사 데이터 수집 제한)")
+                insights.append(f"업종: {sector_label} (경쟁사 데이터 수집 제한)")
         else:
-            insights.append(f"업종: {sector} (매핑된 경쟁사 없음)")
+            insights.append(f"업종: {sector_label} (매핑된 경쟁사 없음)")
 
         return convert_numpy_types(
             {
@@ -199,8 +277,8 @@ def get_comparative_analysis_logic(stock_code: str, company_name: str) -> dict[s
                 "company_name": company_name,
                 "analysis_summary": analysis_result,
                 "key_insights": insights,
-                "data_sources": ["PyKRX", "KRX Market Data"],
-                "analysis_date": today_str,
+                "data_sources": ["PyKRX", "KRX Market Data", "FinanceDataReader"],
+                "analysis_date": trading_day,
             }
         )
     except Exception as e:
@@ -319,7 +397,8 @@ def create_comparative_agent():
         "- 리스크 조정 매력도: 샤프 비율 기준 업종 내 순위\n"
         "- 장기 투자 적합성: [매우 적합/적합/보통/부적합] 평가\n"
         "- 단기 트레이딩 적합성: [매우 적합/적합/보통/부적합] 평가\n\n"
-        "IMPORTANT: This is comparative analysis reference material for institutional portfolio management. Present peer comparison data objectively without specific buy/sell recommendations.\n\n"
+        "IMPORTANT: This is comparative analysis reference material for institutional portfolio management. Present peer comparison data objectively without specific buy/sell recommendations.\n"
+        "DATA RULE: Use only numbers present in the tool result. Any metric the tool did not return (or whose section has available: false, or whose value is null) must be written as '데이터 없음' — never estimate or invent it.\n\n"
         f"🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 '{AgentSignal.COMPARATIVE.value}'라고 정확히 적어주세요. "
         "이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
     )

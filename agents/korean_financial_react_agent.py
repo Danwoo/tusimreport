@@ -1,4 +1,7 @@
 import logging
+import os
+import re
+import tempfile
 from typing import Any
 
 # matplotlib backend는 pyplot import 전에 set해야 적용된다.
@@ -26,6 +29,7 @@ from data.external_schemas import validate_pykrx_fundamental  # noqa: E402
 from data.sector_analysis_client import analyze_sector_relative_performance  # noqa: E402
 from utils.agent_helpers import create_fallback_message, format_error_message_korean  # noqa: E402
 from utils.helpers import convert_numpy_types  # noqa: E402
+from utils.redaction import redact  # noqa: E402
 from utils.time import kst_days_ago_compact, kst_isoformat, kst_yesterday_compact  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -99,6 +103,17 @@ def get_korean_stock_data(stock_code: str) -> dict[str, Any]:
         return {"error": str(e)}
 
 
+LISTING_MARKETS = ("KOSPI", "KOSDAQ", "KONEX")
+
+
+def _lookup_listing(stock_code: str) -> dict[str, str]:
+    """종목명과 상장 시장. `get_market_ticker_list()`의 기본값은 KOSPI뿐이라 시장별로 찾는다."""
+    for market in LISTING_MARKETS:
+        if stock_code in stock.get_market_ticker_list(market=market):
+            return {"name": stock.get_market_ticker_name(stock_code), "market": market}
+    return {}
+
+
 @tool
 def get_pykrx_market_data(stock_code: str) -> dict[str, Any]:
     """PyKRX로 한국 주식 시장 데이터 및 기본 지표 수집"""
@@ -112,24 +127,13 @@ def get_pykrx_market_data(stock_code: str) -> dict[str, Any]:
 
         # 종목 기본 정보
         try:
-            # 종목명 조회
-            ticker_list = stock.get_market_ticker_list()
-            ticker_info = {}
-            for ticker in ticker_list:
-                if ticker == stock_code:
-                    ticker_info = {
-                        "name": stock.get_market_ticker_name(ticker),
-                        "market": (
-                            "KOSPI" if ticker in stock.get_market_ticker_list(market="KOSPI") else "KOSDAQ"
-                        ),
-                    }
-                    break
+            ticker_info = _lookup_listing(stock_code)
 
             # 시가총액 및 기본 지표 (KST 기준 -7일 ~ 어제)
             week_ago = kst_days_ago_compact(7)
             fundamental_data = stock.get_market_fundamental(week_ago, yesterday, stock_code)
 
-            result = {
+            result: dict[str, Any] = {
                 "company_info": ticker_info,
                 "fundamental_data": {},
                 "market_data": {
@@ -168,9 +172,20 @@ def get_pykrx_market_data(stock_code: str) -> dict[str, Any]:
         return {"error": str(e)}
 
 
+def _chart_dir() -> str:
+    """차트 저장 위치. 캐시와 같은 루트(`TUSIM_CACHE_DIR` 또는 임시 디렉토리) 아래 charts/."""
+    root = os.environ.get("TUSIM_CACHE_DIR") or tempfile.gettempdir()
+    path = os.path.join(root, "charts")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 @tool
 def save_stock_chart(stock_code: str, chart_data: dict | None = None) -> dict[str, Any]:
-    """한국어 라벨링된 주가 차트 생성 및 저장"""
+    """한국어 라벨링된 주가 차트를 생성해 파일로 저장하고 경로를 돌려줍니다.
+
+    시세는 항상 FinanceDataReader에서 직접 받습니다. chart_data는 호환용 인자로 쓰지 않습니다.
+    """
     try:
         logger.info(f"Creating chart for {stock_code}")
 
@@ -190,11 +205,10 @@ def save_stock_chart(stock_code: str, chart_data: dict | None = None) -> dict[st
                 plt.rcParams["axes.unicode_minus"] = False
                 break
 
-        # 데이터 가져오기 (chart_data가 없으면 직접 조회)
-        if not chart_data:
-            df = fdr.DataReader(stock_code, start="2024-01-01")
-            if df.empty:
-                return {"error": "No data available for charting"}
+        # LLM이 넘긴 chart_data는 검증할 원천이 없어 그리지 않는다 — 원천 시세만 쓴다.
+        df = fdr.DataReader(stock_code, start="2024-01-01")
+        if df.empty:
+            return {"error": "No data available for charting", "chart_saved": False}
 
         # 차트 생성
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), height_ratios=[3, 1])
@@ -230,18 +244,19 @@ def save_stock_chart(stock_code: str, chart_data: dict | None = None) -> dict[st
 
         plt.tight_layout()
 
-        # Streamlit에서 접근 가능한 고정 파일명으로 저장
-        chart_filename = "korean_stock_chart.png"
-        plt.savefig(chart_filename, dpi=150, bbox_inches="tight")
-        plt.close()
+        # 작업 디렉토리(레포 루트)에 쓰지 않는다. 종목코드는 LLM 입력이라 파일명에 쓰기 전에 거른다.
+        safe_code = re.sub(r"[^0-9A-Za-z]", "", stock_code)[:12] or "unknown"
+        chart_path = os.path.join(_chart_dir(), f"stock_chart_{safe_code}.png")
+        fig.savefig(chart_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
         return {
             "chart_saved": True,
-            "chart_path": chart_filename,
+            "chart_path": chart_path,
             "chart_type": "price_volume",
             "data_points": len(df),
             "created_at": kst_isoformat(),
-            "message": f"Chart saved as {chart_filename} for stock {stock_code}",
+            "message": f"Chart saved as {chart_path} for stock {stock_code}",
         }
 
     except Exception as e:
@@ -258,45 +273,49 @@ def get_dart_company_data(stock_code: str) -> dict[str, Any]:
         result = get_comprehensive_company_data(stock_code)
 
         if result.get("error"):
-            return {"error": f"DART API error: {result['error']}"}
+            return {"error": redact(f"DART API error: {result['error']}")}
 
-        # 주요 재무 지표 추출 (current_year 오류시 previous_year 사용)
+        # 최근 사업보고서 기준. 최신 연도가 아직 공시 전이면 그 전 연도를 쓴다.
         financial_summary = {}
+        financial_basis = None
         financial_statements = result.get("financial_statements", {})
+        statement = next(
+            (
+                financial_statements[key]
+                for key in ("latest_annual", "prior_annual")
+                if financial_statements.get(key, {}).get("financial_data")
+            ),
+            None,
+        )
 
-        # current_year부터 시도, 없으면 previous_year 사용
-        fin_data = None
-        data_year = "정보없음"
-
-        if financial_statements.get("current_year", {}).get("financial_data"):
-            fin_data = financial_statements["current_year"]["financial_data"]
-            data_year = "당기"
-        elif financial_statements.get("previous_year", {}).get("financial_data"):
-            fin_data = financial_statements["previous_year"]["financial_data"]
-            data_year = "전기"
-
-        if fin_data:
-            # 실제 DART API 응답 구조에 맞춘 키워드 (수입, 수익 등 포함)
+        if statement:
+            fin_data = statement["financial_data"]
+            financial_basis = {
+                "fiscal_year": statement.get("year"),
+                "report": statement.get("report_name"),
+                "statement": statement.get("fs_name"),
+                "period": statement.get("period"),
+            }
+            data_year = (
+                f"FY{statement.get('year')} {statement.get('report_name')} ({statement.get('fs_name')})"
+            )
+            # fnlttSinglAcnt의 표준 계정명. 자본금은 자본총계가 아니므로 대체값으로 쓰지 않는다.
             key_accounts_mapping = {
-                # 매출액 관련 (실제 DART에서 '수입'으로 나오는 경우가 많음)
-                "revenue": ["수입", "매출", "매출액", "수익", "Sales", "Revenue"],
-                "operating_income": ["영업이익", "Operating Income"],
-                "net_income": ["당기순이익", "순이익", "Net Income"],
-                "total_assets": ["자산총계", "Total Assets"],
-                "total_liabilities": ["부채총계", "Total Liabilities"],
-                "total_equity": ["자본총계", "자본금", "Total Equity"],
+                "revenue": "매출액",
+                "operating_income": "영업이익",
+                "net_income": "당기순이익",
+                "total_assets": "자산총계",
+                "total_liabilities": "부채총계",
+                "total_equity": "자본총계",
             }
 
-            # 각 지표별로 실제 존재하는 키를 찾아 매핑
-            for metric, possible_keys in key_accounts_mapping.items():
-                for key in possible_keys:
-                    if key in fin_data and fin_data[key] != 0:
-                        financial_summary[metric] = {
-                            "value": fin_data[key],
-                            "source_key": key,
-                            "data_year": data_year,
-                        }
-                        break  # 첫 번째로 찾은 유효한 값 사용
+            for metric, key in key_accounts_mapping.items():
+                if key in fin_data:
+                    financial_summary[metric] = {
+                        "value": fin_data[key],
+                        "source_key": key,
+                        "data_year": data_year,
+                    }
 
         # 공시 요약
         disclosure_summary = []
@@ -316,6 +335,7 @@ def get_dart_company_data(stock_code: str) -> dict[str, Any]:
             "industry_code": result.get("company_info", {}).get("induty_code"),
             "establishment_date": result.get("company_info", {}).get("est_dt"),
             "financial_summary": financial_summary,
+            "financial_basis": financial_basis,
             "recent_disclosures": disclosure_summary,
             "data_source": "DART OpenAPI",
             "last_updated": kst_isoformat(),
@@ -323,7 +343,7 @@ def get_dart_company_data(stock_code: str) -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Error fetching DART company data: {str(e)}")
-        return {"error": str(e)}
+        return {"error": redact(str(e))}
 
 
 @tool
@@ -335,13 +355,13 @@ def get_macro_economic_data() -> dict[str, Any]:
         result = get_macro_economic_indicators()
 
         if result.get("error"):
-            return {"error": f"BOK API error: {result['error']}"}
+            return {"error": redact(f"BOK API error: {result['error']}")}
 
         return result
 
     except Exception as e:
         logger.error(f"Error fetching macro economic data: {str(e)}")
-        return {"error": str(e)}
+        return {"error": redact(str(e))}
 
 
 @tool
