@@ -10,11 +10,23 @@ cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}"
 
 PYTHON_VERSION="3.12"
 
+# .venv가 있어도 python이 실행되지 않으면(깨진 symlink, 만들다 만 디렉터리) 새로 만든다.
 if command -v uv >/dev/null 2>&1; then
-  [ -x .venv/bin/python ] || uv venv .venv --python "$PYTHON_VERSION"
+  [ -x .venv/bin/python ] || uv venv --clear .venv --python "$PYTHON_VERSION"
   uv pip install --python .venv/bin/python -r requirements.txt -r requirements-dev.txt
 else
-  [ -x .venv/bin/python ] || "python${PYTHON_VERSION}" -m venv .venv
+  PYTHON=""
+  for candidate in "python${PYTHON_VERSION}" python3.11 python3; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PYTHON="$candidate"
+      break
+    fi
+  done
+  if [ -z "$PYTHON" ]; then
+    echo "session-start: uv도 python3도 찾지 못했습니다" >&2
+    exit 1
+  fi
+  [ -x .venv/bin/python ] || "$PYTHON" -m venv --clear .venv
   .venv/bin/python -m pip install --upgrade pip
   .venv/bin/python -m pip install -r requirements.txt -r requirements-dev.txt
 fi

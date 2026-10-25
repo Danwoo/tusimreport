@@ -38,7 +38,8 @@ def test_returns_fallback_when_api_key_missing(isolated_cache_dir: Path) -> None
     result = client.get_global_market_overview()
     assert "sp500" in result or "error" in result
     # fallback의 가격은 0이거나 status가 limited여야 한다 (실제 호출 안 됨).
-    assert client.api_key is None
+    # .env.example처럼 빈 값(ALPHA_VANTAGE_API_KEY=)이면 settings가 ""를 준다.
+    assert not client.api_key
 
 
 def test_parses_global_quote_response(
