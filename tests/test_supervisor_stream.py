@@ -135,8 +135,46 @@ class TestStreamKoreanStockAnalysis:
         # 꺼낼 수 있음
         assert any("BUY" in m["content"] for m in sup["messages"])
 
+    def test_agent_error_marks_card_without_ending_stream(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """agent_error는 해당 카드의 실패로 전달한다 — 'error' 키를 쓰면 main.py가 스트림을 끊는다."""
+        events = [
+            {
+                "type": "agent_error",
+                "agent_name": "community_expert",
+                "error": "429 rate limit",
+                "completed_agents": 3,
+                "total_agents": 9,
+            },
+        ]
+        _install_fake_engine(monkeypatch, events)
+
+        chunks = list(stream_korean_stock_analysis("005930", "삼성전자"))
+
+        assert "error" not in chunks[0]
+        assert chunks[0]["supervisor"]["agent_error"] == {
+            "agent": "community_expert",
+            "error": "429 rate limit",
+        }
+
+    def test_incomplete_event_carries_exclusions(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        events = [
+            {
+                "type": "incomplete",
+                "message": "근거 데이터가 있는 분석이 2/9개",
+                "excluded": {"esg_expert": "근거 데이터 없음"},
+                "completed_agents": 9,
+                "total_agents": 9,
+            },
+        ]
+        _install_fake_engine(monkeypatch, events)
+
+        sup = list(stream_korean_stock_analysis("005930", "삼성전자"))[0]["supervisor"]
+
+        assert sup["incomplete"] is True
+        assert sup["excluded"] == {"esg_expert": "근거 데이터 없음"}
+
     def test_error_event_yields_error_chunk(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """agent_error / system_error / report_error 이벤트는 error 키로 전달."""
+        """system_error / report_error 이벤트는 error 키로 전달."""
         events = [
             {
                 "type": "system_error",

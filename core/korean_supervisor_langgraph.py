@@ -20,7 +20,7 @@ from agents.korean_global_market_agent import create_global_market_agent  # 🆕
 from agents.korean_institutional_trading_agent import create_institutional_trading_agent
 from agents.korean_sentiment_agent import create_sentiment_agent
 from config.llm_factory import build_llm
-from core.signals import AGENT_TO_SIGNAL
+from core.signals import AGENT_TO_SIGNAL, MIN_AGENTS_FOR_REPORT
 
 logger = logging.getLogger(__name__)
 
@@ -67,52 +67,24 @@ def create_all_agents():
 # ====================
 
 
-def generate_comprehensive_report(
-    supervisor_llm, all_analyses: dict[str, str], stock_code: str, company_name: str
-) -> str:
-    """Supervisor가 직접 생성하는 종합 투자 참고자료"""
-    try:
-        # 모든 전문가 분석 내용을 하나의 문자열로 결합
-        expert_analyses_text = ""
-        for expert_key, analysis in all_analyses.items():
-            expert_name = {
-                "context_expert": "시장·경제 전문가",
-                "sentiment_expert": "뉴스·여론 전문가",
-                "financial_expert": "재무·공시 전문가",
-                "advanced_technical_expert": "기술적 분석 전문가",
-                "institutional_trading_expert": "수급 분석 전문가",
-                "comparative_expert": "상대 가치 전문가",
-                "esg_expert": "ESG 분석 전문가",
-                "community_expert": "커뮤니티 여론 전문가",
-                "global_market_expert": "글로벌 시장 전문가",  # 🆕 P1-3
-            }.get(expert_key, expert_key)
+EXPERT_LABELS: dict[str, str] = {
+    "context_expert": "시장·경제 전문가",
+    "sentiment_expert": "뉴스·여론 전문가",
+    "financial_expert": "재무·공시 전문가",
+    "advanced_technical_expert": "기술적 분석 전문가",
+    "institutional_trading_expert": "수급 분석 전문가",
+    "comparative_expert": "상대 가치 전문가",
+    "esg_expert": "ESG 분석 전문가",
+    "community_expert": "커뮤니티 여론 전문가",
+    "global_market_expert": "글로벌 시장 전문가",
+}
 
-            expert_analyses_text += f"\n\n=== {expert_name} 분석 ===\n{analysis}\n"
+GROUNDING_RULE = (
+    "**근거 규칙**: 수치와 사실은 주어진 분석·도구 결과에 있는 것만 쓴다. "
+    "자료가 없는 영역은 추측하지 말고 해당 섹션에 '데이터 없음'이라고 적는다."
+)
 
-        # 🔍 전문가 분석 데이터 품질 확인
-        total_analysis_length = sum(len(str(analysis)) for analysis in all_analyses.values())
-        logger.info(f"🔍 전문가 분석 총 길이: {total_analysis_length:,}자")
-        logger.info(f"🔍 참여 전문가 수: {len(all_analyses)}/9")
-
-        # 🚨 데이터 부족 시 조기 반환
-        if len(all_analyses) < 4:
-            logger.warning(f"⚠️ 전문가 분석 부족: {len(all_analyses)}/9")
-            return f"## 분석 데이터 부족\n\n{len(all_analyses)}/9개 전문가 분석만 완료되어 종합 보고서 생성이 제한됩니다."
-
-        if total_analysis_length < 1000:
-            logger.warning(f"⚠️ 분석 내용 부족: {total_analysis_length}자")
-            return f"## 분석 내용 부족\n\n전문가 분석 내용이 {total_analysis_length}자로 부족하여 종합 보고서 생성이 어렵습니다."
-
-        report_prompt = f"""
-🎯 당신은 **대한민국 최고 증권사의 Chief Investment Research Director**로서, {len(all_analyses)}개 전문가의 심층 분석을 바탕으로 기관투자자급 투자 리서치 보고서를 작성해야 합니다.
-
-📊 **분석 대상**: {stock_code} ({company_name})
-📈 **전문가 분석 총량**: {total_analysis_length:,}자
-
-🔍 **전문가 팀 분석 결과:**
-{expert_analyses_text}
-
-🏆 **증권사 Chief Analyst 급 보고서 작성 가이드:**
+REPORT_GUIDE = """🏆 **증권사 Chief Analyst 급 보고서 작성 가이드:**
 
 **📚 스타일 가이드:**
 - **투자 스토리텔링**: 단순 나열이 아닌 설득력 있는 투자 내러티브 구성
@@ -124,11 +96,11 @@ def generate_comprehensive_report(
 **🎯 필수 작성 요구사항:**
 - **길이**: 최소 5,000자 이상의 심층 분석
 - **구조**: 투자 스토리 중심의 자연스러운 흐름
-- **통찰력**: 7개 전문가 의견을 종합한 독창적 관점
+- **통찰력**: 전문가 의견을 종합한 독창적 관점
 - **실용성**: 구체적 수치와 실행 가능한 투자 가이드
-- **가독성**: 핵심 메시지가 명확히 전달되는 구성
+- **가독성**: 핵심 메시지가 명확히 전달되는 구성"""
 
-# 📈 투자 리서치 보고서 - 증권사 Chief Analyst 스타일
+REPORT_TEMPLATE = """# 📈 투자 리서치 보고서 - 증권사 Chief Analyst 스타일
 
 ## 🎯 Executive Summary (투자 의견 요약)
 **[핵심 투자 논리를 3-4줄로 명확하게 제시]**
@@ -196,7 +168,7 @@ def generate_comprehensive_report(
 
 ## ⚠️ Investment Disclaimer
 
-본 리서치 보고서는 공개된 정보와 7개 전문가 분석을 바탕으로 작성된 투자 참고자료입니다.
+본 리서치 보고서는 공개된 정보와 전문가 분석을 바탕으로 작성된 투자 참고자료입니다.
 
 **주요 유의사항:**
 - 투자 권유나 특정 매매 추천이 아님
@@ -204,18 +176,81 @@ def generate_comprehensive_report(
 - 시장 상황 변화에 따른 전망 수정 가능
 - 과거 성과가 미래 수익을 보장하지 않음
 
-**Report Completion Signal**: SUPERVISOR_REPORT_GENERATION_COMPLETE
+**Report Completion Signal**: SUPERVISOR_REPORT_GENERATION_COMPLETE"""
+
+
+def _excluded_section(excluded: dict[str, str] | None) -> str:
+    if not excluded:
+        return ""
+    lines = "\n".join(f"- {EXPERT_LABELS.get(name, name)}: {reason}" for name, reason in excluded.items())
+    return (
+        "\n⛔ **분석에서 제외된 영역** (실행 실패 또는 근거 데이터 없음):\n"
+        f"{lines}\n위 영역은 해당 섹션에 '데이터 없음'으로 적고 내용을 지어내지 않는다.\n"
+    )
+
+
+def generate_comprehensive_report(
+    supervisor_llm,
+    all_analyses: dict[str, str],
+    stock_code: str,
+    company_name: str,
+    excluded: dict[str, str] | None = None,
+    callbacks: list | None = None,
+) -> str:
+    """Supervisor가 직접 생성하는 종합 투자 참고자료.
+
+    Args:
+        excluded: 보고서에 반영하지 않은 에이전트와 그 이유. 프롬프트에 명시해
+            LLM이 빠진 영역을 지어내지 않게 한다.
+        callbacks: LLM 호출 계측용 LangChain 콜백.
+    """
+    try:
+        expert_analyses_text = "".join(
+            f"\n\n=== {EXPERT_LABELS.get(expert_key, expert_key)} 분석 ===\n{analysis}\n"
+            for expert_key, analysis in all_analyses.items()
+        )
+
+        total_agents = len(AGENT_TO_SIGNAL)
+        total_analysis_length = sum(len(str(analysis)) for analysis in all_analyses.values())
+        logger.info(f"🔍 전문가 분석 총 길이: {total_analysis_length:,}자")
+        logger.info(f"🔍 참여 전문가 수: {len(all_analyses)}/{total_agents}")
+
+        if len(all_analyses) < MIN_AGENTS_FOR_REPORT:
+            logger.warning(f"⚠️ 전문가 분석 부족: {len(all_analyses)}/{total_agents}")
+            return (
+                f"## 분석 데이터 부족\n\n{len(all_analyses)}/{total_agents}개 전문가 분석만 완료되어 "
+                "종합 보고서 생성이 제한됩니다."
+            )
+
+        if total_analysis_length < 1000:
+            logger.warning(f"⚠️ 분석 내용 부족: {total_analysis_length}자")
+            return f"## 분석 내용 부족\n\n전문가 분석 내용이 {total_analysis_length}자로 부족하여 종합 보고서 생성이 어렵습니다."
+
+        report_prompt = f"""
+🎯 당신은 **대한민국 최고 증권사의 Chief Investment Research Director**로서, {len(all_analyses)}개 전문가의 심층 분석을 바탕으로 기관투자자급 투자 리서치 보고서를 작성해야 합니다.
+
+📊 **분석 대상**: {stock_code} ({company_name})
+📈 **전문가 분석 총량**: {total_analysis_length:,}자
+
+🔍 **전문가 팀 분석 결과:**
+{expert_analyses_text}
+{_excluded_section(excluded)}
+{GROUNDING_RULE}
+
+{REPORT_GUIDE}
+
+{REPORT_TEMPLATE}
 """
 
-        # 🤖 Supervisor LLM으로 종합 보고서 생성
-        response = supervisor_llm.invoke(report_prompt)
+        if callbacks:
+            response = supervisor_llm.invoke(report_prompt, config={"callbacks": callbacks})
+        else:
+            response = supervisor_llm.invoke(report_prompt)
         report_content = response.content if hasattr(response, "content") else str(response)
 
-        # 🔍 생성된 보고서 품질 검증
         logger.info("🎯 Supervisor가 종합 보고서 생성 완료")
         logger.info(f"📊 보고서 길이: {len(report_content):,}자")
 
-        # 🚨 품질 검증 - 증권사 급 보고서 기준
         if len(report_content) < 3000:
             logger.warning(f"⚠️ 생성된 보고서가 너무 짧습니다: {len(report_content)}자 (목표: 5,000자+)")
             logger.warning(f"⚠️ 프롬프트 길이: {len(report_prompt):,}자")
@@ -364,6 +399,8 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                             "current_stage": stage_name,
                             "progress": result["progress"],
                             "messages": [{"content": result["content"]}],
+                            "completed_agent": result["agent_name"],
+                            "agent_status": result.get("agent_status", {}),
                             "executed_agents": result["completed_agents"],
                             "total_agents": result["total_agents"],
                             "progressive_mode": True,
@@ -383,9 +420,45 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                             "final_report_generated": True,
                             "progressive_mode": True,
                             "context_stats": result.get("context_stats", {}),
+                            "excluded": result.get("excluded", {}),
+                            "agent_statuses": result.get("agent_statuses", {}),
+                            "metrics": result.get("metrics", {}),
                         }
                     }
-                elif result["type"] in ["agent_error", "system_error", "report_error"]:
+                elif result["type"] == "agent_error":
+                    # 에이전트 하나의 실패는 그 카드의 실패다. 스트림 전체를 끊지 않는다.
+                    yield {
+                        "supervisor": {
+                            "stock_code": stock_code,
+                            "company_name": company_name,
+                            "current_stage": result.get("message", "분석 실패"),
+                            "messages": [],
+                            "agent_error": {
+                                "agent": result.get("agent_name", ""),
+                                "error": result.get("error", "알 수 없는 오류"),
+                            },
+                            "executed_agents": result.get("completed_agents", 0),
+                            "total_agents": result.get("total_agents", len(AGENT_TO_SIGNAL)),
+                            "progressive_mode": True,
+                        }
+                    }
+                elif result["type"] == "incomplete":
+                    yield {
+                        "supervisor": {
+                            "stock_code": stock_code,
+                            "company_name": company_name,
+                            "current_stage": result.get("message", "보고서 생성 조건 미충족"),
+                            "messages": [],
+                            "incomplete": True,
+                            "excluded": result.get("excluded", {}),
+                            "agent_statuses": result.get("agent_statuses", {}),
+                            "metrics": result.get("metrics", {}),
+                            "executed_agents": result.get("completed_agents", 0),
+                            "total_agents": result.get("total_agents", len(AGENT_TO_SIGNAL)),
+                            "progressive_mode": True,
+                        }
+                    }
+                elif result["type"] in ["system_error", "report_error"]:
                     yield {
                         "error": {"error": result.get("error", "알 수 없는 오류"), "progressive_mode": True}
                     }
@@ -405,7 +478,7 @@ def stream_korean_stock_analysis(stock_code: str, company_name: str = None, use_
                             "progress": result.get("progress", 0.0),
                             "messages": [],
                             "executed_agents": result.get("completed_agents", 0),
-                            "total_agents": result.get("total_agents", 7),
+                            "total_agents": result.get("total_agents", len(AGENT_TO_SIGNAL)),
                             "progressive_mode": True,
                         }
                     }
