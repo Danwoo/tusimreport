@@ -4,9 +4,12 @@ TuSimReport 환경 검증 스크립트
 설치 후 환경이 올바르게 설정되었는지 확인합니다.
 """
 
+import argparse
 import os
 import sys
+import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def print_header(text):
@@ -44,8 +47,11 @@ def check_dependencies():
     required_packages = [
         ("streamlit", "Streamlit"),
         ("langchain", "LangChain"),
+        ("langchain_openai", "LangChain OpenAI"),
+        ("langgraph", "LangGraph"),
         ("pandas", "Pandas"),
         ("pydantic_settings", "Pydantic Settings"),
+        ("FinanceDataReader", "FinanceDataReader"),
         ("selenium", "Selenium (v2.1)"),
         ("pytest", "Pytest"),
     ]
@@ -79,74 +85,93 @@ def check_env_file():
     else:
         print("✅ .env.example 파일 존재")
 
-    if not env_path.exists():
-        print("⚠️  .env 파일이 없습니다")
-        print("    다음 명령으로 생성하세요: cp .env.example .env")
-        print("    그 후 .env 파일을 열어 API 키를 입력하세요")
-        return False
-    else:
+    if env_path.exists():
         print("✅ .env 파일 존재")
-        return True
+    else:
+        print("ℹ️  .env 파일이 없습니다 — 환경변수(클라우드 세션 secret 등)에서만 키를 읽습니다")
+        print("    로컬에서는: cp .env.example .env 후 키 입력 (안내: docs/API_KEYS.md)")
+    return True
 
 
 def check_api_keys():
-    """API 키 설정 확인"""
+    """API 키 설정 확인. 키 값은 일부라도 출력하지 않는다."""
     print_section("4. API 키 설정 확인")
 
-    from dotenv import load_dotenv
+    from config.settings import get_api_key_status, get_llm_model
 
-    load_dotenv()
-
-    required_keys = {
-        "LLM (필수)": [
-            ("GOOGLE_API_KEY", "Google Gemini"),
-            ("OPENAI_API_KEY", "OpenAI"),
-        ],
-        "금융 데이터 (필수)": [
-            ("DART_API_KEY", "DART (금융감독원)"),
-            ("ECOS_API_KEY", "ECOS (한국은행)"),
-        ],
-        "뉴스 (권장)": [
-            ("NAVER_CLIENT_ID", "Naver News (한국)"),
-            ("NAVER_CLIENT_SECRET", "Naver News Secret"),
-            ("TAVILY_API_KEY", "Tavily (글로벌)"),
-        ],
+    status = get_api_key_status()
+    labels = {
+        "llm": "LLM (필수)",
+        "dart": "DART (금융감독원, 필수)",
+        "ecos": "ECOS (한국은행, 필수)",
+        "naver": "Naver 뉴스 검색 (권장)",
+        "tavily": "Tavily (선택)",
+        "alpha_vantage": "Alpha Vantage (선택)",
     }
+    for key, label in labels.items():
+        print(f"  {label}: {status[key]}")
 
-    status = {}
+    # pykrx는 settings가 아니라 os.environ에서 직접 읽는다.
+    has_krx = bool(os.getenv("KRX_ID")) and bool(os.getenv("KRX_PW"))
+    print(f"  KRX 데이터 포털 로그인 (pykrx): {'✅ 설정됨' if has_krx else '⚠️ 미설정 (KRX_ID·KRX_PW)'}")
 
-    for category, keys in required_keys.items():
-        print(f"\n{category}:")
-        for key, name in keys:
-            value = os.getenv(key)
-            is_set = value is not None and value != f"your_{key.lower()}_here" and value != ""
-            status[key] = is_set
+    llm_config = get_llm_model(raise_on_missing=False)
+    if llm_config is not None:
+        endpoint = urlparse(llm_config.base_url).netloc if llm_config.base_url else "provider 기본값"
+        print(
+            f"\n  사용할 LLM: provider={llm_config.provider} model={llm_config.model_name} endpoint={endpoint}"
+        )
 
-            if is_set:
-                masked = value[:8] + "..." if len(value) > 8 else "***"
-                print(f"  ✅ {name}: {masked}")
-            else:
-                print(f"  ❌ {name}: 미설정")
-
-    # 최소 요구사항 확인
-    has_llm = status.get("GOOGLE_API_KEY") or status.get("OPENAI_API_KEY")
-    has_dart = status.get("DART_API_KEY")
-    has_ecos = status.get("ECOS_API_KEY")
-
+    has_dart = status["dart"].startswith("✅")
+    has_ecos = status["ecos"].startswith("✅")
     print("\n최소 요구사항 확인:")
-    if has_llm and has_dart and has_ecos:
-        print("✅ 최소 API 키 설정 완료 (LLM + DART + ECOS)")
-        print("⚠️  뉴스 API 키를 추가하면 더 나은 분석이 가능합니다")
+    if llm_config is not None and has_dart and has_ecos:
+        print("✅ 최소 설정 완료 (LLM + DART + ECOS)")
         return True
-    else:
-        print("❌ 최소 API 키가 설정되지 않았습니다")
-        if not has_llm:
-            print("    - GOOGLE_API_KEY 또는 OPENAI_API_KEY 필요")
-        if not has_dart:
-            print("    - DART_API_KEY 필요")
-        if not has_ecos:
-            print("    - ECOS_API_KEY 필요")
+    print("❌ 최소 설정이 완료되지 않았습니다 (안내: docs/API_KEYS.md)")
+    return False
+
+
+def probe_llm_tool_calling():
+    """설정된 LLM에 tool calling 요청을 한 번 보내 ReAct 에이전트가 쓸 수 있는지 확인한다."""
+    print_section("8. LLM tool calling 확인 (--llm-probe, 실제 호출 1회)")
+
+    from langchain_core.tools import tool
+
+    from config.llm_factory import build_llm
+
+    @tool
+    def get_stock_price(stock_code: str) -> str:
+        """종목코드의 현재가를 조회한다."""
+        return "0"
+
+    llm = build_llm(temperature=0, raise_on_missing=False)
+    if llm is None:
+        print("❌ LLM 설정이 없어 확인하지 못했습니다")
         return False
+
+    started = time.monotonic()
+    try:
+        response = llm.bind_tools([get_stock_price]).invoke(
+            "삼성전자(005930)의 현재가를 get_stock_price 도구로 조회해줘."
+        )
+    except Exception as e:
+        print(f"❌ 호출 실패: {type(e).__name__}: {str(e)[:300]}")
+        return False
+    elapsed = time.monotonic() - started
+
+    if not response.tool_calls:
+        print(
+            f"❌ 응답은 왔지만 tool call이 없습니다 ({elapsed:.1f}s) — ReAct 에이전트에 쓸 수 없는 모델입니다"
+        )
+        print(f"    응답 앞부분: {str(response.content)[:200]}")
+        return False
+    call = response.tool_calls[0]
+    print(f"✅ tool call 수신 ({elapsed:.1f}s): {call['name']}({call['args']})")
+    usage = getattr(response, "usage_metadata", None)
+    if usage:
+        print(f"    토큰: 입력 {usage.get('input_tokens')} / 출력 {usage.get('output_tokens')}")
+    return True
 
 
 def check_chrome():
@@ -230,6 +255,14 @@ def run_import_test():
 
 def main():
     """메인 함수"""
+    parser = argparse.ArgumentParser(description="TuSimReport 환경 검증")
+    parser.add_argument(
+        "--llm-probe",
+        action="store_true",
+        help="설정된 LLM에 tool calling 요청을 실제로 1회 보낸다 (무료 한도 소모)",
+    )
+    args = parser.parse_args()
+
     print_header("TuSimReport 환경 검증")
     print("설치 후 환경이 올바르게 설정되었는지 확인합니다.\n")
 
@@ -242,14 +275,16 @@ def main():
     results["chrome"] = check_chrome()
     results["structure"] = check_directory_structure()
     results["imports"] = run_import_test()
+    if args.llm_probe:
+        results["llm_probe"] = probe_llm_tool_calling()
 
     # 최종 결과
     print_header("최종 검증 결과")
 
-    critical_checks = ["python", "dependencies", "env_file", "api_keys"]
+    critical_checks = ["python", "dependencies", "api_keys"] + (["llm_probe"] if args.llm_probe else [])
     critical_ok = all(results.get(k, False) for k in critical_checks)
 
-    optional_checks = ["chrome", "structure", "imports"]
+    optional_checks = ["env_file", "chrome", "structure", "imports"]
     optional_ok = all(results.get(k, False) for k in optional_checks)
 
     if critical_ok and optional_ok:
