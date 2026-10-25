@@ -1,13 +1,17 @@
 # Top-level production dependencies — human-edited source.
 #
-# requirements.txt is the fully-pinned lockfile that should be regenerated
-# from this file. Workflow:
+# requirements.lock is the fully-pinned lockfile generated from this file.
+# requirements.txt mirrors the direct deps below with loose pins (used by the
+# Dockerfile); keep the two in sync. Workflow:
 #
-#   # add or change a dep here, then:
-#   pip-compile --resolver=backtracking requirements.in -o requirements.txt
+#   # add or change a dep here (and in requirements.txt), then:
+#   make lock-all
 #
-# To pick up upstream security fixes:
-#   pip-compile --upgrade requirements.in -o requirements.txt
+# To pick up upstream security fixes (existing pins are kept otherwise):
+#   make lock-all PIP_COMPILE_ARGS=--upgrade
+#
+# Pre-releases are not enabled globally (no --pre). A dependency that only
+# ships pre-releases names one in its specifier — see mplfinance below.
 #
 # Dev tools (ruff/mypy/pytest-cov/types-requests/pip-audit/pre-commit) live in
 # requirements-dev.in and only get installed in CI / local dev. They are kept
@@ -47,7 +51,9 @@ pydantic-settings~=2.14
 
 # Visualization
 matplotlib>=3.7.0
-mplfinance>=0.12.0
+# mplfinance has never shipped a final release on PyPI (only 0.12.x betas).
+# Naming the beta lets pip take a pre-release for this package only.
+mplfinance>=0.12.10b0
 plotly>=5.17.0
 Pillow>=10.0.0
 

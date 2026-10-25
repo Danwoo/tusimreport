@@ -98,10 +98,13 @@ main.py    Streamlit entry point
 - pykrx ≥ 1.2.9 logs in to data.krx.co.kr with `KRX_ID` / `KRX_PW` read
   straight from `os.environ` (not `config.settings`); without them it
   prints a login-failure line on import.
-- `requirements.lock` was compiled with `--pre` and pins pre-releases
-  (pydantic 2.14.0a1); with it, importing `langchain_openai` after the
-  agent modules raises `TypeError`. CI, Docker and the SessionStart hook
-  install `requirements.txt` instead.
+- Never compile the lock with `--pre`: it applies to every package. It
+  once pinned pydantic 2.14.0a1, which made `import langchain_openai`
+  raise TypeError once `langgraph.prebuilt` was loaded — every
+  OpenAI-provider run — while all unit tests passed. A package that only
+  ships pre-releases (mplfinance) names one in its `requirements.in`
+  specifier. CI installs `requirements*.lock`; `tests/test_smoke.py`
+  fails on unexpected pre-release pins.
 - ruff ≥ 0.17 also formats Python code blocks inside Markdown, so a doc
   edit can fail `ruff format --check`.
 - OpenDART `reprt_code`: 11011 is the annual report (사업보고서), 11014
@@ -144,12 +147,14 @@ runs for `main` and PRs to `main`).
 ## Common commands
 
 ```
-make install     # pip install -r requirements.txt -r requirements-dev.txt
+make install     # pip install -r requirements.lock -r requirements-dev.lock (= CI)
 make lint        # ruff check
 make format      # ruff format + ruff check --fix
 make test        # pytest with --cov-fail-under (CI gate)
 make cov         # pytest with line-level missing report
-make lock        # regenerate requirements.lock (uses --pre — see Gotchas)
+make lock        # regenerate requirements.lock (no --pre; keeps existing pins)
+make lock-all    # requirements.lock, then requirements-dev.lock (constrained by it)
+                 #   add PIP_COMPILE_ARGS=--upgrade to move pins forward
 make docker      # docker compose up --build
 make run         # streamlit run main.py (local)
 ```

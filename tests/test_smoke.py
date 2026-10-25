@@ -49,6 +49,28 @@ class TestImports:
         assert korean_esg_analysis_agent is not None
         assert korean_community_agent is not None
 
+    def test_import_llm_providers_after_agents(self):
+        """에이전트 import 후 LLM provider 모듈 import (build_llm()의 실제 순서).
+
+        build_llm() imports langchain_openai / langchain_google_genai lazily,
+        after the agent modules have pulled in langgraph.prebuilt. With pydantic
+        2.14.0a1 in requirements.lock that order raised TypeError at import
+        time while every other test passed (they patch build_llm). Runs in a
+        fresh interpreter so the result does not depend on what earlier tests
+        already imported.
+        """
+        import subprocess
+
+        code = "import agents.korean_context_agent; import langchain_openai; import langchain_google_genai"
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=Path(__file__).parent.parent,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
+
     def test_import_core(self):
         """코어 모듈 import"""
         from core import (
@@ -265,6 +287,28 @@ class TestRequirements:
         dev_packages = ["pytest", "ruff", "mypy"]
         for pkg in dev_packages:
             assert pkg in dev_req, f"{pkg}가 requirements-dev.txt에 없습니다"
+
+    def test_lockfiles_pin_no_unexpected_prereleases(self):
+        """lock 파일에 의도하지 않은 alpha/beta/rc/dev 버전이 없는지.
+
+        `make lock` used to pass --pre, which pinned pre-releases for every
+        package (pydantic 2.14.0a1, matplotlib rc, altair dev, ...). Only a
+        package with no final release on PyPI may be pinned to one, and
+        requirements.in must name the pre-release in its specifier.
+        """
+        from packaging.version import Version
+
+        allowed = {"mplfinance"}
+        project_root = Path(__file__).parent.parent
+        offenders = []
+        for lock_name in ("requirements.lock", "requirements-dev.lock"):
+            for line in (project_root / lock_name).read_text().splitlines():
+                name, sep, version = line.partition("==")
+                if not sep or line.startswith(("#", " ")):
+                    continue
+                if Version(version).is_prerelease and name not in allowed:
+                    offenders.append(f"{lock_name}: {line}")
+        assert not offenders, "pre-release 버전이 pin됨 (--pre 재도입 여부 확인): " + ", ".join(offenders)
 
 
 if __name__ == "__main__":

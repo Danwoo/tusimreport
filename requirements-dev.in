@@ -5,8 +5,14 @@
 #   pip install -r requirements-dev.txt
 # (or pip install -r requirements.txt -r requirements-dev.txt)
 #
-# Regenerate the pinned dev lockfile with:
-#   pip-compile --resolver=backtracking requirements-dev.in -o requirements-dev.txt
+# Regenerate the pinned dev lockfile (requirements-dev.lock) with:
+#   make lock-dev
+#
+# The -c line keeps transitive deps shared with the runtime lock (requests,
+# urllib3, packaging, ...) at the same pins, so
+# `pip install -r requirements.lock -r requirements-dev.lock` never conflicts.
+# Regenerate requirements.lock first.
+-c requirements.lock
 
 # Lint / format
 ruff>=0.15.0

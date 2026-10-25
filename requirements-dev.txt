@@ -1,5 +1,5 @@
-# Dev / CI tooling. Regenerate with:
-#   pip-compile --resolver=backtracking requirements-dev.in -o requirements-dev.txt
+# Dev tooling with loose pins, mirrors requirements-dev.in by hand.
+# The pinned dev lockfile is requirements-dev.lock (`make lock-dev`).
 
 ruff>=0.15.0
 mypy>=1.19.0
