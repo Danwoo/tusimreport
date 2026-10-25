@@ -15,12 +15,36 @@ Thread-safety 가정:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import threading
+from typing import TYPE_CHECKING, Any
 
-from config.settings import get_llm_model
+from config.settings import get_llm_model, settings
 
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.rate_limiters import InMemoryRateLimiter
+
+_rate_limiter: InMemoryRateLimiter | None = None
+_rate_limiter_rpm: float | None = None
+_rate_limiter_lock = threading.Lock()
+
+
+def _shared_rate_limiter() -> InMemoryRateLimiter | None:
+    """LLM_MAX_REQUESTS_PER_MINUTE가 있으면 모든 build_llm 인스턴스가 나눠 쓰는 limiter.
+
+    에이전트마다 따로 두면 병렬 7개가 한도를 7배로 넘기므로 프로세스에 하나만 둔다.
+    """
+    global _rate_limiter, _rate_limiter_rpm
+    rpm = settings.llm_max_requests_per_minute
+    if not rpm:
+        return None
+    with _rate_limiter_lock:
+        if _rate_limiter is None or _rate_limiter_rpm != rpm:
+            from langchain_core.rate_limiters import InMemoryRateLimiter
+
+            _rate_limiter = InMemoryRateLimiter(requests_per_second=rpm / 60, check_every_n_seconds=0.1)
+            _rate_limiter_rpm = rpm
+        return _rate_limiter
 
 
 def build_llm(temperature: float = 0.0, raise_on_missing: bool = True) -> BaseChatModel | None:
@@ -42,6 +66,11 @@ def build_llm(temperature: float = 0.0, raise_on_missing: bool = True) -> BaseCh
     if llm_config is None:
         return None
 
+    extra: dict[str, Any] = {}
+    rate_limiter = _shared_rate_limiter()
+    if rate_limiter is not None:
+        extra["rate_limiter"] = rate_limiter
+
     if llm_config.provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -49,6 +78,7 @@ def build_llm(temperature: float = 0.0, raise_on_missing: bool = True) -> BaseCh
             model=llm_config.model_name,
             temperature=temperature,
             google_api_key=llm_config.api_key,
+            **extra,
         )
 
     from langchain_openai import ChatOpenAI
@@ -59,4 +89,5 @@ def build_llm(temperature: float = 0.0, raise_on_missing: bool = True) -> BaseCh
         temperature=temperature,
         api_key=SecretStr(llm_config.api_key),
         base_url=llm_config.base_url,
+        **extra,
     )
