@@ -40,6 +40,8 @@ PAGE_CSS = """
     .status-waiting { background: #f1f5f9; color: #64748b; }
     .status-running { background: #fef3c7; color: #92400e; animation: pulse 2s infinite; }
     .status-completed { background: #dcfce7; color: #166534; }
+    .status-no_data { background: #ffedd5; color: #9a3412; }
+    .status-failed { background: #fee2e2; color: #991b1b; }
     .result-content { line-height: 1.5; color: #374151; font-size: 0.9rem; white-space: pre-wrap; }
     .final-report { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;
                     padding: 1.5rem; border-radius: 8px; margin: 1.5rem 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }

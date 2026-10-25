@@ -13,6 +13,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import ToolMessage
 
 from core.progressive_supervisor import ProgressiveAnalysisEngine
 from core.signals import AgentSignal
@@ -132,7 +133,8 @@ class TestProgressiveStreamMixedExecution:
             agent = MagicMock()
             resp = MagicMock()
             resp.content = "분석 결과 " * 50 + signal.value
-            agent.invoke.return_value = {"messages": [resp]}
+            tool_result = ToolMessage(content='{"price": 70000}', tool_call_id="call-1")
+            agent.invoke.return_value = {"messages": [tool_result, resp]}
             return agent
 
         from core.signals import AGENT_TO_SIGNAL
@@ -163,3 +165,73 @@ class TestProgressiveStreamMixedExecution:
         # 최종 보고서가 stub 응답인지
         final = next(e for e in events if e["type"] == "final_report")
         assert "BUY 75%" in final["report"]
+
+
+class TestPartialFailurePolicy:
+    """근거 데이터가 있는 에이전트가 과반일 때만 보고서를 만들고, 빠진 영역을 남긴다."""
+
+    @staticmethod
+    def _engine(monkeypatch: pytest.MonkeyPatch, grounded: set[str], failing: set[str]) -> tuple[Any, list]:
+        from core.signals import AGENT_TO_SIGNAL
+
+        def make_agent(name: str) -> MagicMock:
+            agent = MagicMock()
+            if name in failing:
+                agent.invoke.side_effect = RuntimeError(f"{name} 429")
+                return agent
+            resp = MagicMock()
+            resp.content = f"{name} 분석 " * 40 + AGENT_TO_SIGNAL[name].value
+            payload = '{"price": 70000}' if name in grounded else '{"error": "키 없음"}'
+            agent.invoke.return_value = {"messages": [ToolMessage(content=payload, tool_call_id="c"), resp]}
+            return agent
+
+        fakes = {name: make_agent(name) for name in AGENT_TO_SIGNAL}
+        report_calls: list = []
+
+        def fake_report(_llm: Any, analyses: dict, *_a: Any, **kw: Any) -> str:
+            report_calls.append((analyses, kw))
+            return "# 종합 보고서"
+
+        monkeypatch.setattr("core.progressive_supervisor.get_supervisor_llm", lambda: MagicMock())
+        monkeypatch.setattr("core.progressive_supervisor.create_all_agents", lambda: fakes)
+        monkeypatch.setattr("core.progressive_supervisor.generate_comprehensive_report", fake_report)
+        return ProgressiveAnalysisEngine(), report_calls
+
+    def test_report_uses_only_grounded_agents_and_lists_exclusions(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        grounded = {
+            "context_expert",
+            "financial_expert",
+            "advanced_technical_expert",
+            "institutional_trading_expert",
+            "comparative_expert",
+        }
+        engine, report_calls = self._engine(monkeypatch, grounded, failing={"community_expert"})
+
+        events = list(engine.stream_progressive_analysis("005930", "삼성전자"))
+
+        final = next(e for e in events if e["type"] == "final_report")
+        analyses, kwargs = report_calls[0]
+        assert set(analyses) == grounded
+        assert kwargs["excluded"]["community_expert"].startswith("실행 실패")
+        assert "근거 데이터 없음" in kwargs["excluded"]["esg_expert"]
+        assert final["grounded_agents"] == [n for n in engine.execution_order if n in grounded]
+        assert final["agent_statuses"]["community_expert"]["status"] == "error"
+        errors = [e for e in events if e["type"] == "agent_error"]
+        assert [e["agent_name"] for e in errors] == ["community_expert"]
+
+    def test_too_few_grounded_agents_yields_incomplete(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine, report_calls = self._engine(
+            monkeypatch, grounded={"advanced_technical_expert", "global_market_expert"}, failing=set()
+        )
+
+        events = list(engine.stream_progressive_analysis("005930", "삼성전자"))
+
+        assert report_calls == []
+        incomplete = next(e for e in events if e["type"] == "incomplete")
+        assert "2/9" in incomplete["message"]
+        assert set(incomplete["excluded"]) == set(engine.execution_order) - {
+            "advanced_technical_expert",
+            "global_market_expert",
+        }

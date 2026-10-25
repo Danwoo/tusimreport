@@ -40,3 +40,6 @@ AGENT_TO_SIGNAL: dict[str, AgentSignal] = {
 }
 
 ALL_AGENT_SIGNALS: list[str] = [s.value for s in AgentSignal if s != AgentSignal.SUPERVISOR]
+
+# 근거 데이터를 가진 에이전트가 과반일 때만 종합 보고서·투자 의견을 만든다.
+MIN_AGENTS_FOR_REPORT: int = len(AGENT_TO_SIGNAL) // 2 + 1

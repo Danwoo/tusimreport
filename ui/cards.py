@@ -62,7 +62,13 @@ def get_agent_config(agent_name: str) -> dict[str, str]:
     return {"icon": "🤖", "name": agent_name, "color": "#6b7280", "bg": "#f9fafb", "desc": "AI 분석"}
 
 
-_STATUS_TEXT = {"waiting": "대기 중", "running": "분석 중", "completed": "완료"}
+_STATUS_TEXT = {
+    "waiting": "대기 중",
+    "running": "분석 중",
+    "completed": "완료",
+    "no_data": "근거 없음",
+    "failed": "실패",
+}
 
 
 def _render_news_sources(agent_name: str, sources: Iterable[dict] | None) -> str:

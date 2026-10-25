@@ -7,7 +7,7 @@ from agents.korean_investment_opinion_agent import generate_investment_opinion
 from config.settings import check_minimum_requirements, get_api_key_status, resolve_llm_config, settings
 from core.chat_session import create_chat_session
 from core.korean_supervisor_langgraph import stream_korean_stock_analysis
-from core.signals import AGENT_TO_SIGNAL
+from core.signals import AGENT_TO_SIGNAL, MIN_AGENTS_FOR_REPORT
 from data.chart_generator import create_stock_chart
 from data.naver_api_client import fetch_naver_news_for_display
 from ui.cards import create_investment_opinion_card, create_result_card, escape_html, get_agent_config
@@ -36,12 +36,9 @@ st.markdown(PAGE_CSS, unsafe_allow_html=True)
 
 AGENT_NAMES = list(AGENT_TO_SIGNAL.keys())
 
-# 분석 게이트 임계값 (AGENT_NAMES 길이에 비례).
-# - MIN_AGENTS_FOR_OPINION: 투자 의견/최종 보고서/채팅을 활성화하는 최소 완료 수.
-#   에이전트 수가 증가해도 자동으로 따라간다 (50% 이상 완료 시 부분 결과 노출).
-# - WARN_BELOW_AGENTS: "일부 미완료" 경고를 띄울 컷오프 (80% 미만).
-# 이전엔 5/7로 하드코딩되어 있어 9개로 늘었을 때 silently drift됐다.
-MIN_AGENTS_FOR_OPINION = max(1, len(AGENT_NAMES) // 2)
+# 분석 게이트 임계값. 투자 의견·채팅은 엔진의 보고서 기준과 같은 수의 근거 있는
+# 분석이 있을 때만 연다. WARN_BELOW_AGENTS는 "일부 미완료" 경고 컷오프(80% 미만).
+MIN_AGENTS_FOR_OPINION = MIN_AGENTS_FOR_REPORT
 WARN_BELOW_AGENTS = max(1, int(len(AGENT_NAMES) * 0.8))
 
 
@@ -216,6 +213,35 @@ def _consume_analysis_stream(
         )
 
 
+def _mark_agent(
+    agent_name: str,
+    status: str,
+    content: str,
+    symbol: str,
+    agent_states: dict,
+    containers: dict,
+) -> None:
+    """엔진이 이름을 명시한 에이전트의 카드를 갱신한다."""
+    agent_states[agent_name]["status"] = status
+    agent_states[agent_name]["content"] = content
+    card_sources = None
+    if status == "completed" and agent_name == "sentiment_expert":
+        card_sources = st.session_state.get(f"news_sources_{symbol}", [])
+    elif status == "completed" and agent_name == "community_expert":
+        card_sources = st.session_state.get(f"community_sources_{symbol}", [])
+    containers[agent_name].markdown(
+        create_result_card(agent_name, get_agent_config(agent_name), status, content, card_sources),
+        unsafe_allow_html=True,
+    )
+
+
+def _show_exclusions(excluded: dict) -> None:
+    if not excluded:
+        return
+    lines = "\n".join(f"- {get_agent_config(name)['name']}: {reason}" for name, reason in excluded.items())
+    st.warning(f"다음 영역은 종합 보고서에 반영되지 않았습니다.\n\n{lines}")
+
+
 def _consume_inner(
     symbol: str,
     company_name: str,
@@ -243,8 +269,46 @@ def _consume_inner(
             completed,
         )
 
+        agent_error = supervisor_data.get("agent_error")
+        if agent_error and agent_error.get("agent") in agent_states:
+            _mark_agent(
+                agent_error["agent"],
+                "failed",
+                f"분석 실패: {agent_error.get('error', '')}",
+                symbol,
+                agent_states,
+                containers,
+            )
+            render_progress(completed)
+            continue
+
+        if supervisor_data.get("incomplete"):
+            st.warning(f"종합 보고서를 만들지 않았습니다: {supervisor_data.get('current_stage', '')}")
+            _show_exclusions(supervisor_data.get("excluded", {}))
+            continue
+
         if supervisor_data.get("final_report_generated"):
             final_report = _extract_final_report(messages, supervisor_data.get("progressive_mode", False))
+            _show_exclusions(supervisor_data.get("excluded", {}))
+            continue
+
+        completed_agent = supervisor_data.get("completed_agent")
+        if completed_agent in agent_states and agent_states[completed_agent]["status"] != "completed":
+            content = _extract_message_content(messages[0]) if messages else ""
+            signal = AGENT_TO_SIGNAL[completed_agent].value
+            grounded = supervisor_data.get("agent_status", {}).get("data_status", "none") != "none"
+            _mark_agent(
+                completed_agent,
+                "completed" if grounded else "no_data",
+                content.replace(signal, "").strip(),
+                symbol,
+                agent_states,
+                containers,
+            )
+            if grounded:
+                completed += 1
+            render_progress(completed)
+            logger.info(f"===== {completed_agent} 분석 완료 (근거 데이터: {grounded}) =====")
             continue
 
         completed = _process_completion_signals(
