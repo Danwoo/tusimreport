@@ -28,7 +28,7 @@ Key → agents that read it (from the imports in `agents/`; details in `docs/API
 - `DART_API_KEY`: `financial_expert`, `esg_expert`.
 - `ECOS_API_KEY`: `context_expert`, `financial_expert`.
 - `KRX_ID` + `KRX_PW` (pykrx login): `context_expert` (index OHLCV), `financial_expert` (fundamentals), `institutional_trading_expert` (investor flows), `comparative_expert` (fundamentals, market cap).
-- `NAVER_CLIENT_ID` + `NAVER_CLIENT_SECRET`, `TAVILY_API_KEY`: `sentiment_expert`.
+- `NAVER_CLIENT_ID` + `NAVER_CLIENT_SECRET`, `TAVILY_API_KEY`: `sentiment_expert`. Do not ask the user for a Naver key: new keys come only from NAVER API HUB (different endpoint and headers than the current client) and the 2026-09-07 terms forbid feeding search results to AI (`docs/API_KEYS.md` 4.4).
 - `ALPHA_VANTAGE_API_KEY`: `global_market_expert` (also uses CoinGecko and CNN Fear & Greed).
 - No key: FinanceDataReader (`advanced_technical_expert` and others), Paxnet via Selenium/Chrome (`community_expert`).
 

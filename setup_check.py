@@ -117,7 +117,7 @@ def check_api_keys():
         "llm": "LLM (필수)",
         "dart": "DART (금융감독원, 필수)",
         "ecos": "ECOS (한국은행, 필수)",
-        "naver": "Naver 뉴스 검색 (권장)",
+        "naver": "Naver 뉴스 검색 (발급 보류 — docs/API_KEYS.md 4.4)",
         "tavily": "Tavily (선택)",
         "alpha_vantage": "Alpha Vantage (선택)",
     }

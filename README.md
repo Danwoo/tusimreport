@@ -92,7 +92,7 @@ tusimreport/
 | PyKRX | KRX 정보데이터시스템 로그인 (`KRX_ID`·`KRX_PW`) | 한국거래소 데이터 |
 | BOK ECOS | ✅ | 거시경제 지표 |
 | DART | ✅ | 기업 공시/재무 |
-| Naver News | ✅ | 한국 뉴스 |
+| Naver News | 발급 보류 (약관 — [docs/API_KEYS.md](./docs/API_KEYS.md) 4.4) | 한국 뉴스 |
 | Paxnet (Selenium) | ❌ | 커뮤니티 토론 |
 
 ---
@@ -188,7 +188,7 @@ python setup_check.py
 
 권장 (더 나은 분석):
 4. **KRX 정보데이터시스템 계정** (pykrx 로그인): https://data.krx.co.kr
-5. **Naver News**: https://developers.naver.com/products/search/
+5. **Naver News**: 발급 보류. 신규 키는 NAVER API HUB에서만 나오고 2026-09-07 시행 약관이 검색 결과의 AI 입력을 금지한다 (docs/API_KEYS.md 4.4)
 6. **Tavily**: https://tavily.com/ · **Alpha Vantage**: https://www.alphavantage.co/support/#api-key
 
 ### 4️⃣ **실행**
@@ -218,8 +218,6 @@ ECOS_API_KEY=your_ecos_api_key
 # 권장 (더 나은 분석)
 KRX_ID=your_krx_id
 KRX_PW=your_krx_password
-NAVER_CLIENT_ID=your_naver_client_id
-NAVER_CLIENT_SECRET=your_naver_client_secret
 TAVILY_API_KEY=your_tavily_api_key
 ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key
 ```
