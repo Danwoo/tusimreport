@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   lint-type-test:
-    name: Lint, type-check, and test (py${{ matrix.python }})
+    name: Lint, type-check, and test (py${{ matrix.python }}${{ matrix.deps == 'loose' && ', requirements.txt' || '' }})
     runs-on: ubuntu-latest
     timeout-minutes: 12
     strategy:
@@ -22,6 +22,17 @@ jobs:
         # 3.11 (현재 명시 타깃), 3.12 (StrEnum/from __future__ 회귀 방지).
         # 3.13은 아직 일부 라이브러리(pykrx/FinanceDataReader) 미검증이라 보류.
         python: ["3.11", "3.12"]
+        # lock: exact pins from requirements*.lock, the reproducible install.
+        # Testing anything else let a lock full of pre-releases rot unnoticed.
+        deps: ["lock"]
+        include:
+          # loose: runtime deps from requirements.txt resolved fresh, the way
+          # the Dockerfile builds the image. Only ruff and mypy are pinned,
+          # from the dev lock: a floating ruff (0.17 also formats Markdown
+          # code blocks) turned CI red on main in 2026-10 with no code change.
+          # Drop this leg once the image installs requirements.lock.
+          - python: "3.11"
+            deps: loose
 
     steps:
       - name: Check out repository
@@ -32,11 +43,21 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
+          cache-dependency-path: |
+            requirements*.lock
+            requirements*.txt
 
-      - name: Install dependencies
+      - name: Install dependencies (${{ matrix.deps }})
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          if [ "${{ matrix.deps }}" = "lock" ]; then
+            pip install -r requirements.lock -r requirements-dev.lock
+          else
+            # The whole dev lock would also pin shared runtime deps
+            # (requests, urllib3, ...) that the image resolves fresh.
+            pip install -r requirements.txt -r requirements-dev.txt \
+              $(grep -E '^(ruff|mypy)==' requirements-dev.lock)
+          fi
 
       - name: Ruff (lint)
         run: ruff check .

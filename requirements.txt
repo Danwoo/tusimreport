@@ -1,11 +1,12 @@
-# Pinned dependencies — this is the lockfile.
+# Direct dependencies with loose pins — NOT the lockfile.
 #
-# Generated from requirements.in. Do NOT edit by hand. To change deps:
-#   1. edit requirements.in
-#   2. run: pip-compile --resolver=backtracking requirements.in -o requirements.txt
+# Mirrors requirements.in by hand; requirements.lock (`make lock`) is the
+# fully-pinned transitive lockfile that CI and `make install` use. This file
+# is used by the Dockerfile. To change deps:
+#   1. edit requirements.in and this file
+#   2. run: make lock-all
 #
-# Until requirements.lock (transitive pinning via pip-compile) is checked in,
-# this file pins direct deps with ~= (compatible release). The major-version
+# Direct deps are pinned with ~= (compatible release). The major-version
 # bumps in the LangChain ecosystem make exact pinning the safe default.
 
 # Core
@@ -42,7 +43,7 @@ pydantic-settings~=2.14
 
 # Visualization
 matplotlib>=3.7.0
-mplfinance>=0.12.0
+mplfinance>=0.12.10b0  # pre-release only on PyPI; see requirements.in
 plotly>=5.17.0
 Pillow>=10.0.0
 
