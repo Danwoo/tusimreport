@@ -10,9 +10,7 @@ Thread-safety 가정:
   pool에 대해 thread-safe하다고 공식 문서가 보증한다.
 - 따라서 같은 인스턴스를 여러 스레드가 동시에 invoke()하는 것은 안전하다고
   본다. supervisor의 ThreadPoolExecutor는 이 가정에 의존한다.
-- 위 가정이 깨지면 회귀 — `tests/test_llm_factory_concurrent.py`가
-  build_llm() 인스턴스를 8개 스레드가 동시에 두드리는 부하 테스트로
-  최소한의 안전망을 제공.
+- 이 가정을 검증하는 동시성 부하 테스트는 아직 없다.
 """
 
 from __future__ import annotations
@@ -28,6 +26,8 @@ if TYPE_CHECKING:
 def build_llm(temperature: float = 0.0, raise_on_missing: bool = True) -> BaseChatModel | None:
     """settings에 맞춰 ChatOpenAI 또는 ChatGoogleGenerativeAI 인스턴스를 반환한다.
 
+    OpenAI 호환 엔드포인트(LLM_BASE_URL)도 ChatOpenAI에 base_url만 바꿔 연결한다.
+
     Args:
         temperature: 샘플링 temperature.
         raise_on_missing: API 키 누락 시 ValueError를 던질지 여부.
@@ -42,17 +42,21 @@ def build_llm(temperature: float = 0.0, raise_on_missing: bool = True) -> BaseCh
     if llm_config is None:
         return None
 
-    provider, model_name, api_key = llm_config
-
-    if provider == "gemini":
+    if llm_config.provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         return ChatGoogleGenerativeAI(
-            model=model_name,
+            model=llm_config.model_name,
             temperature=temperature,
-            google_api_key=api_key,
+            google_api_key=llm_config.api_key,
         )
 
     from langchain_openai import ChatOpenAI
+    from pydantic import SecretStr
 
-    return ChatOpenAI(model=model_name, temperature=temperature, api_key=api_key)
+    return ChatOpenAI(
+        model=llm_config.model_name,
+        temperature=temperature,
+        api_key=SecretStr(llm_config.api_key),
+        base_url=llm_config.base_url,
+    )

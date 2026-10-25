@@ -34,7 +34,7 @@ LangGraph Supervisor 아키텍처 기반의 AI 멀티 에이전트 시스템. **
 ## 🐳 Docker로 실행
 
 ```bash
-cp .env.example .env   # API 키 채우기 (Gemini 또는 OpenAI 필수)
+cp .env.example .env   # API 키 채우기 (LLM 설정 필수 — docs/API_KEYS.md)
 docker compose up --build
 # → http://localhost:8501
 ```
@@ -89,7 +89,7 @@ tusimreport/
 | 데이터 소스 | API 키 필요 | 용도 |
 |------------|-----------|------|
 | FinanceDataReader | ❌ | 주가 데이터 |
-| PyKRX | ❌ | 한국거래소 데이터 |
+| PyKRX | KRX 정보데이터시스템 로그인 (`KRX_ID`·`KRX_PW`) | 한국거래소 데이터 |
 | BOK ECOS | ✅ | 거시경제 지표 |
 | DART | ✅ | 기업 공시/재무 |
 | Naver News | ✅ | 한국 뉴스 |
@@ -179,14 +179,17 @@ python setup_check.py
 
 ### 3️⃣ **API 키 발급** (필수)
 
+모든 키는 무료로 발급할 수 있습니다. 발급 절차·무료 한도·환경변수 이름은 **[docs/API_KEYS.md](./docs/API_KEYS.md)** 에 정리했습니다.
+
 최소 요구사항 (3개):
-1. **Google Gemini** 또는 **OpenAI**: https://aistudio.google.com/app/apikey
+1. **LLM**: OpenAI 호환 무료 엔드포인트(`LLM_BASE_URL`·`LLM_MODEL`·`LLM_API_KEY`), Google Gemini, OpenAI 중 하나. tool calling을 지원해야 하며 `python setup_check.py --llm-probe`로 확인합니다.
 2. **DART**: https://opendart.fss.or.kr/
 3. **ECOS**: https://ecos.bok.or.kr/
 
 권장 (더 나은 분석):
-4. **Naver News**: https://developers.naver.com/products/search/
-5. **Tavily**: https://tavily.com/
+4. **KRX 정보데이터시스템 계정** (pykrx 로그인): https://data.krx.co.kr
+5. **Naver News**: https://developers.naver.com/products/search/
+6. **Tavily**: https://tavily.com/ · **Alpha Vantage**: https://www.alphavantage.co/support/#api-key
 
 ### 4️⃣ **실행**
 
@@ -203,22 +206,25 @@ streamlit run main.py
 ### .env 파일 설정
 
 ```env
-# 필수 (최소 3개)
-GOOGLE_API_KEY=your_google_api_key
+# 필수 — LLM (OpenAI 호환 엔드포인트 예시)
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_MODEL=<엔드포인트가 제공하는 모델 이름>
+LLM_API_KEY=<발급받은 키>
+
+# 필수 — 데이터
 DART_API_KEY=your_dart_api_key
 ECOS_API_KEY=your_ecos_api_key
 
 # 권장 (더 나은 분석)
+KRX_ID=your_krx_id
+KRX_PW=your_krx_password
 NAVER_CLIENT_ID=your_naver_client_id
 NAVER_CLIENT_SECRET=your_naver_client_secret
 TAVILY_API_KEY=your_tavily_api_key
-
-# LLM 설정
-USE_GEMINI=true
-GEMINI_MODEL=gemini-2.0-flash-lite
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key
 ```
 
-자세한 설정은 `.env.example` 파일 참고
+자세한 설정은 `.env.example`과 [docs/API_KEYS.md](./docs/API_KEYS.md) 참고. Claude Code 클라우드 세션에서는 `.env` 대신 환경 설정의 secret으로 넣습니다.
 
 ---
 
@@ -240,6 +246,7 @@ python setup_check.py
 ## 📚 문서
 
 - **[CLAUDE.md](./CLAUDE.md)**: AI Assistant 개발 가이드 (상세)
+- **[docs/API_KEYS.md](./docs/API_KEYS.md)**: 무료 API 키 발급 안내
 - **[.env.example](./.env.example)**: 환경 설정 예제
 
 ---
