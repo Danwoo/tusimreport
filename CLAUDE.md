@@ -84,6 +84,32 @@ main.py    Streamlit entry point
 - PyKRX returns Korean-keyed DataFrame columns (`'시가총액'`, `'PER'`,
   `'순매수'`, `'종가'`). Validators in `data/external_schemas.py`
   translate to English fields; do not bypass.
+- pykrx ≥ 1.2.9 logs in to data.krx.co.kr with `KRX_ID` / `KRX_PW` read
+  straight from `os.environ` (not `config.settings`); without them it
+  prints a login-failure line on import.
+- `requirements.lock` was compiled with `--pre` and pins pre-releases
+  (pydantic 2.14.0a1); with it, importing `langchain_openai` after the
+  agent modules raises `TypeError`. CI, Docker and the SessionStart hook
+  install `requirements.txt` instead.
+- ruff ≥ 0.17 also formats Python code blocks inside Markdown, so a doc
+  edit can fail `ruff format --check`.
+
+## LLM provider
+
+`config.settings.get_llm_model()` picks, in order: `LLM_BASE_URL` +
+`LLM_MODEL` + `LLM_API_KEY` (any OpenAI-compatible endpoint, built as
+`ChatOpenAI(base_url=...)`), then Gemini / OpenAI keys. An incomplete
+`LLM_BASE_URL` setup returns `None` instead of falling back to a paid
+provider. Every agent is a `create_react_agent`, so the model must
+support tool calling — `python setup_check.py --llm-probe` checks that
+with one request. Key issuance: `docs/API_KEYS.md`.
+
+## Claude Code cloud sessions
+
+`.claude/hooks/session-start.sh` installs `.venv` from `requirements.txt`
++ `requirements-dev.txt` and puts it on `PATH`. Project skills:
+`env-check` (key / LLM status) and `ci-check` (local CI gate — CI only
+runs for `main` and PRs to `main`).
 
 ## Common commands
 
@@ -93,7 +119,7 @@ make lint        # ruff check
 make format      # ruff format + ruff check --fix
 make test        # pytest with --cov-fail-under (CI gate)
 make cov         # pytest with line-level missing report
-make lock        # regenerate requirements.lock (uses --pre)
+make lock        # regenerate requirements.lock (uses --pre — see Gotchas)
 make docker      # docker compose up --build
 make run         # streamlit run main.py (local)
 ```
