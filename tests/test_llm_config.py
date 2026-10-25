@@ -7,7 +7,14 @@ from typing import Any
 import pytest
 
 from config import llm_factory
-from config.settings import LLMConfig, check_minimum_requirements, get_api_key_status, get_llm_model, settings
+from config.settings import (
+    LLMConfig,
+    check_minimum_requirements,
+    get_api_key_status,
+    get_llm_model,
+    resolve_llm_config,
+    settings,
+)
 
 
 @pytest.fixture
@@ -71,6 +78,23 @@ def test_build_llm_passes_base_url_to_chat_openai(clean_llm_settings: pytest.Mon
         "temperature": 0.2,
         "base_url": "http://localhost:8080/v1",
     }
+
+
+def test_status_matches_agents_when_use_gemini_has_no_google_key(
+    clean_llm_settings: pytest.MonkeyPatch,
+) -> None:
+    """USE_GEMINI=true + OpenAI 키만: 에이전트의 build_llm()은 실패하므로 상태도 실패여야 한다."""
+    clean_llm_settings.setattr(settings, "use_gemini", True)
+    clean_llm_settings.setattr(settings, "google_api_key", "your_google_api_key_here")
+    clean_llm_settings.setattr(settings, "openai_api_key", "sk-test")
+
+    with pytest.raises(ValueError):
+        llm_factory.build_llm(temperature=0.1)
+    config, problem = resolve_llm_config()
+    assert config is None
+    assert problem is not None and "Google API" in problem
+    assert check_minimum_requirements()[0] is False
+    assert get_api_key_status()["llm"].startswith("❌")
 
 
 def test_openai_path_keeps_default_base_url(clean_llm_settings: pytest.MonkeyPatch) -> None:

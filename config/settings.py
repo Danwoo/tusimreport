@@ -99,8 +99,6 @@ def validate_api_keys() -> dict[str, bool]:
         각 API 키의 유효성 여부를 담은 딕셔너리
     """
     return {
-        "openai_compatible": _is_valid_api_key(settings.llm_base_url)
-        and not _missing_openai_compatible_fields(),
         "openai": _is_valid_api_key(settings.openai_api_key),
         "google": _is_valid_api_key(settings.google_api_key),
         "dart": _is_valid_api_key(settings.dart_api_key),
@@ -120,12 +118,11 @@ def get_api_key_status() -> dict[str, str]:
         각 API 키의 상태 메시지
     """
     validation = validate_api_keys()
-    if _is_valid_api_key(settings.llm_base_url) and not validation["openai_compatible"]:
-        llm_status = f"❌ LLM_BASE_URL 설정됨, {'·'.join(_missing_openai_compatible_fields())} 필요"
-    elif validation["openai_compatible"] or validation["openai"] or validation["google"]:
-        llm_status = "✅ 설정됨"
+    llm_config, llm_problem = resolve_llm_config()
+    if llm_config is not None:
+        llm_status = f"✅ 설정됨 ({llm_config.provider})"
     else:
-        llm_status = "❌ 미설정 (필수)"
+        llm_status = (llm_problem or "❌ 미설정 (필수)").splitlines()[0]
     return {
         "llm": llm_status,
         "dart": "✅ 설정됨" if validation["dart"] else "⚠️ 미설정 (재무 분석 제한)",
@@ -205,6 +202,19 @@ def get_llm_model(raise_on_missing: bool = False) -> LLMConfig | None:
     return None
 
 
+def resolve_llm_config() -> tuple[LLMConfig | None, str | None]:
+    """에이전트의 build_llm()이 고르는 설정과, 고르지 못하면 그 이유.
+
+    get_llm_model(raise_on_missing=False)는 USE_GEMINI=true인데 Google 키가 없을 때
+    OpenAI로 넘어가지만, 에이전트가 쓰는 raise_on_missing=True 경로는 예외를 낸다.
+    상태 표시와 점검 도구는 에이전트와 같은 판정을 보여줘야 하므로 이 함수를 쓴다.
+    """
+    try:
+        return get_llm_model(raise_on_missing=True), None
+    except ValueError as e:
+        return None, str(e)
+
+
 def check_minimum_requirements() -> tuple[bool, list[str]]:
     """
     최소 요구사항 확인
@@ -216,9 +226,10 @@ def check_minimum_requirements() -> tuple[bool, list[str]]:
     validation = validate_api_keys()
 
     # LLM은 필수
-    has_llm = get_llm_model(raise_on_missing=False) is not None
+    llm_config, llm_problem = resolve_llm_config()
+    has_llm = llm_config is not None
     if not has_llm:
-        warnings.append("❌ LLM 설정 필요 (LLM_BASE_URL·LLM_MODEL·LLM_API_KEY, Gemini 또는 OpenAI)")
+        warnings.append((llm_problem or "❌ LLM 설정 필요").splitlines()[0])
 
     # 데이터 API는 경고만
     if not validation["dart"]:

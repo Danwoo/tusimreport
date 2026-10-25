@@ -93,13 +93,26 @@ def check_env_file():
     return True
 
 
+def _endpoint_host(base_url):
+    """URL에 섞인 user:password를 빼고 host[:port]만 돌려준다."""
+    if not base_url:
+        return "provider 기본값"
+    parsed = urlparse(base_url)
+    return f"{parsed.hostname}:{parsed.port}" if parsed.port else str(parsed.hostname)
+
+
 def check_api_keys():
     """API 키 설정 확인. 키 값은 일부라도 출력하지 않는다."""
     print_section("4. API 키 설정 확인")
 
-    from config.settings import get_api_key_status, get_llm_model
+    try:
+        from config.settings import get_api_key_status, resolve_llm_config
 
-    status = get_api_key_status()
+        status = get_api_key_status()
+        llm_config, llm_problem = resolve_llm_config()
+    except Exception as e:  # 잘못된 .env 값이면 Settings() 생성에서 ValidationError가 난다
+        print(f"❌ 설정을 읽지 못했습니다: {type(e).__name__}: {str(e)[:300]}")
+        return False
     labels = {
         "llm": "LLM (필수)",
         "dart": "DART (금융감독원, 필수)",
@@ -115,12 +128,13 @@ def check_api_keys():
     has_krx = bool(os.getenv("KRX_ID")) and bool(os.getenv("KRX_PW"))
     print(f"  KRX 데이터 포털 로그인 (pykrx): {'✅ 설정됨' if has_krx else '⚠️ 미설정 (KRX_ID·KRX_PW)'}")
 
-    llm_config = get_llm_model(raise_on_missing=False)
     if llm_config is not None:
-        endpoint = urlparse(llm_config.base_url).netloc if llm_config.base_url else "provider 기본값"
         print(
-            f"\n  사용할 LLM: provider={llm_config.provider} model={llm_config.model_name} endpoint={endpoint}"
+            f"\n  사용할 LLM: provider={llm_config.provider} model={llm_config.model_name} "
+            f"endpoint={_endpoint_host(llm_config.base_url)}"
         )
+    elif llm_problem:
+        print(f"\n  에이전트가 LLM을 만들 수 없습니다:\n{llm_problem}")
 
     has_dart = status["dart"].startswith("✅")
     has_ecos = status["ecos"].startswith("✅")
@@ -145,9 +159,10 @@ def probe_llm_tool_calling():
         """종목코드의 현재가를 조회한다."""
         return "0"
 
-    llm = build_llm(temperature=0, raise_on_missing=False)
-    if llm is None:
-        print("❌ LLM 설정이 없어 확인하지 못했습니다")
+    try:
+        llm = build_llm(temperature=0)  # 에이전트와 같은 raise_on_missing=True 경로
+    except Exception as e:
+        print(f"❌ 에이전트가 쓰는 LLM을 만들지 못했습니다: {str(e).splitlines()[0]}")
         return False
 
     started = time.monotonic()
@@ -241,14 +256,20 @@ def run_import_test():
         "core.korean_supervisor_langgraph",
     ]
 
+    # pykrx는 import 시점에 KRX_ID·KRX_PW로 data.krx.co.kr에 로그인하고(같은 계정의 다른
+    # 세션을 끊는다) 로그인 ID를 출력한다. import 확인에는 로그인이 필요 없으므로 잠시 뺀다.
+    krx_credentials = {k: os.environ.pop(k) for k in ("KRX_ID", "KRX_PW") if k in os.environ}
     all_ok = True
-    for module_name in modules_to_test:
-        try:
-            __import__(module_name)
-            print(f"✅ {module_name}")
-        except Exception as e:
-            print(f"❌ {module_name}: {str(e)[:60]}")
-            all_ok = False
+    try:
+        for module_name in modules_to_test:
+            try:
+                __import__(module_name)
+                print(f"✅ {module_name}")
+            except Exception as e:
+                print(f"❌ {module_name}: {str(e)[:60]}")
+                all_ok = False
+    finally:
+        os.environ.update(krx_credentials)
 
     return all_ok
 

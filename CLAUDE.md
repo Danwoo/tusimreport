@@ -100,7 +100,11 @@ main.py    Streamlit entry point
 `LLM_MODEL` + `LLM_API_KEY` (any OpenAI-compatible endpoint, built as
 `ChatOpenAI(base_url=...)`), then Gemini / OpenAI keys. An incomplete
 `LLM_BASE_URL` setup returns `None` instead of falling back to a paid
-provider. Every agent is a `create_react_agent`, so the model must
+provider. `get_llm_model(raise_on_missing=False)` can pick a different
+provider than the agents' `build_llm()` (USE_GEMINI=true without a Google
+key falls through to OpenAI), so anything that reports LLM status —
+sidebar, `check_minimum_requirements()`, `setup_check.py` — goes through
+`resolve_llm_config()`, which uses the agents' path. Every agent is a `create_react_agent`, so the model must
 support tool calling — `python setup_check.py --llm-probe` checks that
 with one request. Key issuance: `docs/API_KEYS.md`.
 

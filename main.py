@@ -4,7 +4,7 @@ from datetime import datetime
 import streamlit as st
 
 from agents.korean_investment_opinion_agent import generate_investment_opinion
-from config.settings import check_minimum_requirements, get_api_key_status, settings
+from config.settings import check_minimum_requirements, get_api_key_status, resolve_llm_config, settings
 from core.chat_session import create_chat_session
 from core.korean_supervisor_langgraph import stream_korean_stock_analysis
 from core.signals import AGENT_TO_SIGNAL
@@ -373,14 +373,17 @@ def main():
             st.write(msg)
 
         st.divider()
-        st.caption("💡 API 키 설정: .env 파일 참고")
+        st.caption("💡 API 키 설정: docs/API_KEYS.md")
 
     # 🔧 Phase 3 개선: API 키 최소 요구사항 확인
     has_llm, warnings = check_minimum_requirements()
 
     if not has_llm:
+        _, llm_problem = resolve_llm_config()
         st.error(
-            "❌ **LLM API 키가 필요합니다**\n\n시스템을 사용하려면 다음 중 하나의 API 키를 설정해주세요:\n- Google Gemini API\n- OpenAI API\n\n.env 파일을 확인하고 API 키를 설정해주세요."
+            "**LLM 설정이 필요합니다**\n\n"
+            + (llm_problem or "").replace("\n", "  \n")
+            + "\n\n설정 안내: docs/API_KEYS.md"
         )
 
     # 입력 섹션

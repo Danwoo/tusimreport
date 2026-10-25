@@ -5,11 +5,11 @@ description: Check which API keys / LLM endpoint this tusimreport environment ha
 
 # Environment check
 
-1. Run the static check (no network, no quota):
+1. Run the static check (no LLM or data API calls):
    ```bash
    .venv/bin/python setup_check.py
    ```
-   Section 4 lists every key as set / missing and which LLM provider, model and endpoint host will be used. It never prints key values — keep it that way; do not echo env vars yourself.
+   Section 4 lists every key as set / missing and the LLM provider, model and endpoint host the agents will get — or the exact reason they cannot build one (it uses the same `raise_on_missing=True` path as `build_llm()`). It never prints key values or URL credentials — keep it that way; do not echo env vars yourself. Its import check hides `KRX_ID`/`KRX_PW` so pykrx does not log in; any other `import pykrx` (the app, the tests) does log in to data.krx.co.kr and ends other sessions of that KRX account.
 
 2. Only if an LLM is configured, confirm it can drive the ReAct agents (sends exactly one chat request with one tool attached, so it uses a little free-tier quota):
    ```bash
