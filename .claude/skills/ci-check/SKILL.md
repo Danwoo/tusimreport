@@ -13,7 +13,7 @@ Run from the repo root. The SessionStart hook installs `.venv` from `requirement
 .venv/bin/mypy --config-file pyproject.toml \
   core/signals.py core/schemas.py core/errors.py config/llm_factory.py \
   ui/cards.py data/base_client.py utils/time.py utils/logging_context.py
-LLM_BASE_URL= LLM_MODEL= LLM_API_KEY= OPENAI_API_KEY= GOOGLE_API_KEY= USE_GEMINI=false \
+LLM_BASE_URL= LLM_MODEL= LLM_API_KEY= LLM_MAX_REQUESTS_PER_MINUTE= OPENAI_API_KEY= GOOGLE_API_KEY= USE_GEMINI=false \
   DART_API_KEY= ECOS_API_KEY= NAVER_CLIENT_ID= NAVER_CLIENT_SECRET= \
   TAVILY_API_KEY= ALPHA_VANTAGE_API_KEY= KRX_ID= KRX_PW= TYPESAFE_API_KEY= \
   .venv/bin/pytest -q --cov=core --cov=ui --cov=utils --cov=data --cov=agents --cov-fail-under=45

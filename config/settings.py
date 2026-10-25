@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import NamedTuple, TypeGuard
 
 from dotenv import load_dotenv
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
@@ -33,6 +34,14 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
+    # 무료 등급의 분당 요청 한도에 맞춰 모든 LLM 호출을 한 줄로 세운다. 비우면 제한 없음.
+    llm_max_requests_per_minute: float | None = None
+
+    @field_validator("llm_max_requests_per_minute", mode="before")
+    @classmethod
+    def _blank_number_is_unset(cls, value: object) -> object:
+        # .env.example처럼 `KEY=`로 비워 둔 숫자 필드가 float 파싱 오류로 import를 막지 않게 한다.
+        return None if value == "" else value
 
     # LLM API 키 (OpenAI 또는 Google)
     openai_api_key: str | None = None
