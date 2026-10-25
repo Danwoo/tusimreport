@@ -84,16 +84,25 @@ main.py    Streamlit entry point
 - PyKRX returns Korean-keyed DataFrame columns (`'시가총액'`, `'PER'`,
   `'순매수'`, `'종가'`). Validators in `data/external_schemas.py`
   translate to English fields; do not bypass.
+- Never compile the lock with `--pre`: it applies to every package. It
+  once pinned pydantic 2.14.0a1, which made `import langchain_openai`
+  raise TypeError once `langgraph.prebuilt` was loaded — every
+  OpenAI-provider run — while all unit tests passed. A package that only
+  ships pre-releases (mplfinance) names one in its `requirements.in`
+  specifier. CI installs `requirements*.lock`; `tests/test_smoke.py`
+  fails on unexpected pre-release pins.
 
 ## Common commands
 
 ```
-make install     # pip install -r requirements.txt -r requirements-dev.txt
+make install     # pip install -r requirements.lock -r requirements-dev.lock (= CI)
 make lint        # ruff check
 make format      # ruff format + ruff check --fix
 make test        # pytest with --cov-fail-under (CI gate)
 make cov         # pytest with line-level missing report
-make lock        # regenerate requirements.lock (uses --pre)
+make lock        # regenerate requirements.lock (no --pre; keeps existing pins)
+make lock-all    # requirements.lock, then requirements-dev.lock (constrained by it)
+                 #   add PIP_COMPILE_ARGS=--upgrade to move pins forward
 make docker      # docker compose up --build
 make run         # streamlit run main.py (local)
 ```
