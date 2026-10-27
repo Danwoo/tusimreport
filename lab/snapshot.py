@@ -11,12 +11,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import hashlib
 import json
+import logging
+import os
+import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -27,8 +31,16 @@ from langchain_core.tools import BaseTool
 from core.agent_status import classify_tool_output
 from utils.time import kst_isoformat
 
+logger = logging.getLogger(__name__)
+
 SnapshotMode = Literal["off", "record", "replay"]
-_STOCK_ARG_NAMES = ("stock_code", "ticker", "symbol", "code")
+
+# Arguments a tool accepts but does not read (save_stock_chart's chart_data). They are dropped
+# before keying, so they never turn an identical replay into a fuzzy one.
+_IGNORED_ARG_NAMES = frozenset({"chart_data"})
+# Arguments replay may ignore when no exact snapshot exists: spellings of the company name. Any
+# other argument (stock_code, period_days, ...) changes the data, so a mismatch there is missing.
+_LOOSE_ARG_NAMES = frozenset({"company_name", "company", "corp_name", "stock_name", "name"})
 
 
 @dataclass
@@ -37,23 +49,38 @@ class ToolCall:
     args: dict[str, Any]
     output: Any
     error: str | None
-    source: str  # live | snapshot | snapshot_fuzzy | missing
+    source: str  # live | snapshot | snapshot_fuzzy | missing | corrupt
     elapsed_s: float
+    agent: str | None = None
+    recorded_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def _canonical_args(args: dict[str, Any]) -> dict[str, Any]:
-    return {k: (v.strip() if isinstance(v, str) else v) for k, v in sorted(args.items())}
+@dataclass
+class SnapshotHit:
+    match: Literal["exact", "fuzzy"]
+    output: Any
+    recorded_at: str | None
 
 
-def _stock_of(args: dict[str, Any]) -> str | None:
-    for name in _STOCK_ARG_NAMES:
-        value = args.get(name)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+def _canonical_args(args: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        k: (v.strip() if isinstance(v, str) else v)
+        for k, v in sorted(args.items())
+        if k not in _IGNORED_ARG_NAMES
+    }
+
+
+def _effective_args(args: Mapping[str, Any], defaults: Mapping[str, Any]) -> dict[str, Any]:
+    """생략한 인자를 도구의 기본값으로 채운 인자. `{"period_days": 20}` 생략과 명시를 같게 본다."""
+    return _canonical_args({**defaults, **args})
+
+
+def _strict_part(args: Mapping[str, Any]) -> str:
+    strict = {k: v for k, v in args.items() if k not in _LOOSE_ARG_NAMES}
+    return json.dumps(strict, sort_keys=True, ensure_ascii=False, default=str)
 
 
 class SnapshotStore:
@@ -73,6 +100,7 @@ class SnapshotStore:
         return self.root / tool_name / f"{self.key(tool_name, args)}.json"
 
     def save(self, tool_name: str, args: dict[str, Any], output: Any) -> Path:
+        """임시 파일에 쓴 뒤 바꿔 끼운다. 중간에 끊겨도 반쯤 쓴 스냅샷이 남지 않는다."""
         path = self.path(tool_name, args)
         path.parent.mkdir(parents=True, exist_ok=True)
         record = {
@@ -81,66 +109,123 @@ class SnapshotStore:
             "output": output,
             "recorded_at": kst_isoformat(),
         }
-        path.write_text(json.dumps(record, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+        text = json.dumps(record, ensure_ascii=False, indent=1, default=str)
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            os.replace(tmp_name, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_name)
+            raise
         return path
 
-    def load(self, tool_name: str, args: dict[str, Any]) -> tuple[str, Any] | None:
-        """(일치 방식, 결과). 정확히 같은 인자가 없으면 같은 종목의 가장 최근 기록을 쓴다.
+    @staticmethod
+    def _read(path: Path) -> dict[str, Any]:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(record, dict) or "output" not in record or not isinstance(record.get("args"), dict):
+            raise ValueError(f"스냅샷 형식이 아닙니다: {path.name}")
+        return record
 
-        LLM은 같은 도구를 회사명 표기만 바꿔 부르기도 하므로, 종목코드가 같으면 같은
-        데이터로 본다. 이렇게 맞춘 호출은 snapshot_fuzzy로 표시해 결과에 남긴다.
+    def load(
+        self, tool_name: str, args: dict[str, Any], defaults: Mapping[str, Any] | None = None
+    ) -> SnapshotHit | None:
+        """같은 인자로 기록한 결과. 없으면 이름 표기만 다른 기록 중 가장 최근 것(fuzzy).
+
+        도구 기본값으로 채웠을 때 인자가 같으면 정확히 일치한 것으로 본다. 회사명 표기 같은
+        이름 인자(`_LOOSE_ARG_NAMES`)만 다르면 fuzzy로 돌려준다. 그 밖의 인자가 하나라도 다르면
+        None이다. 손상된 파일을 만나면 예외를 그대로 올린다.
         """
         exact = self.path(tool_name, args)
         if exact.exists():
-            return "exact", json.loads(exact.read_text(encoding="utf-8"))["output"]
+            record = self._read(exact)
+            return SnapshotHit("exact", record["output"], record.get("recorded_at"))
 
         tool_dir = self.root / tool_name
         if not tool_dir.is_dir():
             return None
-        candidates = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(tool_dir.glob("*.json"))]
-        stock = _stock_of(args)
-        if stock is not None:
-            candidates = [c for c in candidates if _stock_of(c["args"]) == stock]
-        elif len(candidates) != 1:
-            return None
-        if not candidates:
-            return None
-        latest = max(candidates, key=lambda c: c.get("recorded_at", ""))
-        return "fuzzy", latest["output"]
+        defaults = defaults or {}
+        wanted = _effective_args(args, defaults)
+        wanted_strict = _strict_part(wanted)
+        best: tuple[tuple[bool, str], SnapshotHit] | None = None
+        for path in sorted(tool_dir.glob("*.json")):
+            record = self._read(path)
+            have = _effective_args(record["args"], defaults)
+            if _strict_part(have) != wanted_strict:
+                continue
+            recorded_at = record.get("recorded_at")
+            hit = SnapshotHit("exact" if have == wanted else "fuzzy", record["output"], recorded_at)
+            rank = (hit.match == "exact", recorded_at or "")
+            if best is None or rank > best[0]:
+                best = (rank, hit)
+        return best[1] if best else None
 
 
 class ToolCallRecorder:
-    """도구 호출을 모두 기록하고, 모드에 따라 스냅샷을 저장하거나 돌려준다."""
+    """도구 호출을 모두 기록하고, 모드에 따라 스냅샷을 저장하거나 돌려준다.
 
-    def __init__(self, mode: SnapshotMode = "off", store: SnapshotStore | None = None) -> None:
+    `owners`(도구 이름 → 에이전트)를 주면 호출마다 그 도구를 가진 에이전트를 남긴다.
+    """
+
+    def __init__(
+        self,
+        mode: SnapshotMode = "off",
+        store: SnapshotStore | None = None,
+        owners: Mapping[str, str] | None = None,
+    ) -> None:
         if mode != "off" and store is None:
             raise ValueError("record/replay 모드에는 SnapshotStore가 필요합니다")
         self.mode = mode
         self.store = store
+        self.owners = dict(owners or {})
         self.calls: list[ToolCall] = []
+        self.save_failures = 0
         self._lock = threading.Lock()
 
     def _append(self, call: ToolCall) -> None:
+        call.agent = self.owners.get(call.tool)
         with self._lock:
             self.calls.append(call)
 
-    def wrap(self, tool_name: str, func: Callable[..., Any]) -> Callable[..., Any]:
+    def _replay(self, tool_name: str, call_args: dict[str, Any], defaults: Mapping[str, Any]) -> Any:
+        assert self.store is not None
+        started = time.monotonic()
+        try:
+            found = self.store.load(tool_name, call_args, defaults)
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            reason = f"스냅샷 손상: {type(e).__name__}: {e}"
+            self._append(ToolCall(tool_name, call_args, None, reason, "corrupt", time.monotonic() - started))
+            return {"error": f"스냅샷을 읽을 수 없음: {tool_name}", "args": call_args}
+        if found is None:
+            output = {"error": f"스냅샷 없음: {tool_name}", "args": call_args}
+            self._append(ToolCall(tool_name, call_args, output, "snapshot missing", "missing", 0.0))
+            return output
+        source = "snapshot" if found.match == "exact" else "snapshot_fuzzy"
+        self._append(
+            ToolCall(
+                tool_name,
+                call_args,
+                found.output,
+                None,
+                source,
+                time.monotonic() - started,
+                recorded_at=found.recorded_at,
+            )
+        )
+        return found.output
+
+    def wrap(
+        self, tool_name: str, func: Callable[..., Any], defaults: Mapping[str, Any] | None = None
+    ) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            started = time.monotonic()
             call_args = dict(kwargs)
             if self.mode == "replay":
-                assert self.store is not None
-                found = self.store.load(tool_name, call_args)
-                if found is None:
-                    output = {"error": f"스냅샷 없음: {tool_name}", "args": call_args}
-                    self._append(ToolCall(tool_name, call_args, output, "snapshot missing", "missing", 0.0))
-                    return output
-                match, output = found
-                source = "snapshot" if match == "exact" else "snapshot_fuzzy"
-                self._append(ToolCall(tool_name, call_args, output, None, source, time.monotonic() - started))
-                return output
+                return self._replay(tool_name, call_args, defaults or {})
 
+            started = time.monotonic()
+            fetched_at = kst_isoformat()
             try:
                 output = func(*args, **kwargs)
             except Exception as e:
@@ -148,8 +233,23 @@ class ToolCallRecorder:
                 raise
             if self.mode == "record":
                 assert self.store is not None
-                self.store.save(tool_name, call_args, output)
-            self._append(ToolCall(tool_name, call_args, output, None, "live", time.monotonic() - started))
+                try:
+                    self.store.save(tool_name, call_args, output)
+                except OSError as e:
+                    # The live result still reaches the agent; the run just cannot be replayed later.
+                    logger.warning(f"스냅샷 저장 실패 ({tool_name}): {e}")
+                    self.save_failures += 1
+            self._append(
+                ToolCall(
+                    tool_name,
+                    call_args,
+                    output,
+                    None,
+                    "live",
+                    time.monotonic() - started,
+                    recorded_at=fetched_at,
+                )
+            )
             return output
 
         return wrapper
@@ -158,14 +258,24 @@ class ToolCallRecorder:
         by_source: dict[str, int] = {}
         for call in self.calls:
             by_source[call.source] = by_source.get(call.source, 0) + 1
-        return {
+        stamps = sorted(c.recorded_at for c in self.calls if c.recorded_at)
+        result = {
             "calls": len(self.calls),
             "errors": sum(1 for c in self.calls if c.error),
             "with_data": sum(
                 1 for c in self.calls if not c.error and classify_tool_output(c.output) == (False, True)
             ),
             "by_source": by_source,
+            "fuzzy": by_source.get("snapshot_fuzzy", 0),
+            "recorded_at": {"min": stamps[0], "max": stamps[-1]} if stamps else None,
         }
+        if self.save_failures:
+            result["save_failures"] = self.save_failures
+        return result
+
+
+def _tool_defaults(tool: BaseTool) -> dict[str, Any]:
+    return {name: spec["default"] for name, spec in tool.args.items() if "default" in spec}
 
 
 @contextmanager
@@ -178,7 +288,7 @@ def instrument_tools(tools: Iterable[BaseTool], recorder: ToolCallRecorder) -> I
             if func is None:
                 continue
             originals.append((tool, func))
-            tool.func = recorder.wrap(tool.name, func)
+            tool.func = recorder.wrap(tool.name, func, _tool_defaults(tool))
         yield recorder
     finally:
         for tool, func in originals:

@@ -23,8 +23,8 @@ def _stub_trading_value() -> pd.DataFrame:
     )
 
 
-def test_aggregates_investor_net_purchase_in_billions(monkeypatch: pytest.MonkeyPatch) -> None:
-    """3개 투자자 모두 billion 단위로 정규화."""
+def test_net_purchase_is_returned_in_won(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PyKRX 순매수(원)를 나누지 않고 그대로 돌려준다."""
     monkeypatch.setattr(
         "agents.korean_institutional_trading_agent.stock.get_market_trading_value_by_investor",
         lambda *_a, **_kw: _stub_trading_value(),
@@ -34,10 +34,24 @@ def test_aggregates_investor_net_purchase_in_billions(monkeypatch: pytest.Monkey
 
     assert result["status"] == "success"
     key = result["analysis_data"]["key_investors"]
-    # 5000억 = 500_000_000_000원 → 5000 billion (×1e-8)
-    assert key["외국인"]["net_purchase_billion"] == 5000.0
-    assert key["기관합계"]["net_purchase_billion"] == -2000.0
-    assert key["개인"]["net_purchase_billion"] == 2000.0
+    assert key["외국인"] == {"net_purchase_won": 500_000_000_000.0}
+    assert key["기관합계"] == {"net_purchase_won": -200_000_000_000.0}
+    assert key["개인"] == {"net_purchase_won": 200_000_000_000.0}
+
+
+def test_report_amounts_in_eok_won_match_the_tool_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """보고서의 '5,000억원 순매수', '2,000억원 순매도'가 도구 결과로 확인된다."""
+    from lab.grounding import numeric_grounding
+
+    monkeypatch.setattr(
+        "agents.korean_institutional_trading_agent.stock.get_market_trading_value_by_investor",
+        lambda *_a, **_kw: _stub_trading_value(),
+    )
+    output = get_investor_trading_analysis_logic("005930", "삼성전자")
+
+    result = numeric_grounding("외국인은 5,000억원 순매수, 기관은 2,000억원 순매도했다.", [output])
+
+    assert (result.checked, result.grounded) == (2, 2)
 
 
 def test_empty_pykrx_returns_error(monkeypatch: pytest.MonkeyPatch) -> None:

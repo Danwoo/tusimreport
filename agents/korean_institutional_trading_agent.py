@@ -51,10 +51,7 @@ def get_investor_trading_analysis_logic(
             key_analysis = {}
             for investor in key_investors:
                 if investor in latest_net.index:
-                    net_amount = float(latest_net[investor])
-                    key_analysis[investor] = {
-                        "net_purchase_billion": net_amount / 100000000,
-                    }
+                    key_analysis[investor] = {"net_purchase_won": float(latest_net[investor])}
             analysis_data["key_investors"] = key_analysis
 
         return convert_numpy_types(
