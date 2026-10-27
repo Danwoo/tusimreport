@@ -11,9 +11,12 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 DataStatus = Literal["sufficient", "partial", "none"]
+
+# create_react_agent's final message when it runs out of recursion budget.
+STEP_LIMIT_TEXT = "Sorry, need more steps to process this request."
 
 # 실패를 나타내는 status 값. 도구들이 제각각 쓰는 표기를 모았다.
 _FAILED_STATUSES = {"error", "failed", "all_failed", "unavailable", "no_data", "missing_api_key"}
@@ -109,3 +112,12 @@ def data_status(summary: ToolSummary) -> DataStatus:
     if summary.errors > 0 or summary.with_data < summary.calls:
         return "partial"
     return "sufficient"
+
+
+def hit_step_limit(messages: list[Any]) -> bool:
+    """마지막 AI 메시지가 LangGraph의 단계 한도 초과 문구인가. 이 문구를 분석 결과로 쓰면 안 된다."""
+    for message in reversed(messages):
+        if isinstance(message, AIMessage):
+            content = message.content if isinstance(message.content, str) else ""
+            return content.strip() == STEP_LIMIT_TEXT
+    return False
