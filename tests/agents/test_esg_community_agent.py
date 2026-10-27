@@ -65,7 +65,8 @@ class TestESGAgent:
 
         governance = result["governance"]
         assert governance["available"] is True
-        assert governance["ceo_name"] == "한종희"
+        # 대표자명은 기업개황(basic_info)일 뿐 지배구조 근거가 아니다.
+        assert "ceo_name" not in governance
         assert [d["title"] for d in governance["related_disclosures"]] == [
             "임원ㆍ주요주주특정증권등소유상황보고서"
         ]
@@ -80,23 +81,91 @@ class TestESGAgent:
         assert "+09:00" in result["last_updated"]
 
     def test_pillars_without_dart_evidence_are_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """상장사는 DART가 늘 대표자명을 준다 — 그것만으로는 어느 축도 available이 아니다."""
         monkeypatch.setattr(
             "agents.korean_esg_analysis_agent.get_comprehensive_company_data",
-            lambda _code: _dart_payload(["분기보고서 (2025.09)"], ceo=None),
+            lambda _code: _dart_payload(["분기보고서 (2025.09)", "[기재정정]분기보고서 (2025.06)"]),
         )
 
         result = get_esg_analysis_logic("005930", "삼성전자")
 
         assert result["status"] == "no_data"
+        assert result["basic_info"]["ceo_nm"] == "한종희"
         for pillar in ("governance", "social", "environmental"):
             assert result[pillar]["available"] is False, pillar
             assert result[pillar]["related_disclosures"] == []
-            assert "1건" in result[pillar]["reason"]
+            assert "최근 공시 2건(최대 20건) 중 관련 공시 없음" in result[pillar]["reason"]
+            assert "90일 DART 공시 2건" not in result[pillar]["reason"]
         assert "ceo_name" not in result["governance"]
+        assert "한종희" not in str(result["governance"])
         # 점수·등급을 지어내지 않는다.
         assert result["esg_rating"] is None
         for invented in ("esg_score", "audit_opinion", "employee_info", "board_composition"):
             assert invented not in str(result), invented
+
+    def test_empty_disclosure_list_is_no_data_with_reason(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "agents.korean_esg_analysis_agent.get_comprehensive_company_data",
+            lambda _code: _dart_payload([]),
+        )
+
+        result = get_esg_analysis_logic("005930", "삼성전자")
+
+        assert result["status"] == "no_data"
+        assert result["disclosures_reviewed"] == 0
+        assert "0건" not in result["governance"]["reason"]
+        assert "받지 못함" in result["governance"]["reason"]
+
+    def test_board_resolution_titles_are_not_social_evidence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """'이사회' 안의 '사회'를 사회(S) 축 근거로 세지 않는다."""
+        board_titles = [
+            "대규모내부거래에대한이사회의결",
+            "[기재정정]대규모내부거래에대한이사회의결",
+            "이사회내위원회설치및구성(자율공시)",
+        ]
+        monkeypatch.setattr(
+            "agents.korean_esg_analysis_agent.get_comprehensive_company_data",
+            lambda _code: _dart_payload(board_titles),
+        )
+
+        result = get_esg_analysis_logic("005930", "삼성전자")
+
+        assert result["social"]["available"] is False
+        assert result["social"]["related_disclosures"] == []
+        assert "최근 공시 3건(최대 20건)" in result["social"]["reason"]
+        assert [d["title"] for d in result["governance"]["related_disclosures"]] == board_titles
+        assert result["status"] == "success"
+
+    def test_social_contribution_titles_are_social_evidence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "agents.korean_esg_analysis_agent.get_comprehensive_company_data",
+            lambda _code: _dart_payload(["기타경영사항(자율공시)(사회공헌기금 출연)"]),
+        )
+
+        result = get_esg_analysis_logic("005930", "삼성전자")
+
+        assert [d["title"] for d in result["social"]["related_disclosures"]] == [
+            "기타경영사항(자율공시)(사회공헌기금 출연)"
+        ]
+        assert result["governance"]["available"] is False
+
+    def test_prompt_does_not_ask_to_judge_board_from_profile(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: dict[str, str] = {}
+
+        def fake_create_react_agent(*, model: object, tools: list, prompt: str, name: str) -> object:
+            captured["prompt"] = prompt
+            return object()
+
+        monkeypatch.setattr("agents.korean_esg_analysis_agent.build_llm", lambda **_kw: object())
+        monkeypatch.setattr("agents.korean_esg_analysis_agent.create_react_agent", fake_create_react_agent)
+
+        from agents.korean_esg_analysis_agent import create_esg_agent
+
+        create_esg_agent()
+        prompt = captured["prompt"]
+        assert "이사회가 제대로 견제 역할을 하고 있는지" not in prompt
+        assert "대표자 이름이나 기업개황만으로" in prompt
+        assert "related_disclosures만 근거로" in prompt
 
     def test_dart_unavailable_returns_error_dict(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(

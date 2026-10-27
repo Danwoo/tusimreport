@@ -110,7 +110,17 @@ def test_code_missing_from_fundamentals_has_no_unbound_local(no_network: dict[st
     assert "999999" in summary["sector_analysis"]["reason"]
     assert summary["market_position"]["available"] is True
     assert summary["market_position"]["rank"] == 4
+    # 4개 중 4위는 상위 100%다 (상위 0%가 아니다).
+    assert summary["market_position"]["top_percent"] == 100.0
     assert any("업종 미분류" in line for line in result["key_insights"])
+
+
+def test_top_ranked_stock_is_reported_as_top_percent(no_network: dict[str, Any]) -> None:
+    position = get_comparative_analysis_logic("005930", "삼성전자")["analysis_summary"]["market_position"]
+
+    assert position["rank"] == 1
+    assert position["top_percent"] == 25.0
+    assert "percentile" not in position
 
 
 def test_mapped_code_missing_from_fundamentals_keeps_peers(no_network: dict[str, Any]) -> None:
@@ -130,6 +140,59 @@ def test_zero_per_is_missing_not_averaged(monkeypatch: pytest.MonkeyPatch) -> No
     sa = get_comparative_analysis_logic("005930", "삼성전자")["analysis_summary"]["sector_analysis"]
     assert sa["peer_averages"]["PER"] == 12.5
     assert sa["peer_averages"]["PBR"] == pytest.approx((1.3 + 1.8) / 2)
+
+
+def test_all_zero_fundamentals_frame_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """휴장일 날짜로 조회하면 KRX는 전 종목이 0인 표를 준다 — available True에 지표 전부 None이면 안 된다."""
+    zero = _stub_fundamental_df() * 0
+    monkeypatch.setattr(comp.stock, "get_market_fundamental", lambda *_a, **_kw: zero)
+
+    result = get_comparative_analysis_logic("005930", "삼성전자")
+
+    summary = result["analysis_summary"]
+    sa = summary["sector_analysis"]
+    assert sa["available"] is False
+    assert BUSINESS_DAY in sa["reason"]
+    assert "모두 0" in sa["reason"]
+    assert "target_metrics" not in sa
+    assert "competitive_advantages" not in summary
+    # 시가총액 순위는 FDR에서 따로 받으므로 결과 자체는 살아 있다.
+    assert result["status"] == "success"
+    assert summary["market_position"]["available"] is True
+
+
+def test_target_with_all_zero_metrics_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    df = _stub_fundamental_df()
+    df.loc["005930"] = 0
+    monkeypatch.setattr(comp.stock, "get_market_fundamental", lambda *_a, **_kw: df)
+
+    sa = get_comparative_analysis_logic("005930", "삼성전자")["analysis_summary"]["sector_analysis"]
+
+    assert sa["available"] is False
+    assert "005930" in sa["reason"]
+    assert "전자부품" in sa["sector_name"]
+    assert "peer_averages" not in sa
+
+
+def test_prompt_template_only_asks_for_tool_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_create_react_agent(*, model: object, tools: list, prompt: str, name: str) -> object:
+        captured["prompt"] = prompt
+        return object()
+
+    monkeypatch.setattr(comp, "build_llm", lambda **_kw: object())
+    monkeypatch.setattr(comp, "create_react_agent", fake_create_react_agent)
+
+    comp.create_comparative_agent()
+    prompt = captured["prompt"]
+
+    assert "2,500" not in prompt
+    for slot in ("ROE [수치]", "EV/EBITDA: [수치]", "Forward PER: [", "샤프 비율", "신용등급: ["):
+        assert slot not in prompt, slot
+    assert "'데이터 없음'" in prompt
+    assert prompt.rstrip().endswith("이것은 시스템이 분석 완료를 확인하는 데 필수입니다.")
+    assert f"'{comp.AgentSignal.COMPARATIVE.value}'라고 정확히 적어주세요" in prompt
 
 
 def test_missing_market_cap_is_unavailable_not_rank_999(monkeypatch: pytest.MonkeyPatch) -> None:
