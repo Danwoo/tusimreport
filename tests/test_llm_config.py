@@ -158,3 +158,24 @@ def test_blank_rate_limit_env_is_unset(
     monkeypatch.setenv("LLM_MAX_REQUESTS_PER_MINUTE", raw)
 
     assert Settings(_env_file=None).llm_max_requests_per_minute == expected
+
+
+def test_temperature_override_pins_every_build_and_restores(fake_chat_openai: list[dict[str, Any]]) -> None:
+    with llm_factory.temperature_override(0.0):
+        llm_factory.build_llm(temperature=0.3)
+        llm_factory.build_llm(temperature=0.1)
+    llm_factory.build_llm(temperature=0.3)
+
+    assert [call["temperature"] for call in fake_chat_openai] == [0.0, 0.0, 0.3]
+
+
+def test_temperature_override_reaches_worker_threads(fake_chat_openai: list[dict[str, Any]]) -> None:
+    """병렬 에이전트 스레드에서 만든 LLM도 고정값을 쓴다."""
+    import threading
+
+    with llm_factory.temperature_override(0.7):
+        worker = threading.Thread(target=lambda: llm_factory.build_llm(temperature=0.1))
+        worker.start()
+        worker.join()
+
+    assert fake_chat_openai[0]["temperature"] == 0.7

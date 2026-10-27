@@ -16,6 +16,8 @@ Thread-safety 가정:
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from config.settings import get_llm_model, settings
@@ -27,6 +29,31 @@ if TYPE_CHECKING:
 _rate_limiter: InMemoryRateLimiter | None = None
 _rate_limiter_rpm: float | None = None
 _rate_limiter_lock = threading.Lock()
+
+_temperature_override: float | None = None
+
+
+@contextmanager
+def temperature_override(value: float) -> Iterator[None]:
+    """블록 안에서 build_llm이 만드는 모든 LLM의 temperature를 value로 고정한다.
+
+    구조 비교 실험(lab) 전용이다. 에이전트마다 temperature가 다르면 구조 차이와 섞이므로
+    실험 중에는 하나로 맞춘다. 병렬 에이전트 스레드에도 적용되도록 contextvar가 아니라
+    프로세스 전역 값을 쓴다. 그래서 실험은 한 번에 하나씩 돌린다(`lab/snapshot.py`와 같은 전제).
+    """
+    global _temperature_override
+    previous = _temperature_override
+    _temperature_override = value
+    try:
+        yield
+    finally:
+        _temperature_override = previous
+
+
+def effective_temperature(requested: float) -> float:
+    """고정값이 있으면 그 값, 없으면 호출자가 요청한 값."""
+    override = _temperature_override
+    return requested if override is None else override
 
 
 def _shared_rate_limiter() -> InMemoryRateLimiter | None:
@@ -53,7 +80,7 @@ def build_llm(temperature: float = 0.0, raise_on_missing: bool = True) -> BaseCh
     OpenAI 호환 엔드포인트(LLM_BASE_URL)도 ChatOpenAI에 base_url만 바꿔 연결한다.
 
     Args:
-        temperature: 샘플링 temperature.
+        temperature: 샘플링 temperature. `temperature_override` 블록 안에서는 그 값이 우선한다.
         raise_on_missing: API 키 누락 시 ValueError를 던질지 여부.
             True가 default인 이유: 호출자가 즉시 .invoke()를 호출하는 시맨틱이라
             None을 받으면 무조건 NoneType 에러로 이어지기 때문에 즉시 실패가 안전함.
@@ -65,6 +92,7 @@ def build_llm(temperature: float = 0.0, raise_on_missing: bool = True) -> BaseCh
     llm_config = get_llm_model(raise_on_missing=raise_on_missing)
     if llm_config is None:
         return None
+    temperature = effective_temperature(temperature)
 
     extra: dict[str, Any] = {}
     rate_limiter = _shared_rate_limiter()
