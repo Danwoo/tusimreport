@@ -23,13 +23,16 @@ plus a note with the typed error (core.errors), the HTTP status, and the agents
 that depend on the source.
 
 Exit code 0 when the minimum set works: DART (corp code, company, financial
-statements) + ECOS + one price source (FinanceDataReader or pykrx index OHLCV).
-Otherwise 1. The LLM is not part of this check (`python setup_check.py
---llm-probe` covers it).
+statements) + ECOS + FinanceDataReader daily prices for the stock. Otherwise 1.
+The pykrx KOSPI index row is informational: every agent reads the stock's own
+prices through fdr.DataReader, so an index series cannot stand in for them. The
+LLM is not part of this check (`python setup_check.py --llm-probe` covers it).
 
 Key values are never printed. Client error messages and library output are
 redacted before they reach stdout or the JSON file, and anything a check prints
-while it runs is captured instead of shown (see --verbose).
+while it runs is captured instead of shown (see --verbose). Log records are
+masked when they are created (utils.redaction), so a check that logs after its
+timeout, when nothing captures it any more, cannot print a key either.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ import argparse
 import io
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -67,6 +71,7 @@ from core.errors import (  # noqa: E402
     RateLimitError,
     TusimError,
 )
+from utils.redaction import install_record_redaction  # noqa: E402
 from utils.time import (  # noqa: E402
     KST,
     kst_days_ago_compact,
@@ -86,8 +91,7 @@ KEY_SET, KEY_MISSING, KEY_NOT_REQUIRED = "set", "missing", "not_required"
 REQ_OK, REQ_FAILED, REQ_TIMEOUT, REQ_NOT_SENT = "ok", "failed", "timeout", "not_sent"
 DATA_OK, DATA_EMPTY, DATA_INVALID, DATA_NA = "ok", "empty", "invalid", "n/a"
 
-MINIMUM_REQUIRED = ("dart_corp_code", "dart_company", "dart_financials", "ecos_base_rate")
-PRICE_SOURCES = ("fdr_prices", "pykrx_index_ohlcv")
+MINIMUM_REQUIRED = ("dart_corp_code", "dart_company", "dart_financials", "ecos_base_rate", "fdr_prices")
 
 FDR_LOOKBACK_DAYS = 60
 FDR_PRICE_COLUMNS = ("Open", "High", "Low", "Close", "Volume")
@@ -134,6 +138,8 @@ _REDACT_PATTERNS = (
     (re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._\-]+"), r"\1***"),
     (re.compile(r"tvly-[A-Za-z0-9_\-]+"), "tvly-***"),
 )
+# Quota statuses beyond 429, per source: Tavily answers 432 (plan limit) and 433 (pay-as-you-go limit).
+_QUOTA_STATUS: dict[str, frozenset[int]] = {"Tavily": frozenset({432, 433})}
 _HTTP_STATUS_IN_TEXT = re.compile(
     r"\b([1-5]\d\d) (?:Client|Server) Error|\bstatus[ =:]+([1-5]\d\d)\b|HTTP Error ([1-5]\d\d)"
 )
@@ -351,7 +357,7 @@ def _json(call: _HttpCall | None) -> Any:
 def _error_for_status(status: int, message: str, source: str) -> ExternalAPIError:
     if status in (401, 403):
         return AuthenticationError(message, source=source, status_code=status)
-    if status == 429:
+    if status == 429 or status in _QUOTA_STATUS.get(source, frozenset()):
         return RateLimitError(message, source=source, status_code=status)
     return DataSourceUnavailableError(message, source=source, status_code=status)
 
@@ -802,7 +808,7 @@ def check_naver_news(ctx: CheckContext) -> Outcome:
 
 
 # ---------------------------------------------------------------------------
-# Global context: Alpha Vantage, CoinGecko, CNN Fear & Greed
+# Global context: Alpha Vantage, CoinGecko
 # ---------------------------------------------------------------------------
 
 
@@ -890,38 +896,33 @@ def check_coingecko(ctx: CheckContext) -> Outcome:
     return Outcome(as_of=as_of, coverage=f"coins={len(coins)}", note="; ".join(notes))
 
 
-def check_fear_greed(ctx: CheckContext) -> Outcome:
-    """FearGreedClient.get_current_index (unofficial CNN JSON), cache bypassed."""
-    from data.fear_greed_client import FearGreedClient
-
-    client = FearGreedClient()
-    client.cache_dir = None
-    calls = _record_http(client.session)
-    result = client.get_current_index()
-    if _client_failed(result):
-        detail = _client_failure_detail(result, "score 50 'Neutral'")
-        _raise_from_calls(calls, "CNN Fear & Greed", "graphdata", detail)
-        raise DataQualityError(f"no usable 'fear_and_greed' ({detail})", source="CNN Fear & Greed")
-    score = result.get("score")
-    if not isinstance(score, int) or not 0 <= score <= 100:
-        raise DataQualityError(f"score is {score!r}", source="CNN Fear & Greed")
-    raw = _json(calls[-1]) if calls else None
-    block = raw.get("fear_and_greed", {}) if isinstance(raw, dict) else {}
-    return Outcome(
-        as_of=_to_kst_iso(block.get("timestamp")),
-        coverage=f"score={score} rating={result.get('rating')}",
-        note="unofficial endpoint",
-    )
-
-
 # ---------------------------------------------------------------------------
 # Paxnet (Selenium)
 # ---------------------------------------------------------------------------
 
 
+def _chrome_hint() -> str:
+    """Where Chrome might be, for the note only: the crawler does not look on PATH or at CHROME_BIN.
+
+    PaxnetCrawlClient.setup_driver finds the browser through chromedriver_autoinstaller and
+    Selenium Manager, which also know the macOS / Windows install locations.
+    """
+    on_path = next((path for path in (shutil.which(c) for c in CHROME_COMMANDS) if path), None)
+    chrome_bin = os.environ.get("CHROME_BIN", "").strip()
+    if not chrome_bin:
+        bin_state = "unset"
+    elif os.path.isfile(chrome_bin):
+        bin_state = chrome_bin
+    else:
+        bin_state = f"{chrome_bin} (no such file)"
+    return (
+        f"Chrome/Chromium: {on_path or 'not on PATH'}; CHROME_BIN: {bin_state} "
+        "(informational; the crawler finds Chrome via chromedriver_autoinstaller / Selenium Manager)"
+    )
+
+
 def check_paxnet(ctx: CheckContext) -> Outcome:
-    """Chrome + selenium readiness; with --crawl-paxnet, fetch_paxnet_discussions as community_expert."""
-    chrome = next((path for path in (shutil.which(c) for c in CHROME_COMMANDS) if path), None)
+    """With --crawl-paxnet, fetch_paxnet_discussions as community_expert calls it; otherwise nothing is sent."""
     try:
         from data import paxnet_crawl_client
 
@@ -929,22 +930,25 @@ def check_paxnet(ctx: CheckContext) -> Outcome:
     except Exception:
         paxnet_crawl_client = None
         selenium_ok = False
-    env = (
-        f"Chrome/Chromium: {chrome or 'not on PATH'}; selenium: {'importable' if selenium_ok else 'missing'}"
-    )
+    env = f"selenium: {'importable' if selenium_ok else 'missing'}; {_chrome_hint()}"
     if not ctx.crawl_paxnet:
-        raise _NotSent(f"{env}; crawl skipped (pass --crawl-paxnet)")
-    if not chrome or not selenium_ok or paxnet_crawl_client is None:
-        raise _NotSent(f"{env}; cannot crawl")
+        raise _NotSent(f"crawl skipped (pass --crawl-paxnet); {env}")
+    if not selenium_ok or paxnet_crawl_client is None:
+        raise _NotSent(f"PaxnetCrawlClient needs selenium, which is not importable; {env}")
     result = paxnet_crawl_client.fetch_paxnet_discussions(ctx.stock_code, max_posts=ctx.paxnet_max_posts)
     if result.get("error"):
-        if "게시글을 찾을 수 없습니다" in str(result["error"]):
-            raise _EmptyData(str(result["error"]), source="paxnet")
-        raise DataSourceUnavailableError(str(result["error"]), source="paxnet")
+        error = str(result["error"])
+        if "게시글을 찾을 수 없습니다" in error:
+            raise _EmptyData(error, source="paxnet")
+        if "드라이버 설정" in error:
+            raise ConfigurationError(
+                f"Chrome driver did not start, no Paxnet page requested ({error}); {env}"
+            )
+        raise DataSourceUnavailableError(f"{error}; {env}", source="paxnet")
     posts = result.get("posts") or []
     if not posts:
         raise _EmptyData("0 posts", source="paxnet")
-    return Outcome(coverage=f"posts={len(posts)}", note=f"{env}; client output carries no post dates")
+    return Outcome(coverage=f"posts={len(posts)}", note=f"client output carries no post dates; {env}")
 
 
 # ---------------------------------------------------------------------------
@@ -1038,7 +1042,6 @@ SPECS: tuple[CheckSpec, ...] = (
         gate=_gate_alpha_vantage,
     ),
     CheckSpec("coingecko", "CoinGecko 암호화폐 시세", ("global_market_expert",), check_coingecko),
-    CheckSpec("fear_greed", "CNN Fear & Greed", ("global_market_expert",), check_fear_greed),
     CheckSpec(
         "paxnet",
         "Paxnet 종목토론 (Selenium)",
@@ -1203,15 +1206,7 @@ def run_checks(
 def evaluate_minimum(results: Sequence[SourceResult]) -> dict[str, Any]:
     by_source = {r.source: r for r in results}
     missing = [s for s in MINIMUM_REQUIRED if not (s in by_source and by_source[s].works)]
-    price = next((s for s in PRICE_SOURCES if s in by_source and by_source[s].works), None)
-    if price is None:
-        missing.append("one of " + "|".join(PRICE_SOURCES))
-    return {
-        "ok": not missing,
-        "required": [*MINIMUM_REQUIRED, "one of " + "|".join(PRICE_SOURCES)],
-        "price_source": price,
-        "missing": missing,
-    }
+    return {"ok": not missing, "required": list(MINIMUM_REQUIRED), "missing": missing}
 
 
 # ---------------------------------------------------------------------------
@@ -1253,10 +1248,11 @@ def render_report(
         lines += ["", f"Naver: {NAVER_HOLD_NOTE}. This run only shows connectivity."]
     lines.append("")
     if minimum["ok"]:
-        lines.append(f"Minimum set (DART + ECOS + price via {minimum['price_source']}): OK -> exit 0")
+        lines.append("Minimum set (DART + ECOS + FinanceDataReader prices): OK -> exit 0")
     else:
         lines.append(
-            f"Minimum set (DART + ECOS + one price source): NOT met, missing {minimum['missing']} -> exit 1"
+            "Minimum set (DART + ECOS + FinanceDataReader prices): NOT met, "
+            f"missing {minimum['missing']} -> exit 1"
         )
     return "\n".join(lines)
 
@@ -1333,13 +1329,28 @@ def _parse_stock(value: str) -> str:
     return value
 
 
+def _parse_timeout(value: str) -> float:
+    try:
+        seconds = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"timeout must be a number of seconds, got {value!r}") from None
+    # thread.join(0) returns at once and would report working sources as timeouts;
+    # values above TIMEOUT_MAX make thread.join raise OverflowError.
+    if not math.isfinite(seconds) or not 0 < seconds <= threading.TIMEOUT_MAX:
+        raise argparse.ArgumentTypeError(
+            f"timeout must be a number of seconds in (0, {threading.TIMEOUT_MAX:.0f}], got {value!r}"
+        )
+    return seconds
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python scripts/check_sources.py",
         description=(
             "Exercise every external data source once through the repo's own client code and report, "
-            "per source, key / request / data / as-of states. Exit 0 when DART + ECOS + one price "
-            "source work, 1 otherwise. Key values are never printed."
+            "per source, key / request / data / as-of states. Exit 0 when DART + ECOS + FinanceDataReader "
+            "daily prices work, 1 otherwise (the pykrx KOSPI index row does not count). Key values are "
+            "never printed."
         ),
         epilog=(
             "pykrx: importing pykrx logs in to data.krx.co.kr with KRX_ID/KRX_PW (it can end another "
@@ -1352,7 +1363,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--name", default=None, help="company name for news queries (default: lookup)")
     parser.add_argument("--only", type=_parse_only, default=None, help="comma-separated source ids")
     parser.add_argument(
-        "--timeout", type=float, default=DEFAULT_TIMEOUT_S, help="per-check timeout in seconds (default 60)"
+        "--timeout",
+        type=_parse_timeout,
+        default=DEFAULT_TIMEOUT_S,
+        help="per-check timeout in seconds, > 0 (default 60)",
     )
     parser.add_argument("--json", dest="json_path", default=None, help="also write the result as JSON here")
     parser.add_argument(
@@ -1363,7 +1377,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--crawl-paxnet",
         action="store_true",
-        help="actually crawl Paxnet with Selenium (default: only check Chrome/Chromium + selenium)",
+        help="crawl Paxnet with Selenium as community_expert does (default: send nothing, only note "
+        "whether selenium imports and where Chrome might be)",
     )
     parser.add_argument(
         "--verbose", action="store_true", help="show what each check printed or logged (redacted)"
@@ -1372,6 +1387,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # Clients are imported lazily inside the checks, so this runs before any of them can log. It
+    # stays installed after main returns: a check abandoned at its timeout may still log then.
+    install_record_redaction()
     args = parse_args(argv)
     saved_streams = (sys.stdout, sys.stderr)
     sys.stdout, sys.stderr = _OutputRouter(saved_streams[0]), _OutputRouter(saved_streams[1])

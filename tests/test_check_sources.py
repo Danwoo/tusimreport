@@ -1,8 +1,10 @@
 """scripts/check_sources.py: per-source key / request / data / as-of states and exit code.
 
-No network: HTTP goes through `responses` (unregistered URLs raise), FinanceDataReader
-and pykrx are monkeypatched. Keys are set on `config.settings.settings` per test so a
-key in the session environment or `.env` cannot change the outcome.
+No network and no browser: HTTP goes through `responses` (unregistered URLs raise),
+FinanceDataReader, pykrx and the Paxnet crawler are monkeypatched. Keys are set on
+`config.settings.settings` per test so a key in the session environment or `.env`
+cannot change the outcome. The last section also covers the log redaction that
+scripts/run_experiment.py installs the same way.
 """
 
 from __future__ import annotations
@@ -10,10 +12,13 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import logging
 import re
 import sys
+import threading
 import time
 import zipfile
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,7 +32,8 @@ from responses import matchers
 from config.settings import settings
 from utils.time import KST, kst_year
 
-_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "check_sources.py"
+_SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+_SCRIPT = _SCRIPTS / "check_sources.py"
 _spec = importlib.util.spec_from_file_location("check_sources", _SCRIPT)
 assert _spec is not None and _spec.loader is not None
 cs = importlib.util.module_from_spec(_spec)
@@ -36,11 +42,12 @@ _spec.loader.exec_module(cs)
 
 DART = "https://opendart.fss.or.kr/api"
 ECOS_RE = re.compile(r"https://ecos\.bok\.or\.kr/api/StatisticSearch/.+")
-CNN_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
 COINGECKO = "https://api.coingecko.com/api/v3"
+TAVILY_SEARCH = "https://api.tavily.com/search"
 
 DART_SECRET = "DART-TEST-SECRET-VALUE"
 ECOS_SECRET = "ECOS-TEST-SECRET-VALUE"
+AV_SECRET = "AV-TEST-SECRET-VALUE"
 KEY_ATTRS = (
     "dart_api_key",
     "ecos_api_key",
@@ -57,6 +64,16 @@ def _no_keys(monkeypatch: pytest.MonkeyPatch, isolated_cache_dir: Path) -> None:
         monkeypatch.setattr(settings, attr, None)
     for name in cs.SECRET_ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_log_record_factory() -> Iterator[None]:
+    """main() installs log redaction process-wide on purpose; keep it out of other tests."""
+    factory = logging.getLogRecordFactory()
+    try:
+        yield
+    finally:
+        logging.setLogRecordFactory(factory)
 
 
 def _run(tmp_path: Path, capsys: pytest.CaptureFixture[str], *args: str) -> tuple[int, dict, dict, str]:
@@ -223,17 +240,41 @@ def test_alpha_vantage_needs_opt_in_even_with_a_key(
 def test_http_error_is_request_failed_with_status(
     mocked_responses: responses.RequestsMock, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    mocked_responses.add(responses.GET, CNN_URL, status=418, body="I'm a teapot")
+    mocked_responses.add(responses.GET, f"{COINGECKO}/simple/price", status=418, body="I'm a teapot")
 
-    _, rows, _, _ = _run(tmp_path, capsys, "--only", "fear_greed")
+    _, rows, _, _ = _run(tmp_path, capsys, "--only", "coingecko")
 
-    row = rows["fear_greed"]
+    row = rows["coingecko"]
     assert (row["key"], row["request"], row["data"], row["as_of"]) == ("not_required", "failed", "n/a", None)
     assert row["http_status"] == 418
     assert row["error_type"] == "DataSourceUnavailableError"
-    # Whatever the client handed agents (older clients: score 50; newer: available=False), the
-    # check reports the transport failure and names what the client returned.
+    # The client swallowed the HTTPError into available=False; the check reports the transport
+    # failure and names what the client returned.
     assert "client returned" in row["note"]
+
+
+@pytest.mark.parametrize("status", [432, 433])
+def test_tavily_quota_status_is_rate_limit(
+    mocked_responses: responses.RequestsMock,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    status: int,
+) -> None:
+    """432 = plan usage limit, 433 = pay-as-you-go limit: quota, not an outage."""
+    settings.tavily_api_key = "tvly-TEST-SECRET-VALUE"
+    mocked_responses.add(
+        responses.POST,
+        TAVILY_SEARCH,
+        status=status,
+        json={"detail": {"error": "This request exceeds your plan's set usage limit."}},
+    )
+
+    _, rows, _, stdout = _run(tmp_path, capsys, "--only", "tavily_news")
+
+    row = rows["tavily_news"]
+    assert (row["key"], row["request"], row["data"]) == ("set", "failed", "n/a")
+    assert (row["error_type"], row["http_status"]) == ("RateLimitError", status)
+    assert "tvly-TEST-SECRET-VALUE" not in stdout
 
 
 def test_dart_auth_failure_is_typed_and_dependents_are_not_sent(
@@ -327,8 +368,7 @@ def test_minimum_set_with_as_of_exits_0(
     assert code == 0
     assert payload["minimum"] == {
         "ok": True,
-        "required": [*cs.MINIMUM_REQUIRED, "one of fdr_prices|pykrx_index_ohlcv"],
-        "price_source": "fdr_prices",
+        "required": ["dart_corp_code", "dart_company", "dart_financials", "ecos_base_rate", "fdr_prices"],
         "missing": [],
     }
     assert payload["checked_at"].endswith("+09:00")
@@ -346,6 +386,50 @@ def test_minimum_set_with_as_of_exits_0(
     assert rows["ecos_base_rate"]["as_of"] == "2026-10-24"
     assert "-> exit 0" in stdout
     assert DART_SECRET not in stdout and ECOS_SECRET not in stdout
+
+
+def test_kospi_index_does_not_stand_in_for_stock_prices(
+    mocked_responses: responses.RequestsMock,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No agent reads a stock's own prices from pykrx, so a working KOSPI series is not enough."""
+
+    def fdr_down(*args: Any, **kwargs: Any) -> pd.DataFrame:
+        raise ConnectionError("fdr upstream unreachable")
+
+    monkeypatch.setattr("FinanceDataReader.DataReader", fdr_down)
+    monkeypatch.setenv("KRX_ID", "krx-test-user")
+    monkeypatch.setenv("KRX_PW", "krx-test-password")
+    kospi = pd.DataFrame(
+        {"시가": [1.0], "고가": [1.0], "저가": [1.0], "종가": [2610.0], "거래량": [1]},
+        index=pd.to_datetime(["2026-10-23"]),
+    )
+    monkeypatch.setattr(
+        cs, "_import_pykrx_stock", lambda: (SimpleNamespace(get_index_ohlcv_by_date=lambda *a: kospi), True)
+    )
+    settings.dart_api_key = DART_SECRET
+    settings.ecos_api_key = ECOS_SECRET
+    _register_dart_success(mocked_responses)
+    mocked_responses.add(responses.GET, ECOS_RE, json=_ecos_rows())
+
+    code, rows, payload, stdout = _run(
+        tmp_path,
+        capsys,
+        "--only",
+        "fdr_prices,pykrx_index_ohlcv,dart_corp_code,dart_company,dart_financials,ecos_base_rate",
+    )
+
+    assert code == 1
+    assert payload["exit_code"] == 1
+    assert payload["minimum"]["ok"] is False
+    assert payload["minimum"]["missing"] == ["fdr_prices"]
+    assert (rows["fdr_prices"]["request"], rows["fdr_prices"]["data"]) == ("failed", "n/a")
+    assert (rows["pykrx_index_ohlcv"]["request"], rows["pykrx_index_ohlcv"]["data"]) == ("ok", "ok")
+    for source in ("dart_corp_code", "dart_company", "dart_financials", "ecos_base_rate"):
+        assert (rows[source]["request"], rows[source]["data"]) == ("ok", "ok")
+    assert "missing ['fdr_prices'] -> exit 1" in stdout
 
 
 def test_pykrx_checks_report_as_of_and_hide_login_output(
@@ -456,6 +540,7 @@ def test_slow_check_times_out_without_blocking_the_rest(
 
     monkeypatch.setattr("FinanceDataReader.DataReader", slow)
     monkeypatch.setattr(cs.shutil, "which", lambda name: None)
+    monkeypatch.delenv("CHROME_BIN", raising=False)
 
     started = time.monotonic()
     _, rows, _, _ = _run(tmp_path, capsys, "--only", "fdr_prices,paxnet", "--timeout", "0.2")
@@ -465,6 +550,92 @@ def test_slow_check_times_out_without_blocking_the_rest(
     pax = rows["paxnet"]
     assert (pax["key"], pax["request"], pax["data"]) == ("not_required", "not_sent", "n/a")
     assert "not on PATH" in pax["note"] and "--crawl-paxnet" in pax["note"]
+
+
+# ---------------------------------------------------------------------------
+# Paxnet: the crawler decides, PATH / CHROME_BIN are only noted
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def paxnet_client(monkeypatch: pytest.MonkeyPatch) -> Any:
+    from data import paxnet_crawl_client
+
+    monkeypatch.setattr(paxnet_crawl_client, "SELENIUM_AVAILABLE", True)
+    monkeypatch.delenv("CHROME_BIN", raising=False)
+    return paxnet_crawl_client
+
+
+def test_paxnet_without_flag_sends_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, paxnet_client: Any
+) -> None:
+    def must_not_crawl(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("no crawl without --crawl-paxnet")
+
+    monkeypatch.setattr(paxnet_client, "fetch_paxnet_discussions", must_not_crawl)
+    monkeypatch.setattr(cs.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    _, rows, _, _ = _run(tmp_path, capsys, "--only", "paxnet")
+
+    pax = rows["paxnet"]
+    assert (pax["request"], pax["data"], pax["error_type"]) == ("not_sent", "n/a", None)
+    assert pax["note"].startswith("crawl skipped (pass --crawl-paxnet)")
+
+
+def test_paxnet_crawls_without_chrome_on_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, paxnet_client: Any
+) -> None:
+    """macOS / Windows: Chrome is not on PATH, the crawler still finds it."""
+    calls: list[tuple[str, int]] = []
+
+    def crawl(stock_code: str, max_posts: int = 10) -> dict[str, Any]:
+        calls.append((stock_code, max_posts))
+        return {"status": "success", "posts": [{"title": "t", "content": "c", "url": "u"}] * 2}
+
+    monkeypatch.setattr(paxnet_client, "fetch_paxnet_discussions", crawl)
+    monkeypatch.setattr(cs.shutil, "which", lambda name: None)
+    monkeypatch.setenv("CHROME_BIN", str(tmp_path / "no-chrome-here"))
+
+    _, rows, _, _ = _run(tmp_path, capsys, "--only", "paxnet", "--crawl-paxnet")
+
+    assert calls == [("005930", 3)]
+    pax = rows["paxnet"]
+    assert (pax["request"], pax["data"], pax["coverage"]) == ("ok", "ok", "posts=2")
+    assert "not on PATH" in pax["note"]
+    assert "no-chrome-here (no such file)" in pax["note"]
+    assert "informational" in pax["note"]
+
+
+def test_paxnet_driver_failure_is_reported_from_the_crawl(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, paxnet_client: Any
+) -> None:
+    monkeypatch.setattr(
+        paxnet_client, "fetch_paxnet_discussions", lambda *a, **kw: {"error": "드라이버 설정에 실패했습니다."}
+    )
+    monkeypatch.setattr(cs.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    _, rows, _, _ = _run(tmp_path, capsys, "--only", "paxnet", "--crawl-paxnet")
+
+    pax = rows["paxnet"]
+    assert (pax["request"], pax["data"], pax["error_type"]) == ("not_sent", "n/a", "ConfigurationError")
+    assert "Chrome driver did not start" in pax["note"]
+    assert "드라이버 설정에 실패했습니다." in pax["note"]
+
+
+def test_paxnet_without_selenium_does_not_crawl(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, paxnet_client: Any
+) -> None:
+    def must_not_crawl(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("PaxnetCrawlClient cannot start without selenium")
+
+    monkeypatch.setattr(paxnet_client, "SELENIUM_AVAILABLE", False)
+    monkeypatch.setattr(paxnet_client, "fetch_paxnet_discussions", must_not_crawl)
+
+    _, rows, _, _ = _run(tmp_path, capsys, "--only", "paxnet", "--crawl-paxnet")
+
+    pax = rows["paxnet"]
+    assert (pax["request"], pax["data"]) == ("not_sent", "n/a")
+    assert "selenium, which is not importable" in pax["note"]
 
 
 # ---------------------------------------------------------------------------
@@ -492,3 +663,117 @@ def test_unknown_source_id_is_a_usage_error() -> None:
     with pytest.raises(SystemExit) as excinfo:
         cs.parse_args(["--only", "fdr_prices,nope"])
     assert excinfo.value.code == 2
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "1e10", "abc"])
+def test_timeout_must_be_a_positive_number(value: str, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        cs.parse_args(["--timeout", value])
+    assert excinfo.value.code == 2
+    assert "--timeout" in capsys.readouterr().err
+
+
+def test_timeout_accepts_a_fraction_of_a_second() -> None:
+    assert cs.parse_args(["--timeout", "0.5"]).timeout == 0.5
+
+
+# ---------------------------------------------------------------------------
+# log redaction in the CLI entry points
+# ---------------------------------------------------------------------------
+
+
+def _leaky_dart_log() -> None:
+    logging.getLogger("data.dart_api_client").warning(
+        "기업개황 조회 실패: 404 Client Error for url: %s/company.json?crtfc_key=%s&corp_code=00126380",
+        DART,
+        DART_SECRET,
+    )
+
+
+def test_log_from_an_abandoned_check_is_masked_on_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After main() returns, nothing captures a timed-out check: its WARNING goes to
+    logging.lastResort (stderr), so only the record factory main() installed can mask it."""
+    settings.dart_api_key = DART_SECRET
+    logging.setLogRecordFactory(logging.LogRecord)
+    release = threading.Event()
+
+    def slow_then_log(*args: Any, **kwargs: Any) -> pd.DataFrame:
+        release.wait(5)
+        _leaky_dart_log()
+        return _prices()
+
+    monkeypatch.setattr("FinanceDataReader.DataReader", slow_then_log)
+    root = logging.getLogger()
+    saved_handlers = root.handlers[:]
+    root.handlers.clear()  # a CLI process has no root handlers outside main()
+    try:
+        _leaky_dart_log()
+        control = capsys.readouterr().err
+        _, rows, _, _ = _run(tmp_path, capsys, "--only", "fdr_prices", "--timeout", "0.1")
+        abandoned = [t for t in cs._ABANDONED_THREADS if t.is_alive()]
+        release.set()
+        for thread in abandoned:
+            thread.join(5)
+        err = capsys.readouterr().err
+    finally:
+        release.set()
+        root.handlers[:] = saved_handlers
+
+    assert DART_SECRET in control  # without redaction the key reaches stderr
+    assert rows["fdr_prices"]["request"] == "timeout"
+    assert abandoned and not any(t.is_alive() for t in abandoned)
+    assert "기업개황 조회 실패" in err
+    assert "crtfc_key=***" in err
+    assert DART_SECRET not in err
+
+
+def test_run_experiment_masks_a_logged_key_on_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """run_experiment configures no logging, so client WARNINGs reach stderr via lastResort."""
+    import lab.runner
+
+    spec = importlib.util.spec_from_file_location("run_experiment", _SCRIPTS / "run_experiment.py")
+    assert spec is not None and spec.loader is not None
+    run_experiment = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(run_experiment)
+
+    settings.alpha_vantage_api_key = AV_SECRET
+
+    def fake_run_once(topology: str, code: str, name: str, *args: Any) -> Any:
+        logging.getLogger("data.alpha_vantage_client").warning(
+            "환율 조회 실패: 401 Client Error for url: https://www.alphavantage.co/query?function=FX_DAILY&apikey=%s",
+            AV_SECRET,
+        )
+        return SimpleNamespace(
+            topology=topology,
+            stock_code=code,
+            succeeded=True,
+            error=None,
+            notes={},
+            elapsed_s=0.0,
+            stats={"llm_calls": 0, "input_tokens": 0, "output_tokens": 0},
+            grounding={"grounded": 0, "checked": 0},
+            tool_calls={"by_source": {}, "with_data": 0, "calls": 0},
+            coverage={"agents": []},
+            to_dict=lambda: {"topology": topology, "stock_code": code},
+        )
+
+    monkeypatch.setattr(lab.runner, "run_once", fake_run_once)
+    monkeypatch.setattr(lab.runner, "save_record", lambda *args, **kwargs: None)
+    logging.setLogRecordFactory(logging.LogRecord)
+    root = logging.getLogger()
+    saved_handlers = root.handlers[:]
+    root.handlers.clear()
+    try:
+        code = run_experiment.main(["--topologies", "progressive", "--out", str(tmp_path / "run")])
+        err = capsys.readouterr().err
+    finally:
+        root.handlers[:] = saved_handlers
+
+    assert code == 0
+    assert "환율 조회 실패" in err
+    assert "apikey=***" in err
+    assert AV_SECRET not in err
