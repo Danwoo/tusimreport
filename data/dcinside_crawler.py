@@ -2,7 +2,6 @@
 DCInside Stock Gallery Crawler
 디시인사이드 주식 갤러리 크롤링
 
-🆕 P2-1-C: 커뮤니티 차별화 전략 (Option C)
 - 실제 투자자 의견 수집
 - 로그인 불필요 공개 게시판
 - BeautifulSoup + requests 기반

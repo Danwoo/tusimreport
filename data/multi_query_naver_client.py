@@ -2,7 +2,6 @@
 Multi-Query Naver News Client
 멀티 쿼리 전략으로 뉴스 커버리지 5배 확장
 
-🎯 P2-1-B: Naver API 최적화 (Option B)
 - 단일 쿼리 10개 → 멀티 쿼리 50개
 - 중복 제거 및 품질 필터링
 - 다각화된 검색어로 포괄적 커버리지

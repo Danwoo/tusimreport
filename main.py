@@ -429,7 +429,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # 🔧 Phase 3 개선: API 키 상태 사이드바
+    # API 키 상태 사이드바
     with st.sidebar:
         st.subheader("🔑 API 키 상태")
         api_status = get_api_key_status()
@@ -439,7 +439,7 @@ def main():
         st.divider()
         st.caption("💡 API 키 설정: docs/API_KEYS.md")
 
-    # 🔧 Phase 3 개선: API 키 최소 요구사항 확인
+    # API 키 최소 요구사항 확인
     has_llm, warnings = check_minimum_requirements()
 
     if not has_llm:
@@ -491,7 +491,7 @@ def main():
             if not symbol:
                 st.error("❌ 종목코드를 입력해주세요!")
             else:
-                # 🔧 Phase 3 개선: 종목 코드 검증
+                # 종목 코드 검증
                 is_valid, validation_msg = validate_stock_code(symbol.strip())
                 if not is_valid:
                     st.error(validation_msg)
@@ -520,7 +520,7 @@ def main():
             "**🤖 AI 전문가 구성 (8인):**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석 💬 커뮤니티분석\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News • Paxnet"
         )
 
-    # 🔧 P0-2: Tab UI 구조 - 분석 결과 vs AI 대화 분리
+    # 탭: 분석 결과 / AI 대화
     if st.session_state.get("analysis_completed") and st.session_state.get("chat_session"):
         st.markdown("---")
 

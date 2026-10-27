@@ -16,7 +16,7 @@ from agents.korean_comparative_agent import create_comparative_agent
 from agents.korean_context_agent import create_context_agent
 from agents.korean_esg_analysis_agent import create_esg_agent
 from agents.korean_financial_react_agent import get_financial_react_agent
-from agents.korean_global_market_agent import create_global_market_agent  # 🆕 P1-3
+from agents.korean_global_market_agent import create_global_market_agent
 from agents.korean_institutional_trading_agent import create_institutional_trading_agent
 from agents.korean_sentiment_agent import create_sentiment_agent
 from config.llm_factory import build_llm
@@ -40,7 +40,7 @@ def get_supervisor_llm():
 
 
 def create_all_agents():
-    """모든 9개의 전문 분석 에이전트를 생성합니다. (🆕 P1-3: global_market_expert 추가)"""
+    """9개 전문 분석 에이전트를 생성합니다."""
     try:
         agents = {
             "context_expert": create_context_agent(),
@@ -51,7 +51,7 @@ def create_all_agents():
             "comparative_expert": create_comparative_agent(),
             "esg_expert": create_esg_agent(),
             "community_expert": create_community_agent(),
-            "global_market_expert": create_global_market_agent(),  # 🆕 P1-3
+            "global_market_expert": create_global_market_agent(),
         }
 
         logger.info(f"Successfully created {len(agents)} expert agents: {list(agents.keys())}")

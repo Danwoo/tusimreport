@@ -52,7 +52,7 @@ PAGE_CSS = """
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     @media (max-width: 768px) { .main-title { font-size: 1.8rem; } .input-section { padding: 0.8rem; } }
 
-    /* 투자 의견 카드 스타일 (Level 3) */
+    /* 투자 의견 카드 스타일 */
     .investment-opinion-card { background: white; border-radius: 12px; padding: 1.5rem; margin: 1.5rem 0;
                                border: 2px solid #e2e8f0; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
     .opinion-header { text-align: center; padding: 1.5rem; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
@@ -87,7 +87,7 @@ PAGE_CSS = """
     .factor-icon { font-size: 1.1rem; margin-top: 0.1rem; }
     .factor-text { flex: 1; color: #475569; font-size: 0.9rem; line-height: 1.4; }
 
-    /* Level 3: 목표가, 손절가, R/R, 분할매수 */
+    /* 목표가, 손절가, R/R, 분할매수 */
     .price-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 1rem 0; }
     .price-item { background: #f9fafb; padding: 1rem; border-radius: 8px; border: 1px solid #e5e7eb; }
     .price-label { font-size: 0.8rem; color: #6b7280; margin-bottom: 0.3rem; font-weight: 600; }

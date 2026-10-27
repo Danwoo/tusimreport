@@ -115,7 +115,7 @@ def validate_api_keys() -> dict[str, bool]:
         "naver": _is_valid_api_key(settings.naver_client_id)
         and _is_valid_api_key(settings.naver_client_secret),
         "tavily": _is_valid_api_key(settings.tavily_api_key),
-        "alpha_vantage": _is_valid_api_key(settings.alpha_vantage_api_key),  # 🆕 P1-3
+        "alpha_vantage": _is_valid_api_key(settings.alpha_vantage_api_key),
     }
 
 
@@ -138,9 +138,7 @@ def get_api_key_status() -> dict[str, str]:
         "ecos": "✅ 설정됨" if validation["ecos"] else "⚠️ 미설정 (경제 지표 제한)",
         "naver": "✅ 설정됨" if validation["naver"] else "⚠️ 미설정 (뉴스 분석 제한)",
         "tavily": "✅ 설정됨" if validation["tavily"] else "ℹ️ 미설정 (선택사항)",
-        "alpha_vantage": "✅ 설정됨"
-        if validation["alpha_vantage"]
-        else "ℹ️ 미설정 (글로벌 시장 제한)",  # 🆕 P1-3
+        "alpha_vantage": "✅ 설정됨" if validation["alpha_vantage"] else "ℹ️ 미설정 (글로벌 시장 제한)",
     }
 
 

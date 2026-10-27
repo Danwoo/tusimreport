@@ -42,7 +42,7 @@ def generate_investment_opinion(
     company_name: str, stock_code: str, agent_results: dict[str, Any], current_price: float | None = None
 ) -> InvestmentOpinion:
     """
-    🔧 P1-1: Level 3 투자 의견 생성 (목표가, 손절가, R/R 비율, 분할 매수 전략)
+    투자 의견 생성 (목표가, 손절가, R/R 비율, 분할 매수 전략 포함)
 
     8개 에이전트 분석 결과를 종합하여 고급 투자 의견 생성
 
@@ -72,7 +72,6 @@ def generate_investment_opinion(
             "key_positives": List[str],
             "key_risks": List[str],
             "timeframe": "단기(1-3개월)" | "중기(3-6개월)" | "장기(6개월+)",
-            # 🆕 Level 3 추가 필드
             "current_price": float,
             "target_price": float,
             "stop_loss": float,
@@ -82,9 +81,9 @@ def generate_investment_opinion(
         }
     """
     try:
-        logger.info(f"🔧 P1-1: Generating Level 3 investment opinion for {company_name} ({stock_code})")
+        logger.info(f"Generating investment opinion for {company_name} ({stock_code})")
 
-        # 🆕 현재가 추출 (없으면 FinanceDataReader로 가져오기)
+        # 현재가 추출 (없으면 FinanceDataReader로 가져오기)
         if current_price is None:
             current_price = _extract_current_price(stock_code, agent_results)
             logger.info(f"Current price extracted: {current_price:,}원")
@@ -97,7 +96,6 @@ def generate_investment_opinion(
         # 8개 에이전트 결과 요약
         analysis_summary = _summarize_agent_results(agent_results)
 
-        # 🔧 P1-1: Level 3 시스템 프롬프트 (목표가, 손절가, R/R, 분할매수 추가)
         system_prompt = f"""당신은 한국 주식 투자 전문 애널리스트입니다.
 
 **역할**:
@@ -115,7 +113,7 @@ def generate_investment_opinion(
 - 20-39%: 에이전트 의견 충돌 많음 (낮음)
 - 0-19%: 데이터 부족 또는 심각한 불일치 (매우 낮음)
 
-**🆕 Level 3 추가 분석 요구사항**:
+**추가 분석 요구사항**:
 1. **목표가 (target_price)**:
    - 현재가: {current_price:,}원
    - 3-6개월 목표가를 재무/기술/기관 분석 기반으로 산출
@@ -221,7 +219,6 @@ def generate_investment_opinion(
         # R/R는 음수/0 차단 + 합리적 상한(10배 이상은 비현실)
         rr_ratio = max(0.1, min(10.0, rr_ratio))
 
-        # 🔧 P1-1: Level 3 결과 포맷팅 (목표가, 손절가, R/R, 분할매수 추가)
         result = {
             "company_name": company_name,
             "stock_code": stock_code,
@@ -231,7 +228,6 @@ def generate_investment_opinion(
             "key_positives": opinion_data.get("key_positives", []),
             "key_risks": opinion_data.get("key_risks", []),
             "timeframe": opinion_data.get("timeframe", "중기(3-6개월)"),
-            # 🆕 Level 3 추가 필드
             "current_price": current_price,
             "target_price": target_price,
             "stop_loss": stop_loss,
@@ -263,7 +259,7 @@ def generate_investment_opinion(
 
         result["timestamp"] = kst_isoformat()
 
-        logger.info(f"✅ Level 3 투자 의견 생성: {result['opinion']} (신뢰도: {result['confidence']}%)")
+        logger.info(f"투자 의견 생성: {result['opinion']} (신뢰도: {result['confidence']}%)")
         logger.info(
             f"   목표가: {result['target_price']:,}원, 손절가: {result['stop_loss']:,}원, R/R: {result['risk_reward_ratio']}"
         )
@@ -326,7 +322,7 @@ def _summarize_agent_results(agent_results: dict[str, Any]) -> str:
 
 def _extract_current_price(stock_code: str, agent_results: dict[str, Any]) -> float:
     """
-    🆕 P1-1: 현재가 추출
+    현재가 추출
 
     우선순위:
     1. agent_results에서 추출 시도
@@ -375,7 +371,7 @@ def _extract_current_price(stock_code: str, agent_results: dict[str, Any]) -> fl
 def _create_fallback_opinion(
     company_name: str, stock_code: str, error_msg: str, current_price: float = 100000.0
 ) -> dict[str, Any]:
-    """🔧 P1-1: Level 3 fallback 투자 의견 (에러 발생 시)"""
+    """오류 시 돌려주는 fallback 투자 의견."""
     return {
         "company_name": company_name,
         "stock_code": stock_code,
@@ -385,7 +381,6 @@ def _create_fallback_opinion(
         "key_positives": ["데이터 부족으로 판단 어려움"],
         "key_risks": ["분석 오류로 리스크 평가 불가"],
         "timeframe": "중기(3-6개월)",
-        # 🆕 Level 3 필드
         "current_price": current_price,
         "target_price": int(current_price * 1.05),
         "stop_loss": int(current_price * 0.95),
