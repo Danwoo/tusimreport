@@ -162,7 +162,7 @@ def _rr_label(ratio: float) -> str:
 
 
 def create_investment_opinion_card(opinion_data: dict[str, Any]) -> str:
-    """Level 3 투자 의견 카드 HTML (목표가/손절가/R&R/분할매수 포함)."""
+    """투자 의견 카드 HTML (목표가/손절가/R&R/분할매수 포함)."""
     opinion = opinion_data.get("opinion", "HOLD")
     # opinion은 BUY/HOLD/SELL 화이트리스트로만 매핑되므로 raw 사용 안전
     if opinion not in ("BUY", "HOLD", "SELL"):

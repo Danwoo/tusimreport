@@ -2,7 +2,6 @@
 Multi-Query Tavily Search Client
 다각화된 검색 전략으로 글로벌 뉴스 커버리지 5배 확장
 
-🎯 P2-1-B: Tavily API 최적화 (Option B)
 - 단일 쿼리 10개 → 멀티 쿼리 50개
 - 시간대별/카테고리별 다각화 검색
 - 글로벌 + 한국 매체 균형잡힌 커버리지

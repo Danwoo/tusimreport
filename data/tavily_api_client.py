@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Tavily Search API Client
-
 """
 
 import logging
@@ -26,7 +25,7 @@ class TavilyNewsClient:
 
     def search_company_news(self, company_name: str, max_results: int = 10) -> dict[str, Any]:
         """
-        투자 전문가 최적화: 회사 관련 금융뉴스 검색
+        회사 관련 금융 뉴스 검색
 
         Args:
             company_name: 회사명
@@ -36,13 +35,12 @@ class TavilyNewsClient:
             return {"error": "Tavily API 키가 설정되지 않았습니다."}
 
         try:
-            # 투자 전문가 추천: 간결하고 효과적인 검색 쿼리
             search_query = f"{company_name} stock earnings financial"
 
             payload = {
                 "api_key": self.api_key,
                 "query": search_query,
-                "search_depth": "basic",  # 투자 전문가 추천: 노이즈 최소화
+                "search_depth": "basic",
                 "include_answer": True,  # AI 요약 포함
                 "include_raw_content": False,
                 "max_results": max_results,
@@ -110,6 +108,6 @@ class TavilyNewsClient:
 
 
 def fetch_tavily_company_news(company_name: str, max_results: int = 10) -> dict[str, Any]:
-    """편의 함수: 투자 전문가 최적화 뉴스 검색"""
+    """편의 함수: 회사 관련 뉴스 검색"""
     client = TavilyNewsClient()
     return client.search_company_news(company_name, max_results=max_results)
