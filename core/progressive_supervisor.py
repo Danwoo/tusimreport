@@ -11,7 +11,9 @@ from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from core.agent_status import data_status, summarize_tool_messages
+from langgraph.errors import GraphRecursionError
+
+from core.agent_status import data_status, hit_step_limit, summarize_tool_messages
 from core.context_manager import get_context_manager
 from core.korean_supervisor_langgraph import (
     create_all_agents,
@@ -19,10 +21,23 @@ from core.korean_supervisor_langgraph import (
     get_supervisor_llm,
 )
 from core.run_metrics import CallStats, RunMetricsCallback
-from core.signals import AGENT_TO_SIGNAL, ALL_AGENT_SIGNALS, MIN_AGENTS_FOR_REPORT
+from core.signals import (
+    AGENT_RECURSION_LIMIT,
+    AGENT_TO_SIGNAL,
+    ALL_AGENT_SIGNALS,
+    MIN_AGENTS_FOR_REPORT,
+)
 from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
+
+STEP_LIMIT_REASON = (
+    f"단계 한도({AGENT_RECURSION_LIMIT}) 초과: 도구 호출을 끝내지 못해 분석을 마치지 못했습니다"
+)
+
+
+class StepLimitExceeded(RuntimeError):
+    """전문가 ReAct 루프가 단계 한도 안에 분석을 끝내지 못했다."""
 
 
 class ProgressiveAnalysisEngine:
@@ -72,6 +87,7 @@ class ProgressiveAnalysisEngine:
 
         결과의 status는 '에이전트가 예외 없이 응답했는가'만 뜻한다. 도구가 실제 근거
         데이터를 돌려줬는지는 data_status·tool_summary로, 호출·토큰은 metrics로 따로 담는다.
+        단계 한도(AGENT_RECURSION_LIMIT)에 걸린 실행은 응답이 있어도 status='error'다.
         """
         metrics = RunMetricsCallback()
         started = time.monotonic()
@@ -98,12 +114,21 @@ class ProgressiveAnalysisEngine:
                 agent_name, stock_code, company_name, context_info
             )
 
-            result = agent.invoke(
-                {"messages": [{"role": "user", "content": analysis_request}]},
-                config={"callbacks": [metrics, *(callbacks or [])]},
-            )
+            try:
+                result = agent.invoke(
+                    {"messages": [{"role": "user", "content": analysis_request}]},
+                    config={
+                        "callbacks": [metrics, *(callbacks or [])],
+                        "recursion_limit": AGENT_RECURSION_LIMIT,
+                    },
+                )
+            except GraphRecursionError as e:
+                raise StepLimitExceeded(STEP_LIMIT_REASON) from e
 
             if "messages" in result and result["messages"]:
+                # create_react_agent는 한도에 닿으면 예외 대신 안내 문구로 끝낸다. 그 문구는 분석이 아니다.
+                if hit_step_limit(result["messages"]):
+                    raise StepLimitExceeded(STEP_LIMIT_REASON)
                 last_message = result["messages"][-1]
                 content = last_message.content if hasattr(last_message, "content") else str(last_message)
 

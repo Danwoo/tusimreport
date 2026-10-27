@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
@@ -28,6 +29,8 @@ _META_KEYS = {
     "company_name",
     "data_source",
     "data_sources",
+    "source",
+    "api_status",
     "timestamp",
     "last_updated",
     "message",
@@ -38,7 +41,10 @@ _META_KEYS = {
     "summary",
     "unavailable_data",
     "missing_apis",
+    "statistics",
 }
+# 값 자리에 들어간 '없음' 표기. 문자열이지만 데이터가 아니다.
+_PLACEHOLDER_TEXT = {"n/a", "nan", "none", "null"}
 
 
 @dataclass
@@ -60,20 +66,31 @@ def _parse(content: Any) -> Any:
     return content
 
 
-def _has_payload(value: Any) -> bool:
+def _reports_failure(value: dict[str, Any]) -> bool:
+    """오류나 실패 status를 스스로 밝힌 dict. 함께 든 다른 값(오류 문구 등)은 데이터가 아니다."""
+    if value.get("error"):
+        return True
+    return any(str(value.get(key, "")).lower() in _FAILED_STATUSES for key in ("status", "api_status"))
+
+
+def has_payload(value: Any) -> bool:
+    """메타데이터·실패 표시·빈 값을 빼고도 남는 값이 있는가."""
     # Flags such as available=False describe the data; they are not data.
     if value is None or isinstance(value, bool):
         return False
-    if isinstance(value, int | float):
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, int):
         return True
     if isinstance(value, str):
-        return bool(value.strip())
+        text = value.strip()
+        return bool(text) and text.lower() not in _PLACEHOLDER_TEXT
     if isinstance(value, dict):
-        if value.get("available") is False:
+        if value.get("available") is False or _reports_failure(value):
             return False
-        return any(_has_payload(v) for k, v in value.items() if k not in _META_KEYS)
+        return any(has_payload(v) for k, v in value.items() if k not in _META_KEYS)
     if isinstance(value, list | tuple):
-        return any(_has_payload(v) for v in value)
+        return any(has_payload(v) for v in value)
     return True
 
 
@@ -81,15 +98,14 @@ def classify_tool_output(content: Any) -> tuple[bool, bool]:
     """(오류 여부, 근거 데이터 여부)."""
     parsed = _parse(content)
     if isinstance(parsed, dict):
-        status = str(parsed.get("status", "")).lower()
-        if parsed.get("error") or status in _FAILED_STATUSES:
+        if _reports_failure(parsed):
             return True, False
-        return False, _has_payload(parsed)
+        return False, has_payload(parsed)
     if isinstance(parsed, str):
         lowered = parsed.lower()
         is_error = lowered.startswith(("error", "오류")) or "error:" in lowered[:200]
         return is_error, (not is_error) and bool(parsed.strip())
-    return False, _has_payload(parsed)
+    return False, has_payload(parsed)
 
 
 def summarize_tool_messages(messages: list[Any]) -> ToolSummary:

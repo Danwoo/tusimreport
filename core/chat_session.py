@@ -12,6 +12,8 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from config.llm_factory import build_llm
+from core.korean_supervisor_langgraph import EXPERT_LABELS
+from core.signals import AGENT_TO_SIGNAL
 from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
@@ -21,22 +23,31 @@ class ChatSession:
     """
     분석 결과 기반 대화 세션 관리 클래스
 
-    8개 에이전트 분석 결과를 컨텍스트로 하여
-    사용자와 대화형 상호작용 제공
+    근거 데이터가 있는 전문 에이전트 분석 결과만 컨텍스트로 삼고,
+    나머지 영역은 '데이터 없음'으로 프롬프트에 밝힌다.
     """
 
-    def __init__(self, stock_code: str, company_name: str, analysis_result: dict[str, Any]):
+    def __init__(
+        self,
+        stock_code: str,
+        company_name: str,
+        analysis_result: dict[str, Any],
+        excluded: dict[str, str] | None = None,
+    ):
         """
         세션 초기화
 
         Args:
             stock_code: 종목 코드
             company_name: 회사명
-            analysis_result: 8개 에이전트 분석 결과
+            analysis_result: 에이전트명 → {"status", "content"}. status가 'completed'인
+                (근거 데이터가 있는) 항목만 대화 컨텍스트에 들어간다.
+            excluded: 빠진 영역과 그 사유. 없는 영역은 사유 없이 '데이터 없음'으로 적는다.
         """
         self.stock_code = stock_code
         self.company_name = company_name
         self.analysis_result = analysis_result
+        self.excluded = excluded or {}
         self.created_at = datetime.now()
 
         # 대화 히스토리 + 갱신 락 (Streamlit fragment/동시 입력 보호)
@@ -59,13 +70,37 @@ class ChatSession:
             logger.error(f"LLM 초기화 실패: {e}")
             raise
 
+    def _grounded_results(self) -> dict[str, str]:
+        """근거 데이터가 있는 에이전트의 분석 텍스트 (AGENT_TO_SIGNAL 순서)."""
+        grounded = {}
+        for name in AGENT_TO_SIGNAL:
+            state = self.analysis_result.get(name)
+            if not isinstance(state, dict) or state.get("status") != "completed":
+                continue
+            content = str(state.get("content") or "").strip()
+            if content:
+                grounded[name] = content
+        return grounded
+
+    def _missing_section(self, grounded: dict[str, str]) -> str:
+        missing = [name for name in AGENT_TO_SIGNAL if name not in grounded]
+        if not missing:
+            return ""
+        lines = []
+        for name in missing:
+            reason = self.excluded.get(name)
+            label = EXPERT_LABELS.get(name, name)
+            lines.append(f"- {label}: 데이터 없음 ({reason})" if reason else f"- {label}: 데이터 없음")
+        return (
+            "\n**데이터 없음 영역** (근거 데이터가 없어 위 결과에 넣지 않은 분석):\n"
+            + "\n".join(lines)
+            + "\n"
+        )
+
     def _create_system_prompt(self) -> str:
-        """
-        시스템 프롬프트 생성
-        8개 에이전트 분석 결과를 컨텍스트로 포함
-        """
-        # 분석 결과 요약
-        analysis_summary = self._summarize_analysis()
+        """근거 있는 분석 결과와 빠진 영역을 담은 시스템 프롬프트."""
+        grounded = self._grounded_results()
+        analysis_summary = self._summarize_analysis(grounded)
 
         prompt = f"""당신은 한국 주식 투자 전문 AI 어시스턴트입니다.
 
@@ -73,8 +108,9 @@ class ChatSession:
 - 종목: {self.company_name} ({self.stock_code})
 - 분석 시간: {self.created_at.strftime("%Y-%m-%d %H:%M")}
 
-**8개 전문 에이전트 분석 결과:**
+**전문 에이전트 분석 결과 ({len(grounded)}/{len(AGENT_TO_SIGNAL)}개 영역):**
 {analysis_summary}
+{self._missing_section(grounded)}
 
 **역할:**
 1. 위 분석 결과를 바탕으로 사용자 질문에 답변합니다
@@ -85,6 +121,7 @@ class ChatSession:
 
 **주의사항:**
 - 분석 결과에 없는 내용은 추측하지 말고 "분석 결과에 없습니다"라고 말합니다
+- '데이터 없음' 영역을 물으면 그 영역은 근거 데이터가 없어 분석하지 못했다고 답합니다
 - 투자 권유가 아니라 참고 정보임을 명시합니다
 - 리스크를 항상 함께 언급합니다
 
@@ -95,30 +132,13 @@ class ChatSession:
 """
         return prompt
 
-    def _summarize_analysis(self) -> str:
-        """분석 결과를 텍스트로 요약"""
+    def _summarize_analysis(self, grounded: dict[str, str]) -> str:
+        """근거 있는 분석 결과를 영역별로 앞부분만 옮긴다."""
         summary_parts = []
-
-        # 각 에이전트 결과 요약
-        agent_names = {
-            "context_expert": "🌍 시장 환경",
-            "sentiment_expert": "📰 뉴스 여론",
-            "financial_expert": "💰 재무 상태",
-            "advanced_technical_expert": "📈 기술적 분석",
-            "institutional_trading_expert": "🏦 기관 수급",
-            "comparative_expert": "⚖️ 상대 가치",
-            "esg_expert": "🌱 ESG",
-            "community_expert": "💬 커뮤니티",
-        }
-
-        for agent_key, agent_title in agent_names.items():
-            if agent_key in self.analysis_result:
-                content = self.analysis_result[agent_key].get("content", "분석 데이터 없음")
-                # 너무 길면 앞부분만
-                if len(content) > 500:
-                    content = content[:500] + "..."
-                summary_parts.append(f"{agent_title}:\n{content}\n")
-
+        for name, content in grounded.items():
+            if len(content) > 500:
+                content = content[:500] + "..."
+            summary_parts.append(f"{EXPERT_LABELS.get(name, name)}:\n{content}\n")
         return "\n".join(summary_parts)
 
     def ask(self, user_question: str) -> str:
@@ -181,7 +201,10 @@ class ChatSession:
 
 
 def create_chat_session(
-    stock_code: str, company_name: str, analysis_result: dict[str, Any]
+    stock_code: str,
+    company_name: str,
+    analysis_result: dict[str, Any],
+    excluded: dict[str, str] | None = None,
 ) -> ChatSession | None:
     """
     채팅 세션 생성 헬퍼 함수
@@ -189,13 +212,14 @@ def create_chat_session(
     Args:
         stock_code: 종목 코드
         company_name: 회사명
-        analysis_result: 분석 결과
+        analysis_result: 에이전트명 → {"status", "content"} (근거 있는 항목만 쓰인다)
+        excluded: 빠진 영역과 그 사유
 
     Returns:
         ChatSession 또는 None (실패 시)
     """
     try:
-        return ChatSession(stock_code, company_name, analysis_result)
+        return ChatSession(stock_code, company_name, analysis_result, excluded)
     except Exception as e:
         logger.error(f"Failed to create chat session: {e}")
         return None

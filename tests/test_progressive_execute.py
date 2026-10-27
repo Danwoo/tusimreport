@@ -235,3 +235,85 @@ class TestPartialFailurePolicy:
             "advanced_technical_expert",
             "global_market_expert",
         }
+
+
+class TestStepLimit:
+    """전문가 ReAct 루프에 단계 한도를 걸고, 한도에 걸린 결과는 실패로 처리한다."""
+
+    def test_invoke_passes_recursion_limit_with_callbacks(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from core.signals import AGENT_RECURSION_LIMIT
+
+        body = "분석 " * 50 + AgentSignal.CONTEXT.value
+        engine = _make_engine_with_fake_agent(monkeypatch, body, "context_expert")
+        extra = MagicMock()
+
+        engine.execute_agent_with_context_control("context_expert", "005930", "삼성전자", callbacks=[extra])
+
+        config = engine.agents["context_expert"].invoke.call_args.kwargs["config"]
+        assert config["recursion_limit"] == AGENT_RECURSION_LIMIT
+        assert extra in config["callbacks"]
+        assert len(config["callbacks"]) == 2
+
+    def test_step_limit_text_marks_agent_failed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from langchain_core.messages import AIMessage
+
+        from core.agent_status import STEP_LIMIT_TEXT
+
+        engine = _make_engine_with_fake_agent(monkeypatch, "ignored", "context_expert")
+        engine.agents["context_expert"].invoke.return_value = {
+            "messages": [
+                ToolMessage(content='{"price": 70000}', tool_call_id="a"),
+                AIMessage(content=STEP_LIMIT_TEXT),
+            ]
+        }
+
+        result = engine.execute_agent_with_context_control("context_expert", "005930", "삼성전자")
+
+        assert result["status"] == "error"
+        assert "단계 한도(" in result["error"] and "초과" in result["error"]
+        assert "content" not in result
+
+    def test_graph_recursion_error_marks_agent_failed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from langgraph.errors import GraphRecursionError
+
+        engine = _make_engine_with_fake_agent(monkeypatch, "ignored", "context_expert")
+        engine.agents["context_expert"].invoke.side_effect = GraphRecursionError(
+            "Recursion limit of 25 reached"
+        )
+
+        result = engine.execute_agent_with_context_control("context_expert", "005930", "삼성전자")
+
+        assert result["status"] == "error"
+        assert "단계 한도(" in result["error"] and "초과" in result["error"]
+
+    def test_step_limited_agent_is_excluded_from_report(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from langchain_core.messages import AIMessage
+
+        from core.agent_status import STEP_LIMIT_TEXT
+        from core.signals import AGENT_TO_SIGNAL
+
+        def make_agent(name: str) -> MagicMock:
+            agent = MagicMock()
+            final = AIMessage(content=STEP_LIMIT_TEXT if name == "esg_expert" else "분석 " * 40)
+            agent.invoke.return_value = {
+                "messages": [ToolMessage(content='{"price": 70000}', tool_call_id="c"), final]
+            }
+            return agent
+
+        fakes = {name: make_agent(name) for name in AGENT_TO_SIGNAL}
+        report_calls: list = []
+
+        def fake_report(_llm: Any, analyses: dict, *_a: Any, **kw: Any) -> str:
+            report_calls.append((analyses, kw))
+            return "# 종합 보고서"
+
+        monkeypatch.setattr("core.progressive_supervisor.get_supervisor_llm", lambda: MagicMock())
+        monkeypatch.setattr("core.progressive_supervisor.create_all_agents", lambda: fakes)
+        monkeypatch.setattr("core.progressive_supervisor.generate_comprehensive_report", fake_report)
+
+        events = list(ProgressiveAnalysisEngine().stream_progressive_analysis("005930", "삼성전자"))
+
+        analyses, kwargs = report_calls[0]
+        assert "esg_expert" not in analyses
+        assert "단계 한도(" in kwargs["excluded"]["esg_expert"]
+        assert [e["agent_name"] for e in events if e["type"] == "agent_error"] == ["esg_expert"]

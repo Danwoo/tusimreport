@@ -711,8 +711,10 @@ def get_macro_economic_indicators(indicators_list: list[str] = None) -> dict[str
                 "api_status": "failed",
             }
 
-        # 수출입 - 실제 데이터 또는 에러
-        if not export_data.get("error"):
+        # 수출입 - 실제 데이터 또는 에러. 키가 없으면 오류 없이 빈 목록이 오므로 값으로 판정한다.
+        if not export_data.get("error") and (
+            export_data.get("export_data") or export_data.get("import_data")
+        ):
             indicators["export_data"] = {
                 "data": export_data,
                 "latest_balance": export_data.get("latest_trade_balance"),
@@ -722,7 +724,10 @@ def get_macro_economic_indicators(indicators_list: list[str] = None) -> dict[str
                 "api_status": "success",
             }
         else:
-            indicators["export_data"] = {"error": export_data.get("error"), "api_status": "failed"}
+            indicators["export_data"] = {
+                "error": export_data.get("error") or "수출입 통계 응답이 비어 있음",
+                "api_status": "failed",
+            }
 
         # 성공한 지표 개수 계산
         successful_indicators = len([k for k, v in indicators.items() if v.get("api_status") == "success"])

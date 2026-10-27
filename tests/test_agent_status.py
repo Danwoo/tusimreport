@@ -26,6 +26,19 @@ from core.agent_status import classify_tool_output, data_status, summarize_tool_
         ),
         ("오류: 데이터를 가져올 수 없습니다", (True, False)),
         ("삼성전자 최근 뉴스 3건", (False, True)),
+        (
+            '{"status": "success", "context_summary": {"macro_economics": {"base_interest_rate": '
+            '{"error": "No base rate data found", "api_status": "failed"}}}}',
+            (False, False),
+        ),
+        ('{"rate": {"api_status": "failed", "detail": "timeout"}}', (False, False)),
+        ('{"sections": [{"status": "no_data", "detail": "휴장"}]}', (False, False)),
+        ('{"a": {"error": "x", "value": 1}, "b": {"price": 1}}', (False, True)),
+        (
+            '{"export": {"source": "한국은행 ECOS API", "api_status": "success", "latest": null, "rows": []}}',
+            (False, False),
+        ),
+        ('{"rate": "N/A", "fx": "nan"}', (False, False)),
     ],
 )
 def test_classify_tool_output(content: str, expected: tuple[bool, bool]) -> None:
@@ -65,3 +78,15 @@ def test_hit_step_limit_reads_only_the_last_ai_message() -> None:
     assert hit_step_limit([AIMessage(content="분석"), AIMessage(content=STEP_LIMIT_TEXT)])
     assert not hit_step_limit([AIMessage(content=STEP_LIMIT_TEXT), AIMessage(content="최종 분석")])
     assert not hit_step_limit([ToolMessage(content="x", tool_call_id="1")])
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ('{"rsi": NaN, "macd": Infinity, "signal": -Infinity}', (False, False)),
+        ('{"rsi": NaN, "close": 70000}', (False, True)),
+    ],
+)
+def test_non_finite_numbers_are_not_data(content: str, expected: tuple[bool, bool]) -> None:
+    # ToolNode serialises tool output with json.dumps, which writes float NaN/inf as these literals.
+    assert classify_tool_output(content) == expected
