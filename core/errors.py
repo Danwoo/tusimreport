@@ -28,6 +28,10 @@ class ConfigurationError(TusimError):
     """사용자 환경 설정 문제 (API 키 누락, 잘못된 모델명 등). 재시도해도 무의미."""
 
 
+class ReportGenerationError(TusimError):
+    """종합 보고서를 만들지 못함 (근거 분석 부족, 내용 부족, LLM 호출 실패). 메시지는 한국어 사유."""
+
+
 class ExternalAPIError(TusimError):
     """외부 API 호출 실패의 공통 베이스."""
 

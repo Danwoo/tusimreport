@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from core import korean_supervisor_langgraph as supervisor_mod
+from core.errors import ReportGenerationError
 from core.korean_supervisor_langgraph import (
     AGENT_STAGES,
     generate_comprehensive_report,
@@ -269,36 +270,41 @@ class TestGenerateComprehensiveReport:
         # 응답이 그대로 돌아오는지
         assert "종합 보고서" in report
 
-    def test_too_few_agents_returns_early(self) -> None:
-        """4개 미만의 전문가 분석은 LLM 호출 없이 즉시 '분석 데이터 부족'."""
+    def test_too_few_agents_raises_without_calling_the_llm(self) -> None:
+        """기준(5개) 미만이면 LLM 호출 없이 사유와 함께 실패한다 — 사유 문구를 보고서로 돌려주지 않는다."""
         stub_llm = MagicMock()
-        report = generate_comprehensive_report(
-            stub_llm,
-            {"context_expert": "x" * 200, "sentiment_expert": "y" * 200},
-            "005930",
-            "삼성전자",
-        )
-        assert "분석 데이터 부족" in report
+        with pytest.raises(ReportGenerationError, match="2/9"):
+            generate_comprehensive_report(
+                stub_llm,
+                {"context_expert": "x" * 200, "sentiment_expert": "y" * 200},
+                "005930",
+                "삼성전자",
+            )
         stub_llm.invoke.assert_not_called()
 
-    def test_too_short_analysis_returns_early(self) -> None:
-        """전체 분석 길이가 1000자 미만이면 LLM 호출 전에 'analysis 내용 부족'."""
+    def test_too_short_analysis_raises_without_calling_the_llm(self) -> None:
         stub_llm = MagicMock()
-        report = generate_comprehensive_report(
-            stub_llm,
-            {f"agent_{i}": "x" * 50 for i in range(5)},  # 5개 × 50 = 250자
-            "005930",
-            "삼성전자",
-        )
-        assert "분석 내용 부족" in report
+        with pytest.raises(ReportGenerationError, match="250자"):
+            generate_comprehensive_report(
+                stub_llm,
+                {f"agent_{i}": "x" * 50 for i in range(5)},
+                "005930",
+                "삼성전자",
+            )
         stub_llm.invoke.assert_not_called()
 
-    def test_llm_exception_returns_error_report(self) -> None:
-        """LLM이 raise하면 호출자에게 '## 종합 보고서 생성 오류' 마크다운으로."""
+    def test_llm_failure_raises_with_reason(self) -> None:
         stub_llm = MagicMock()
         stub_llm.invoke.side_effect = RuntimeError("LLM provider rate limit")
 
         analyses = {f"agent_{i}": "x" * 300 for i in range(9)}
-        report = generate_comprehensive_report(stub_llm, analyses, "005930", "삼성전자")
-        assert "종합 보고서 생성 오류" in report
-        assert "rate limit" in report
+        with pytest.raises(ReportGenerationError, match="rate limit"):
+            generate_comprehensive_report(stub_llm, analyses, "005930", "삼성전자")
+
+    def test_empty_llm_response_raises(self) -> None:
+        stub_llm = MagicMock()
+        stub_llm.invoke.return_value = MagicMock(content="  ")
+
+        analyses = {f"agent_{i}": "x" * 300 for i in range(9)}
+        with pytest.raises(ReportGenerationError, match="빈 응답"):
+            generate_comprehensive_report(stub_llm, analyses, "005930", "삼성전자")

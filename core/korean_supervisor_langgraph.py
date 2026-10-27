@@ -20,7 +20,9 @@ from agents.korean_global_market_agent import create_global_market_agent
 from agents.korean_institutional_trading_agent import create_institutional_trading_agent
 from agents.korean_sentiment_agent import create_sentiment_agent
 from config.llm_factory import build_llm
+from core.errors import ReportGenerationError
 from core.signals import AGENT_TO_SIGNAL, MIN_AGENTS_FOR_REPORT
+from utils.redaction import redact
 
 logger = logging.getLogger(__name__)
 
@@ -199,34 +201,36 @@ def generate_comprehensive_report(
 ) -> str:
     """Supervisor가 직접 생성하는 종합 투자 참고자료.
 
+    보고서를 만들 수 없으면 사유를 담은 `ReportGenerationError`를 던진다. 오류 문구를
+    보고서처럼 돌려주면 화면과 실험 기록이 그것을 성공한 보고서로 다루기 때문이다.
+
     Args:
         excluded: 보고서에 반영하지 않은 에이전트와 그 이유. 프롬프트에 명시해
             LLM이 빠진 영역을 지어내지 않게 한다.
         callbacks: LLM 호출 계측용 LangChain 콜백.
     """
-    try:
-        expert_analyses_text = "".join(
-            f"\n\n=== {EXPERT_LABELS.get(expert_key, expert_key)} 분석 ===\n{analysis}\n"
-            for expert_key, analysis in all_analyses.items()
+    expert_analyses_text = "".join(
+        f"\n\n=== {EXPERT_LABELS.get(expert_key, expert_key)} 분석 ===\n{analysis}\n"
+        for expert_key, analysis in all_analyses.items()
+    )
+
+    total_agents = len(AGENT_TO_SIGNAL)
+    total_analysis_length = sum(len(str(analysis)) for analysis in all_analyses.values())
+    logger.info(f"🔍 전문가 분석 총 길이: {total_analysis_length:,}자")
+    logger.info(f"🔍 참여 전문가 수: {len(all_analyses)}/{total_agents}")
+
+    if len(all_analyses) < MIN_AGENTS_FOR_REPORT:
+        raise ReportGenerationError(
+            f"근거 있는 전문가 분석이 {len(all_analyses)}/{total_agents}개로 "
+            f"보고서 기준({MIN_AGENTS_FOR_REPORT}개)에 못 미칩니다"
         )
 
-        total_agents = len(AGENT_TO_SIGNAL)
-        total_analysis_length = sum(len(str(analysis)) for analysis in all_analyses.values())
-        logger.info(f"🔍 전문가 분석 총 길이: {total_analysis_length:,}자")
-        logger.info(f"🔍 참여 전문가 수: {len(all_analyses)}/{total_agents}")
+    if total_analysis_length < 1000:
+        raise ReportGenerationError(
+            f"전문가 분석 내용이 {total_analysis_length}자로 보고서를 쓰기에 부족합니다"
+        )
 
-        if len(all_analyses) < MIN_AGENTS_FOR_REPORT:
-            logger.warning(f"⚠️ 전문가 분석 부족: {len(all_analyses)}/{total_agents}")
-            return (
-                f"## 분석 데이터 부족\n\n{len(all_analyses)}/{total_agents}개 전문가 분석만 완료되어 "
-                "종합 보고서 생성이 제한됩니다."
-            )
-
-        if total_analysis_length < 1000:
-            logger.warning(f"⚠️ 분석 내용 부족: {total_analysis_length}자")
-            return f"## 분석 내용 부족\n\n전문가 분석 내용이 {total_analysis_length}자로 부족하여 종합 보고서 생성이 어렵습니다."
-
-        report_prompt = f"""
+    report_prompt = f"""
 🎯 당신은 **대한민국 최고 증권사의 Chief Investment Research Director**로서, {len(all_analyses)}개 전문가의 심층 분석을 바탕으로 기관투자자급 투자 리서치 보고서를 작성해야 합니다.
 
 📊 **분석 대상**: {stock_code} ({company_name})
@@ -242,29 +246,32 @@ def generate_comprehensive_report(
 {REPORT_TEMPLATE}
 """
 
+    try:
         if callbacks:
             response = supervisor_llm.invoke(report_prompt, config={"callbacks": callbacks})
         else:
             response = supervisor_llm.invoke(report_prompt)
-        report_content = response.content if hasattr(response, "content") else str(response)
-
-        logger.info("🎯 Supervisor가 종합 보고서 생성 완료")
-        logger.info(f"📊 보고서 길이: {len(report_content):,}자")
-
-        if len(report_content) < 3000:
-            logger.warning(f"⚠️ 생성된 보고서가 너무 짧습니다: {len(report_content)}자 (목표: 5,000자+)")
-            logger.warning(f"⚠️ 프롬프트 길이: {len(report_prompt):,}자")
-            logger.warning(f"⚠️ 전문가 분석 데이터: {total_analysis_length:,}자")
-        elif len(report_content) < 5000:
-            logger.info(f"📊 중급 보고서 생성: {len(report_content):,}자 (목표: 5,000자+)")
-        else:
-            logger.info(f"🏆 증권사 급 고품질 보고서 생성 완료: {len(report_content):,}자")
-
-        return report_content
-
     except Exception as e:
-        logger.error(f"종합 보고서 생성 오류: {str(e)}")
-        return f"## 종합 보고서 생성 오류\n\n보고서 생성 중 오류가 발생했습니다: {str(e)}"
+        logger.error(f"종합 보고서 생성 오류: {redact(str(e))}")
+        raise ReportGenerationError(f"보고서 LLM 호출 실패: {redact(str(e))}") from e
+
+    report_content = response.content if hasattr(response, "content") else str(response)
+    if not isinstance(report_content, str) or not report_content.strip():
+        raise ReportGenerationError("보고서 LLM이 빈 응답을 돌려줬습니다")
+
+    logger.info("🎯 Supervisor가 종합 보고서 생성 완료")
+    logger.info(f"📊 보고서 길이: {len(report_content):,}자")
+
+    if len(report_content) < 3000:
+        logger.warning(f"⚠️ 생성된 보고서가 너무 짧습니다: {len(report_content)}자 (목표: 5,000자+)")
+        logger.warning(f"⚠️ 프롬프트 길이: {len(report_prompt):,}자")
+        logger.warning(f"⚠️ 전문가 분석 데이터: {total_analysis_length:,}자")
+    elif len(report_content) < 5000:
+        logger.info(f"📊 중급 보고서 생성: {len(report_content):,}자 (목표: 5,000자+)")
+    else:
+        logger.info(f"🏆 증권사 급 고품질 보고서 생성 완료: {len(report_content):,}자")
+
+    return report_content
 
 
 # ====================
