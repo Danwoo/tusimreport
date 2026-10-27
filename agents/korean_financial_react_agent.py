@@ -22,6 +22,7 @@ from langgraph.prebuilt import create_react_agent  # noqa: E402
 from matplotlib import font_manager  # noqa: E402
 
 from config.llm_factory import build_llm  # noqa: E402
+from core.agent_status import has_payload  # noqa: E402
 from core.signals import AgentSignal  # noqa: E402
 from data.bok_api_client import get_macro_economic_indicators  # noqa: E402
 from data.dart_api_client import get_comprehensive_company_data  # noqa: E402
@@ -399,7 +400,15 @@ def get_macro_economic_data() -> dict[str, Any]:
         if result.get("error"):
             return {"error": redact(f"BOK API error: {result['error']}")}
 
-        return result
+        usable = {
+            name: entry for name, entry in (result.get("indicators") or {}).items() if has_payload(entry)
+        }
+        if not usable:
+            return {
+                "status": "no_data",
+                "error": "한국은행 ECOS 지표를 하나도 받지 못함 (키 미설정 또는 조회 실패)",
+            }
+        return {**result, "indicators": usable}
 
     except Exception as e:
         logger.error(f"Error fetching macro economic data: {str(e)}")
@@ -489,6 +498,12 @@ def get_financial_react_agent():
             prompt=_FINANCIAL_PROMPT,
         )
     return _financial_react_agent
+
+
+def reset_financial_react_agent() -> None:
+    """캐시한 에이전트를 버린다. 다음 호출 때 현재 LLM 설정으로 다시 만든다."""
+    global _financial_react_agent
+    _financial_react_agent = None
 
 
 def __getattr__(name):

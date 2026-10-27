@@ -351,3 +351,34 @@ def test_dart_summary_prefers_latest_annual(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert result["financial_summary"]["operating_income"]["value"] == 0.0
     assert result["financial_basis"]["fiscal_year"] == "2025"
+
+
+def _no_key_bok_response() -> dict[str, Any]:
+    """키 없이 받은 실제 모양: 지표는 모두 실패, 통계 블록과 status 'success'가 붙는다."""
+    failed = {"error": "ECOS API 키 미설정", "api_status": "failed"}
+    return {
+        "indicators": {"base_interest_rate": failed, "exchange_rate": failed, "export_data": failed},
+        "statistics": {"successful_indicators": 1, "total_indicators": 7, "success_rate": "14.3%"},
+        "status": "success",
+        "data_source": "Bank of Korea ECOS API Only (No Mock Data)",
+        "last_updated": "2026-10-27T12:00:00+09:00",
+    }
+
+
+def test_macro_tool_without_usable_indicators_is_not_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agents.korean_financial_react_agent import get_macro_economic_data
+
+    monkeypatch.setattr(
+        "agents.korean_financial_react_agent.get_macro_economic_indicators", lambda: _no_key_bok_response()
+    )
+
+    result = get_macro_economic_data.invoke({})
+
+    assert classify_tool_output(result) == (True, False)
+
+
+def test_statistics_block_alone_is_not_data() -> None:
+    assert classify_tool_output({"statistics": {"successful_indicators": 1}, "status": "success"}) == (
+        False,
+        False,
+    )

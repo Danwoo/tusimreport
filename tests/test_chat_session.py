@@ -121,3 +121,31 @@ def test_llm_exception_returns_korean_error(monkeypatch: pytest.MonkeyPatch) -> 
     answer = session.ask("질문")
     assert answer.startswith("❌")
     assert "오류" in answer
+
+
+def test_system_prompt_keeps_only_grounded_agents_and_names_missing_areas(patched_llm: MagicMock) -> None:
+    from core.korean_supervisor_langgraph import EXPERT_LABELS
+    from core.signals import AGENT_TO_SIGNAL
+
+    analysis = {
+        "context_expert": {"status": "completed", "content": "근거 있는 시장 분석"},
+        "global_market_expert": {"status": "completed", "content": "근거 있는 글로벌 분석"},
+        "esg_expert": {"status": "no_data", "content": "근거 없이 쓴 ESG 글"},
+        "community_expert": {"status": "failed", "content": "분석 실패: 429"},
+    }
+    session = ChatSession(
+        "005930", "삼성전자", analysis, excluded={"community_expert": "실행 실패: 429 Too Many Requests"}
+    )
+    prompt = session.system_prompt
+
+    assert "근거 있는 시장 분석" in prompt
+    assert "근거 있는 글로벌 분석" in prompt
+    assert "근거 없이 쓴 ESG 글" not in prompt
+    assert "분석 실패: 429" not in prompt
+    assert "8개" not in prompt
+    assert f"2/{len(AGENT_TO_SIGNAL)}" in prompt
+    missing_section = prompt.split("데이터 없음", 1)[1]
+    for name in AGENT_TO_SIGNAL:
+        if name not in ("context_expert", "global_market_expert"):
+            assert EXPERT_LABELS[name] in missing_section
+    assert "실행 실패: 429 Too Many Requests" in missing_section

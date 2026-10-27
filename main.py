@@ -1,9 +1,11 @@
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 import streamlit as st
 
-from agents.korean_investment_opinion_agent import generate_investment_opinion
+from agents.korean_investment_opinion_agent import generate_investment_opinion, opinion_sections
 from config.settings import check_minimum_requirements, get_api_key_status, resolve_llm_config, settings
 from core.chat_session import create_chat_session
 from core.korean_supervisor_langgraph import stream_korean_stock_analysis
@@ -36,19 +38,41 @@ st.markdown(PAGE_CSS, unsafe_allow_html=True)
 
 AGENT_NAMES = list(AGENT_TO_SIGNAL.keys())
 
-# 분석 게이트 임계값. 투자 의견·채팅은 엔진의 보고서 기준과 같은 수의 근거 있는
-# 분석이 있을 때만 연다. WARN_BELOW_AGENTS는 "일부 미완료" 경고 컷오프(80% 미만).
+# 투자 의견·채팅은 엔진의 보고서 기준과 같은 수의 근거 있는 분석이 있을 때만 연다.
 MIN_AGENTS_FOR_OPINION = MIN_AGENTS_FOR_REPORT
-WARN_BELOW_AGENTS = max(1, int(len(AGENT_NAMES) * 0.8))
+
+# 한 번의 분석이 남기는 session_state 키. 새 분석을 시작하면 모두 비운다.
+_ANALYSIS_STATE_KEYS = (
+    "chat_session",
+    "chat_history",
+    "analysis_completed",
+    "final_report",
+    "investment_opinion",
+    "analysis_agents",
+    "analysis_excluded",
+    "analysis_agent_statuses",
+)
+
+_STATE_REASONS = {"no_data": "근거 데이터 없음", "failed": "실행 실패"}
 
 
-def _reset_chat_session_state() -> None:
-    """새 분석 시작 전 이전 채팅/완료 상태를 비운다."""
-    for key in ("chat_session", "chat_history"):
+@dataclass
+class StreamOutcome:
+    """분석 스트림을 끝까지 읽은 결과."""
+
+    completed: int = 0
+    final_report: str = ""
+    report_error: str | None = None
+    incomplete: bool = False
+    excluded: dict[str, str] = field(default_factory=dict)
+    agent_statuses: dict[str, Any] = field(default_factory=dict)
+
+
+def _reset_analysis_state() -> None:
+    """새 분석 시작 전 이전 분석의 보고서·투자 의견·채팅 상태를 비운다."""
+    for key in _ANALYSIS_STATE_KEYS:
         if key in st.session_state:
             del st.session_state[key]
-    if "analysis_completed" in st.session_state:
-        st.session_state["analysis_completed"] = False
 
 
 def _prefetch_news_and_chart(symbol: str, company_name: str) -> None:
@@ -78,7 +102,7 @@ def _render_analysis_header(symbol: str, company_name: str) -> None:
 
 
 def _initialize_agent_cards() -> dict:
-    """대기 상태의 빈 카드 8개를 만들고 컨테이너 핸들을 반환."""
+    """에이전트마다 대기 상태의 빈 카드를 만들고 컨테이너 핸들을 반환."""
     containers = {}
     for name in AGENT_NAMES:
         cfg = get_agent_config(name)
@@ -196,21 +220,17 @@ def _consume_analysis_stream(
     agent_states: dict,
     containers: dict,
     render_progress,
-) -> tuple[int, str]:
+) -> StreamOutcome:
     """supervisor 스트림을 소비하며 카드/진행률을 실시간 갱신.
 
     이 함수 안에서 발생하는 모든 로그는 `[s=<session> c=<symbol>]` 접두사를
     얻는다 (bind_session으로 contextvar에 주입). 동시 사용자 두 명이 같은
     프로세스 안에서 분석을 돌려도 로그가 서로 섞이지 않는다.
 
-    Returns: (완료된 에이전트 수, 최종 보고서 텍스트)
+    Returns: 완료 수, 최종 보고서 또는 보고서를 못 만든 사유, 제외 영역
     """
-    completed = 0
-    final_report = ""
     with bind_session(stock_code=symbol):
-        return _consume_inner(
-            symbol, company_name, agent_states, containers, render_progress, completed, final_report
-        )
+        return _consume_inner(symbol, company_name, agent_states, containers, render_progress)
 
 
 def _mark_agent(
@@ -242,18 +262,43 @@ def _show_exclusions(excluded: dict) -> None:
     st.warning(f"다음 영역은 종합 보고서에 반영되지 않았습니다.\n\n{lines}")
 
 
+def _error_reason(error: Any) -> str:
+    """스트림 오류 chunk의 사유. supervisor는 {"error": {"error": 사유, ...}} 모양으로 보낸다."""
+    if isinstance(error, dict):
+        error = error.get("error")
+    return str(error) if error else "알 수 없는 오류"
+
+
+def _grounded_results(agent_states: dict) -> dict[str, str]:
+    """근거 데이터가 있는 분석 텍스트. 투자 의견·채팅의 입력이고, 그 수로 둘을 열지 정한다."""
+    return opinion_sections(
+        {name: state["content"] for name, state in agent_states.items() if state["status"] == "completed"}
+    )
+
+
+def _exclusions(excluded: dict[str, str], agent_states: dict, grounded: dict[str, str]) -> dict[str, str]:
+    """보고서·대화에서 빠진 영역과 사유. 엔진이 준 사유를 쓰고, 없으면 카드 상태로 적는다."""
+    return {
+        name: excluded.get(name)
+        or _STATE_REASONS.get(agent_states.get(name, {}).get("status", ""), "결과 없음")
+        for name in AGENT_NAMES
+        if name not in grounded or name in excluded
+    }
+
+
 def _consume_inner(
     symbol: str,
     company_name: str,
     agent_states: dict,
     containers: dict,
     render_progress,
-    completed: int,
-    final_report: str,
-) -> tuple[int, str]:
+) -> StreamOutcome:
+    outcome = StreamOutcome()
     for chunk in stream_korean_stock_analysis(symbol, company_name):
         if "error" in chunk:
-            st.error(f"분석 중 오류 발생: {chunk['error']}")
+            # report_error와 system_error가 모두 이 모양으로 온다. 보고서 텍스트는 오지 않았다.
+            outcome.report_error = _error_reason(chunk["error"])
+            st.error(f"종합 보고서를 만들지 못했습니다: {outcome.report_error}")
             break
 
         supervisor_data = chunk.get("supervisor", {})
@@ -266,7 +311,7 @@ def _consume_inner(
             agent_states,
             containers,
             render_progress,
-            completed,
+            outcome.completed,
         )
 
         agent_error = supervisor_data.get("agent_error")
@@ -279,17 +324,24 @@ def _consume_inner(
                 agent_states,
                 containers,
             )
-            render_progress(completed)
+            render_progress(outcome.completed)
             continue
 
         if supervisor_data.get("incomplete"):
+            outcome.incomplete = True
+            outcome.excluded = supervisor_data.get("excluded", {})
+            outcome.agent_statuses = supervisor_data.get("agent_statuses", {})
             st.warning(f"종합 보고서를 만들지 않았습니다: {supervisor_data.get('current_stage', '')}")
-            _show_exclusions(supervisor_data.get("excluded", {}))
+            _show_exclusions(outcome.excluded)
             continue
 
         if supervisor_data.get("final_report_generated"):
-            final_report = _extract_final_report(messages, supervisor_data.get("progressive_mode", False))
-            _show_exclusions(supervisor_data.get("excluded", {}))
+            outcome.final_report = _extract_final_report(
+                messages, supervisor_data.get("progressive_mode", False)
+            )
+            outcome.excluded = supervisor_data.get("excluded", {})
+            outcome.agent_statuses = supervisor_data.get("agent_statuses", {})
+            _show_exclusions(outcome.excluded)
             continue
 
         completed_agent = supervisor_data.get("completed_agent")
@@ -306,32 +358,27 @@ def _consume_inner(
                 containers,
             )
             if grounded:
-                completed += 1
-            render_progress(completed)
+                outcome.completed += 1
+            render_progress(outcome.completed)
             logger.info(f"===== {completed_agent} 분석 완료 (근거 데이터: {grounded}) =====")
             continue
 
-        completed = _process_completion_signals(
-            messages, symbol, agent_states, containers, render_progress, completed
+        outcome.completed = _process_completion_signals(
+            messages, symbol, agent_states, containers, render_progress, outcome.completed
         )
-    return completed, final_report
+    return outcome
 
 
-def _render_investment_opinion(symbol: str, company_name: str, agent_states: dict) -> None:
-    """완료된 에이전트 결과를 모아 종합 투자 의견 카드를 그린다."""
+def _render_investment_opinion(symbol: str, company_name: str, sections: dict[str, str]) -> None:
+    """근거 있는 분석만 모아 종합 투자 의견 카드를 그린다."""
     logger.info("===== AI 투자 의견 생성 시작 =====")
     with st.spinner("🤖 AI가 투자 의견을 생성하고 있습니다..."):
         try:
-            agent_results = {
-                name: state["content"]
-                for name, state in agent_states.items()
-                if state["status"] == "completed"
-            }
             opinion_data = generate_investment_opinion.invoke(
                 {
                     "company_name": company_name,
                     "stock_code": symbol,
-                    "agent_results": agent_results,
+                    "agent_results": sections,
                 }
             )
             if opinion_data and not opinion_data.get("error"):
@@ -343,9 +390,7 @@ def _render_investment_opinion(symbol: str, company_name: str, agent_states: dic
                 st.session_state["investment_opinion"] = opinion_data
             else:
                 logger.warning("투자 의견 생성 실패 또는 에러 발생")
-                st.warning(
-                    "⚠️ AI 투자 의견 생성 중 오류가 발생했습니다. 8개 에이전트 분석 결과를 참고해주세요."
-                )
+                st.warning("⚠️ AI 투자 의견 생성 중 오류가 발생했습니다. 전문 분석 결과를 참고해주세요.")
         except Exception as e:
             logger.error(f"투자 의견 생성 중 오류: {str(e)}", exc_info=True)
             st.error(f"💡 투자 의견 생성 오류: {str(e)}")
@@ -355,36 +400,56 @@ def _finalize_analysis(
     symbol: str,
     company_name: str,
     agent_states: dict,
-    completed: int,
-    final_report: str,
+    outcome: StreamOutcome,
+    grounded: dict[str, str],
 ) -> None:
-    """분석 종료 후 session_state 저장 + 채팅 세션 생성 + rerun."""
-    total = len(AGENT_NAMES)
-    if final_report and completed >= MIN_AGENTS_FOR_OPINION:
-        st.session_state["final_report"] = final_report
-    elif completed < WARN_BELOW_AGENTS:
-        st.warning(f"⚠️ 일부 분석이 완료되지 않았습니다 ({completed}/{total})")
+    """보고서·제외 영역·카드 상태를 session_state에 저장하고, 근거 있는 분석만으로
+    채팅 세션을 만든 뒤 rerun한다. rerun 뒤 결과 탭은 session_state만 보고 그린다."""
+    excluded = _exclusions(outcome.excluded, agent_states, grounded)
+    st.session_state["final_report"] = outcome.final_report
+    st.session_state["analysis_completed"] = True
+    st.session_state["analysis_symbol"] = symbol
+    st.session_state["analysis_company"] = company_name
+    st.session_state["analysis_agents"] = agent_states
+    st.session_state["analysis_excluded"] = excluded
+    st.session_state["analysis_agent_statuses"] = outcome.agent_statuses
+    st.session_state["analysis_timestamp"] = datetime.now().isoformat()
 
-    if completed >= MIN_AGENTS_FOR_OPINION:
-        st.session_state["analysis_completed"] = True
-        st.session_state["analysis_symbol"] = symbol
-        st.session_state["analysis_company"] = company_name
-        st.session_state["analysis_agents"] = agent_states
-        st.session_state["analysis_timestamp"] = datetime.now().isoformat()
+    chat_session = create_chat_session(
+        symbol, company_name, {name: agent_states[name] for name in grounded}, excluded=excluded
+    )
+    if chat_session:
+        st.session_state["chat_session"] = chat_session
+        logger.info("Chat session created successfully")
 
-        chat_session = create_chat_session(symbol, company_name, agent_states)
-        if chat_session:
-            st.session_state["chat_session"] = chat_session
-            logger.info("Chat session created successfully")
+    st.success("✅ 분석이 완료되었습니다! 탭에서 결과를 확인하세요.")
+    time.sleep(1)
+    st.rerun()
 
-        st.success("✅ 분석이 완료되었습니다! 탭에서 결과를 확인하세요.")
-        time.sleep(1)
-        st.rerun()
+
+def _conclude(symbol: str, company_name: str, agent_states: dict, outcome: StreamOutcome) -> None:
+    """보고서가 나왔고 근거 있는 분석이 기준 이상일 때만 투자 의견·채팅을 연다."""
+    grounded = _grounded_results(agent_states)
+    if outcome.report_error is not None:
+        logger.warning(f"종합 보고서 실패 — 투자 의견·대화를 만들지 않음: {outcome.report_error}")
+        return
+    if not outcome.final_report:
+        if not outcome.incomplete:
+            st.warning("⚠️ 종합 보고서를 받지 못했습니다. 위 카드의 개별 분석만 참고해주세요.")
+        return
+    if len(grounded) < MIN_AGENTS_FOR_OPINION:
+        st.warning(
+            f"⚠️ 근거 있는 분석이 {len(grounded)}개로 기준({MIN_AGENTS_FOR_OPINION}개)에 못 미쳐 "
+            "투자 의견과 AI 대화를 열지 않습니다."
+        )
+        return
+    _render_investment_opinion(symbol, company_name, grounded)
+    _finalize_analysis(symbol, company_name, agent_states, outcome, grounded)
 
 
 def run_analysis(symbol: str, company_name: str) -> None:
     """분석 실행 — 단계별 helper에 위임하는 얇은 컨트롤러."""
-    _reset_chat_session_state()
+    _reset_analysis_state()
     _prefetch_news_and_chart(symbol, company_name)
     _render_analysis_header(symbol, company_name)
 
@@ -398,19 +463,14 @@ def run_analysis(symbol: str, company_name: str) -> None:
         logger.info(f"종목코드: {symbol} | 회사명: {company_name}")
         logger.info(f"분석 시작 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-        completed, final_report = _consume_analysis_stream(
-            symbol, company_name, agent_states, containers, render_progress
-        )
+        outcome = _consume_analysis_stream(symbol, company_name, agent_states, containers, render_progress)
+        render_progress(outcome.completed)
 
-        if completed >= MIN_AGENTS_FOR_OPINION:
-            _render_investment_opinion(symbol, company_name, agent_states)
-
-        render_progress(completed)
-        _finalize_analysis(symbol, company_name, agent_states, completed, final_report)
-
-        logger.info(f"완료된 전문가 수: {completed}/{len(AGENT_NAMES)}")
-        logger.info(f"최종 보고서 생성: {'예' if final_report else '아니오'}")
+        logger.info(f"완료된 전문가 수: {outcome.completed}/{len(AGENT_NAMES)}")
+        logger.info(f"최종 보고서 생성: {'예' if outcome.final_report else '아니오'}")
         logger.info("================== 주식 분석 완료 ==================")
+
+        _conclude(symbol, company_name, agent_states, outcome)
 
     except Exception as e:
         logger.error(f"분석 실행 중 치명적 오류 발생: {str(e)}", exc_info=True)
@@ -420,10 +480,10 @@ def run_analysis(symbol: str, company_name: str) -> None:
 def main():
     # 메인 헤더
     st.markdown(
-        """
+        f"""
     <div class="main-header">
         <h1 class="main-title">📊 AI Stock Analyzer</h1>
-        <p class="main-subtitle">AI 전문가 8인의 종합 주식 분석</p>
+        <p class="main-subtitle">AI 전문가 {len(AGENT_NAMES)}인의 종합 주식 분석</p>
     </div>
     """,
         unsafe_allow_html=True,
@@ -516,8 +576,9 @@ def main():
 
     # 시스템 정보
     with st.expander("ℹ️ 시스템 정보"):
+        experts = " ".join(f"{cfg['icon']} {cfg['name']}" for cfg in map(get_agent_config, AGENT_NAMES))
         st.markdown(
-            "**🤖 AI 전문가 구성 (8인):**\n🌍 시장환경 📰 뉴스여론 💰 재무상태 📈 기술분석 🏦 기관수급 ⚖️ 상대가치 🌱 ESG분석 💬 커뮤니티분석\n\n**📊 데이터:** FinanceDataReader • PyKRX • BOK ECOS • DART • Naver News • Paxnet"
+            f"**🤖 AI 전문가 구성 ({len(AGENT_NAMES)}인):**\n{experts}\n\n**📊 데이터:** FinanceDataReader • PyKRX • 한국은행 ECOS • OpenDART • Tavily • Alpha Vantage • CoinGecko • Paxnet(선택)"
         )
 
     # 탭: 분석 결과 / AI 대화
@@ -540,16 +601,6 @@ def main():
         # Tab 1: 분석 결과
         with tab1:
             agent_states = st.session_state.get("analysis_agents", {})
-            agent_names = [
-                "context_expert",
-                "sentiment_expert",
-                "financial_expert",
-                "advanced_technical_expert",
-                "institutional_trading_expert",
-                "comparative_expert",
-                "esg_expert",
-                "community_expert",
-            ]
 
             # 차트 표시
             if f"chart_{symbol}" in st.session_state:
@@ -558,8 +609,8 @@ def main():
                 st.markdown(chart_html, unsafe_allow_html=True)
                 st.markdown("---")
 
-            # 8개 에이전트 결과 카드
-            for agent_name in agent_names:
+            # 근거 있는 에이전트 결과 카드 — 빠진 영역은 아래 제외 목록에 사유와 함께 남는다
+            for agent_name in AGENT_NAMES:
                 if agent_name in agent_states and agent_states[agent_name]["status"] == "completed":
                     config = get_agent_config(agent_name)
                     content = agent_states[agent_name]["content"]
@@ -575,6 +626,8 @@ def main():
                         create_result_card(agent_name, config, "completed", content, card_news_sources),
                         unsafe_allow_html=True,
                     )
+
+            _show_exclusions(st.session_state.get("analysis_excluded", {}))
 
             # 투자 의견 카드
             if "investment_opinion" in st.session_state:
