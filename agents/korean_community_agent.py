@@ -17,6 +17,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
 from config.llm_factory import build_llm
+from config.settings import settings
 from core.signals import AgentSignal
 from data.paxnet_crawl_client import fetch_paxnet_discussions
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
@@ -61,7 +62,13 @@ def get_community_sentiment_analysis(company_name: str, stock_code: str) -> dict
 
 
 def _fetch_paxnet_community_data(stock_code: str) -> dict[str, Any]:
-    """Paxnet 종목토론 데이터 수집"""
+    """Paxnet 종목토론 데이터 수집. ENABLE_PAXNET_CRAWL이 켜져 있을 때만 요청한다."""
+    if not settings.enable_paxnet_crawl:
+        return {
+            "error": "Paxnet 크롤링이 꺼져 있습니다. 이용약관을 확인한 뒤 ENABLE_PAXNET_CRAWL=true로 켭니다 "
+            "(docs/API_KEYS.md 4.7).",
+            "posts": [],
+        }
     try:
         logger.info(f"Fetching Paxnet community data for {stock_code}")
 

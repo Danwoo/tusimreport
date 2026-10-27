@@ -23,7 +23,7 @@ core/      supervisor, progressive engine, schemas, errors, signals,
            agent_status (per-agent grounded-data verdict)
 config/    pydantic-settings, llm_factory
 data/      external clients (DART, BOK, PyKRX, FDR, Naver, Tavily,
-           Alpha Vantage, CoinGecko, paxnet, dcinside),
+           Alpha Vantage, CoinGecko, paxnet),
            base_client.BaseAPIClient (retry, atomic cache, LRU,
            force_refresh), external_schemas (Pydantic validators),
            cache_ttl (named TTL constants)

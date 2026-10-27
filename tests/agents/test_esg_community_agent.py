@@ -211,6 +211,22 @@ class TestESGAgent:
 
 
 class TestCommunityAgent:
+    @pytest.fixture(autouse=True)
+    def crawl_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("agents.korean_community_agent.settings.enable_paxnet_crawl", True)
+
+    def test_crawl_is_off_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Paxnet 약관을 확인하지 못해 기본값에서는 요청하지 않는다."""
+        monkeypatch.setattr("agents.korean_community_agent.settings.enable_paxnet_crawl", False)
+        monkeypatch.setattr(
+            "agents.korean_community_agent.fetch_paxnet_discussions",
+            lambda *_a, **_kw: pytest.fail("must not crawl when ENABLE_PAXNET_CRAWL is off"),
+        )
+
+        result = get_community_sentiment_analysis_logic("삼성전자", "005930")
+
+        assert "ENABLE_PAXNET_CRAWL" in result["error"]
+
     def test_returns_truncated_posts_without_calling_an_llm(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "agents.korean_community_agent.fetch_paxnet_discussions",
