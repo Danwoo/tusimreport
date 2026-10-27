@@ -255,3 +255,23 @@ class TestThresholdHelpers:
         assert _rr_label(1.0) == "Fair"
         assert _rr_label(0.99) == "Risky"
         assert _rr_label(0.0) == "Risky"
+
+
+def test_missing_opinion_values_render_as_no_data() -> None:
+    """현재가·목표가·신뢰도가 없으면 0원이나 지어낸 비율 대신 '데이터 없음'을 보인다."""
+    html_out = create_investment_opinion_card(
+        {
+            "opinion": "HOLD",
+            "confidence": None,
+            "reasoning": "근거 부족",
+            "current_price": None,
+            "target_price": None,
+            "stop_loss": None,
+            "risk_reward_ratio": None,
+            "split_buy_strategy": [],
+        }
+    )
+
+    assert "0원" not in html_out
+    assert "% upside" not in html_out
+    assert html_out.count("데이터 없음") >= 5

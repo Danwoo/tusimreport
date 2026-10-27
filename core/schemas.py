@@ -31,21 +31,21 @@ class InvestmentOpinion(TypedDict, total=False):
 
     UI(ui/cards.create_investment_opinion_card)가 이 키들을 그대로 읽는다.
     필수 키: opinion, confidence, reasoning.
-    나머지는 fallback이 가능하므로 total=False.
+    가격·신뢰도·손익비는 근거가 없으면 None이다. 지어낸 기본값을 넣지 않는다.
     """
 
     company_name: str
     stock_code: str
     opinion: OpinionLabel
-    confidence: int  # 0-100
+    confidence: int | None  # 0-100
     reasoning: str
     key_positives: list[str]
     key_risks: list[str]
     timeframe: str
-    current_price: float
-    target_price: float
-    stop_loss: float
-    risk_reward_ratio: float
+    current_price: float | None
+    target_price: float | None
+    stop_loss: float | None
+    risk_reward_ratio: float | None
     split_buy_strategy: list[SplitBuyOrder]
     timestamp: str
 
