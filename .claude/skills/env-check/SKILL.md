@@ -29,7 +29,7 @@ Key → agents that read it (from the imports in `agents/`; details in `docs/API
 - `ECOS_API_KEY`: `context_expert`, `financial_expert`.
 - `KRX_ID` + `KRX_PW` (pykrx login): `context_expert` (index OHLCV), `financial_expert` (fundamentals), `institutional_trading_expert` (investor flows), `comparative_expert` (fundamentals, market cap).
 - `NAVER_CLIENT_ID` + `NAVER_CLIENT_SECRET`, `TAVILY_API_KEY`: `sentiment_expert`. Do not ask the user for a Naver key: new keys come only from NAVER API HUB (different endpoint and headers than the current client) and the 2026-09-07 terms forbid feeding search results to AI (`docs/API_KEYS.md` 4.4).
-- `ALPHA_VANTAGE_API_KEY`: `global_market_expert` (also uses CoinGecko and CNN Fear & Greed).
+- `ALPHA_VANTAGE_API_KEY`: `global_market_expert` (also uses CoinGecko, which needs no key).
 - No key: FinanceDataReader (`advanced_technical_expert` and others), Paxnet via Selenium/Chrome (`community_expert`).
 
-An agent whose tools fail still returns text, so the progressive engine counts it as completed; a missing key shows up as weaker analysis, not as a failed agent.
+An agent whose tools all fail still returns text, but the progressive engine marks it `data_status: none` and leaves it out of the report; with fewer than 5 of 9 agents holding data there is no report at all. `python scripts/check_sources.py` shows which source is missing, failing or empty.
