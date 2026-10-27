@@ -93,6 +93,7 @@ python scripts/run_experiment.py --stocks 005930:삼성전자 --snapshot-mode re
 ```
 
 - 결과는 `runs/experiments/<시각>/`에 실행별 JSON, `results.jsonl`, `summary.md`로 남는다.
+- 1)을 `progressive`로만 돌리면 다른 구조가 부르는 도구(예: 단일 에이전트가 고른 차트·업종 도구)는 스냅샷에 없을 수 있다. 2)의 요약표에서 `스냅샷 누락`이 0이 아니면 그 구조로 `record`를 한 번 더 돌린다. 같은 디렉터리에 추가로 쌓인다.
 - 무료 등급이면 `LLM_MAX_REQUESTS_PER_MINUTE`를 제공자 한도보다 낮게 둔다(KiraAI는 25).
 - `snapshots/`와 `runs/`에는 외부 소스의 원자료가 들어 있어 `.gitignore` 대상이다. 공개 저장소에 올리지 않는다. 결과를 공유할 때는 집계 수치만 옮긴다.
 

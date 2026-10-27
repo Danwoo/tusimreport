@@ -18,17 +18,23 @@ Single-process, single-user, research tool — not a trading terminal.
 ```
 agents/    9 expert agents + investment_opinion synthesiser
 core/      supervisor, progressive engine, schemas, errors, signals,
-           chat session, context manager, logging context
+           chat session, context manager, logging context,
+           run_metrics (LLM/tool call + token callback),
+           agent_status (per-agent grounded-data verdict)
 config/    pydantic-settings, llm_factory
 data/      external clients (DART, BOK, PyKRX, FDR, Naver, Tavily,
-           Alpha Vantage, CoinGecko, Fear&Greed, paxnet, dcinside),
+           Alpha Vantage, CoinGecko, paxnet, dcinside),
            base_client.BaseAPIClient (retry, atomic cache, LRU,
            force_refresh), external_schemas (Pydantic validators),
            cache_ttl (named TTL constants)
 ui/        cards, styles, stock_database — split out of main.py
 utils/     time (KST helpers), cost (token / USD), logging_context,
            helpers, agent_helpers
-tests/     230 tests; agents/, core/, data/ split. responses-based
+lab/       multi-agent topology comparison: tool registry, snapshot
+           record/replay, single_agent / progressive / supervisor,
+           numeric grounding, runner (docs/EXPERIMENTS.md)
+scripts/   run_experiment.py, check_sources.py (CLI, no Streamlit)
+tests/     agents/, lab/, core and data tests. responses-based
            HTTP mocks live in tests/conftest.py
 main.py    Streamlit entry point
 ```
@@ -54,6 +60,10 @@ main.py    Streamlit entry point
 - **mypy strict is incremental.** Only the 8 modules listed in
   `pyproject.toml`'s overrides are strict. The rest is loose-tier on
   purpose — do not add untyped code to the strict list.
+- **Tools return data, not analysis.** No LLM call inside a `@tool`
+  function. A hidden call is invisible to the agent and to run metrics,
+  and its output (e.g. a "sentiment score") looks like source data to
+  the report and to `lab/grounding.py`. The agent's own LLM interprets.
 - **Schema validation at the boundary.** PyKRX columns and DART
   envelopes are validated in `data/external_schemas.py`. New external
   clients should add their shape there, not propagate raw dicts.
@@ -93,6 +103,21 @@ main.py    Streamlit entry point
   install `requirements.txt` instead.
 - ruff ≥ 0.17 also formats Python code blocks inside Markdown, so a doc
   edit can fail `ruff format --check`.
+- OpenDART `reprt_code`: 11011 is the annual report (사업보고서), 11014
+  is Q3. Use `data.dart_api_client.ANNUAL_REPORT`. `fnlttSinglAcnt`
+  mixes consolidated (CFS) and separate (OFS) rows with the same
+  account names; the client keeps one `fs_div`.
+- ECOS table 722Y001 holds several policy rates; the base rate is item
+  `0101000` and must be requested by item code.
+
+## Report gating
+
+The progressive engine separates "agent ran" (`status`) from "agent had
+data" (`data_status`, from its ToolMessages via `core/agent_status.py`).
+The final report is built only from agents with data and only when at
+least `MIN_AGENTS_FOR_REPORT` (5 of 9) have it; the rest are listed in
+`excluded` and named in the report prompt so the LLM does not invent
+them. One agent failing is an `agent_error` card, not a stream error.
 
 ## LLM provider
 

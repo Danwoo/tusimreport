@@ -1,303 +1,134 @@
-# TuSimReport - 한국 주식 분석 AI 에이전트 시스템
+# TuSimReport
 
-LangGraph Supervisor 아키텍처 기반의 AI 멀티 에이전트 시스템. **9개 전문 에이전트**가
-한국 주식의 펀더멘털·기술·수급·여론·글로벌 환경을 병렬 분석하고, 그 결과를
-종합한 BUY/HOLD/SELL **투자 의견**과 분석 컨텍스트를 기억하는 **대화형 AI**를 제공합니다.
+한국 주식 한 종목을 9개 전문 에이전트가 나눠 분석하고, 근거 데이터가 확인된 분석만으로 종합 보고서와 투자 의견을 만드는 멀티 에이전트 시스템이다. Streamlit 앱으로 실행하며, 같은 작업을 서로 다른 오케스트레이션 구조로 돌려 비교하는 실험 도구를 함께 둔다.
 
----
+개인 연구용 도구다. 투자 권유가 아니며 실주문 기능은 없다.
 
-## 📊 핵심 기능
+## 하는 일
 
-- **9개 전문 에이전트**: 시장환경·뉴스여론·재무·기술·수급·상대가치·ESG·커뮤니티·글로벌시장
-- **AI 투자 의견**: 9개 분석을 종합해 BUY/HOLD/SELL + 신뢰도(0-100) + 목표가/손절가/R/R + 분할매수 전략 산출 (LLM 출력을 화이트리스트·범위 clamp로 검증)
-- **대화형 AI**: 완성된 분석을 컨텍스트로 받아 후속 질문에 답변 (동시 입력 락 보호)
-- **글로벌 시장 통합**: Alpha Vantage(S&P/NASDAQ/Dow/FX) + CoinGecko(BTC/ETH) + CNN Fear & Greed
-- **병렬 실행**: 독립 에이전트 7개를 ThreadPoolExecutor로 동시 실행, 종속적 2개만 순차
-- **실제 데이터만**: BOK ECOS, DART, PyKRX, FinanceDataReader, Naver News API, Paxnet 등 — Mock/샘플 데이터 절대 금지
-- **XSS 방어**: 모든 LLM/외부 문자열은 ui.cards.escape_html을 거쳐 렌더링, javascript:/data: URL 차단
-- **Graceful Degradation**: API 키 누락/외부 실패 시 한글 에러 메시지로 폴백, 분석 절반 이상 성공하면 의견 게이트 통과
+1. 종목 코드를 입력하면 9개 에이전트가 각자의 도구로 데이터를 받아 분석한다.
+2. 에이전트마다 "실행이 끝났는가"와 "근거 데이터가 있었는가"를 따로 판정한다.
+3. 근거 데이터가 있는 에이전트가 9개 중 5개 이상이면, 그 분석만 모아 종합 보고서를 쓴다. 빠진 영역은 보고서와 화면에 이유와 함께 표시한다.
+4. 보고서를 바탕으로 BUY/HOLD/SELL 의견을 만들고, 분석 결과를 맥락으로 후속 질문에 답한다.
 
-## 🛡️ Production-grade 안전장치
+| 에이전트 | 분석 영역 | 주요 데이터 |
+|---|---|---|
+| `context_expert` | 시장 환경, 거시 지표 | 한국은행 ECOS, pykrx, FinanceDataReader |
+| `sentiment_expert` | 뉴스 여론 | Tavily |
+| `financial_expert` | 재무제표, 밸류에이션 | OpenDART, 한국은행 ECOS, pykrx, FinanceDataReader |
+| `advanced_technical_expert` | 기술적 지표 | FinanceDataReader |
+| `institutional_trading_expert` | 투자자별 매매 동향 | pykrx |
+| `comparative_expert` | 동종업체 비교 | pykrx, FinanceDataReader |
+| `esg_expert` | 공시 기반 ESG 단서 | OpenDART |
+| `community_expert` | 종목토론 게시판 | Paxnet (Selenium) |
+| `global_market_expert` | 미국 증시, 환율, 암호화폐 | Alpha Vantage, CoinGecko |
 
-- **도메인 예외 계층** (`core/errors.py`): RateLimitError / AuthenticationError / DataSourceUnavailableError 등으로 외부 실패를 타입화 — 재시도 정책을 호출자가 분기 가능
-- **자동 retry/backoff**: `BaseAPIClient`가 urllib3 Retry로 429/5xx에 지수 백오프(0.5s, 1.0s, 2.0s) 3회 시도
-- **상태→예외 매핑**: `request_json()`이 401/403→Auth, 429→RateLimit, 5xx→Unavailable로 자동 변환
-- **KST 타임존 명시**: PyKRX/DART 거래일 인자는 `kst_yesterday_compact()` 등 `utils.time`을 통해 한국 시간 기준 산출 (UTC 컨테이너에서 9시간 어긋남 방지)
-- **TLS verify 화이트리스트**: `verify=False`는 `_ALLOWED_INSECURE_HOSTS`에 명시된 호스트에만 적용 (RSS 인증서 깨진 매체 한정)
-- **Path-safe 캐시 키**: `^[A-Za-z0-9_-][A-Za-z0-9_.-]*$` 화이트리스트 — NUL/UNC/hidden file 차단
-- **Atomic cache write**: `tempfile.mkstemp + os.replace`로 동시 쓰기 race 방지
-- **Structured logging**: `contextvars` 기반 `bind_session(stock_code=...)` — 모든 로그에 `[s=<sid> c=<symbol>]` 접두사 자동 주입, 멀티 사용자 환경에서 로그 demux
-- **명시적 캐시 TTL** (`data/cache_ttl.py`): 시세 5분, 환율 1시간, F&G 6시간, BOK/DART 12시간 — 매직 넘버 제거
-- **타입 검증**: `core.signals`, `core.schemas`, `core.errors`, `config.llm_factory`, `ui.cards`, `data.base_client`, `utils.time`, `utils.logging_context` 8개 모듈은 mypy strict
-- **CI 게이트**: Python 3.11/3.12 matrix → ruff lint + format + mypy strict + pytest (커버리지 ≥20% baseline) + pip-audit + gitleaks 시크릿 스캔
+## 설계에서 다룬 문제
 
-## 🐳 Docker로 실행
+**근거 없는 분석이 보고서에 섞이는 문제.** 에이전트는 도구가 실패해도 오류 메시지를 바탕으로 그럴듯한 글을 쓴다. 그래서 응답이 돌아왔다는 사실만으로는 분석에 근거가 있었는지 알 수 없다. `core/agent_status.py`는 각 에이전트가 받은 도구 결과(ToolMessage)를 읽어 근거 데이터 유무를 판정한다. 보고서는 근거가 있는 에이전트만으로, 과반이 넘을 때만 만든다. 에이전트 하나가 예외로 끝나도 전체 분석은 멈추지 않고 해당 카드만 실패로 표시한다.
+
+**데이터 소스가 실패했을 때 그럴듯한 숫자로 채우는 문제.** 외부 API가 실패하면 클라이언트는 기본값 대신 `None`과 한국어 사유를 돌려주고, 실패한 결과는 캐시하지 않는다. 도구는 데이터만 돌려주고 해석은 에이전트의 LLM이 한다. 도구 안에서 LLM을 다시 부르면 그 출력이 원천 데이터처럼 보이기 때문이다.
+
+**오케스트레이션 구조의 효과를 재는 문제.** 9개로 나눈 구조가 도구를 모두 가진 단일 에이전트보다 나은지, 나은 만큼 무엇을 더 쓰는지를 같은 도구, 같은 데이터 스냅샷, 같은 보고서 형식 위에서 비교한다. 비교 대상은 단일 에이전트, 코드가 실행 순서를 정하는 구조(병렬 7개 후 순차 2개), LLM supervisor가 handoff로 일을 넘기는 구조다. 방법과 지표는 [docs/EXPERIMENTS.md](./docs/EXPERIMENTS.md)에 있다. 측정 결과는 아직 없다.
+
+**외부 API의 실패 모드.** HTTP 상태와 응답 형태에 따라 실패를 타입별 예외(`core/errors.py`)로 나눈다. 일시적 실패는 지수 백오프로 재시도한다. 거래일 계산은 한국 시간 기준으로 한다. 로그와 도구 출력에서는 API 키를 가린다. `scripts/check_sources.py`는 소스마다 키, 요청, 데이터, 기준 시점을 따로 점검한다.
+
+**무료 LLM으로 운용하는 문제.** OpenAI 호환 엔드포인트라면 어떤 제공자든 `LLM_BASE_URL`로 연결한다. 무료 등급의 분당 요청 한도에 맞춰 프로세스 전체가 하나의 요청 제한기를 함께 쓴다. 모델이 tool calling을 지원하는지는 `python setup_check.py --llm-probe`로 실제 요청 한 번을 보내 확인한다.
+
+## 구조
+
+```text
+사용자 입력 (Streamlit)
+  └─ ProgressiveAnalysisEngine
+       ├─ 병렬 7개: context, sentiment, technical, institutional, esg, community, global_market
+       ├─ 순차 2개: financial, comparative (병렬 결과 요약을 참고 정보로 받는다)
+       ├─ 근거 판정: 에이전트별 status / data_status
+       └─ 종합 보고서 (근거 있는 분석 5/9 이상일 때)
+            └─ 투자 의견 (BUY/HOLD/SELL) → 후속 대화
+```
+
+```text
+agents/    9개 전문 에이전트와 투자 의견 생성
+core/      실행 엔진, supervisor, 근거 판정, 실행 계측, 오류 타입, 대화 세션
+config/    설정(pydantic-settings), LLM 생성
+data/      외부 API 클라이언트, 공통 HTTP·캐시 베이스, 응답 스키마 검증
+lab/       오케스트레이션 비교 실험 (도구 등록, 스냅샷 기록·재생, 숫자 근거 대조)
+scripts/   run_experiment.py, check_sources.py
+ui/        카드, 스타일, 종목 목록
+utils/     한국 시간 도우미, 로깅, 키 가리기
+tests/     단위·통합 테스트 (외부 호출 없음)
+```
+
+## 시작하기
+
+Python 3.11 이상이 필요하다. 커뮤니티 분석에는 Chrome 또는 Chromium이 필요하다.
 
 ```bash
-cp .env.example .env   # API 키 채우기 (LLM 설정 필수 — docs/API_KEYS.md)
-docker compose up --build
-# → http://localhost:8501
-```
-
-Dockerfile은 multi-stage: builder는 wheel 빌드만, runtime은 chromium + 한글 폰트 + tini로 슬림. non-root user(uid=1000)로 실행. healthcheck는 `/_stcore/health`.
-
----
-
-## 🏗️ 시스템 아키텍처
-
-### 9개 전문 에이전트
-
-```
-tusimreport/
-├── agents/                              # 9개 전문 에이전트 + 투자 의견 합성
-│   ├── korean_context_agent.py            # 시장 환경 (BOK, FDR)
-│   ├── korean_sentiment_agent.py          # 뉴스 여론 (Naver, Tavily)
-│   ├── korean_financial_react_agent.py    # 재무 (DART, PyKRX)
-│   ├── korean_advanced_technical_agent.py # 기술적 (FDR, PyKRX)
-│   ├── korean_institutional_trading_agent.py # 기관 수급 (PyKRX)
-│   ├── korean_comparative_agent.py        # 상대 가치 (섹터)
-│   ├── korean_esg_analysis_agent.py       # ESG (DART)
-│   ├── korean_community_agent.py          # 커뮤니티 (Paxnet, DC)
-│   ├── korean_global_market_agent.py      # 글로벌 시장 (Alpha Vantage, CoinGecko, Fear&Greed)
-│   └── korean_investment_opinion_agent.py # 9개 결과 종합 → BUY/HOLD/SELL
-├── core/
-│   ├── korean_supervisor_langgraph.py   # LangGraph Supervisor + 프롬프트 빌드
-│   ├── progressive_supervisor.py        # 병렬 실행 엔진 + lock
-│   ├── context_manager.py               # tiktoken lazy + 토큰 예산
-│   ├── chat_session.py                  # 분석 결과 컨텍스트 채팅 (lock)
-│   ├── signals.py                       # 완료 신호 enum (single source)
-│   └── schemas.py                       # TypedDicts (InvestmentOpinion, AgentResponse)
-├── config/
-│   ├── settings.py                      # pydantic-settings v2
-│   └── llm_factory.py                   # build_llm() - 프로바이더 통합
-├── data/                                # 외부 클라이언트 + BaseAPIClient(atomic cache)
-│   ├── base_client.py                   # 공통 베이스 (atomic write, path-safe key)
-│   ├── bok_api_client.py, dart_api_client.py, naver_api_client.py
-│   ├── paxnet_crawl_client.py, dcinside_crawler.py
-│   ├── alpha_vantage_client.py, coingecko_client.py, fear_greed_client.py
-│   └── chart_generator.py, sector_analysis_client.py
-├── ui/                                  # main.py에서 분리한 프레젠테이션
-│   ├── cards.py                         # HTML 카드 빌더 + escape_html
-│   ├── styles.py                        # PAGE_CSS
-│   └── stock_database.py                # 종목 메타데이터
-├── utils/agent_helpers.py               # graceful fallback, korean 에러 변환
-└── main.py                              # Streamlit UI 엔트리
-```
-
-### 데이터 소스 (6개)
-
-| 데이터 소스 | API 키 필요 | 용도 |
-|------------|-----------|------|
-| FinanceDataReader | ❌ | 주가 데이터 |
-| PyKRX | KRX 정보데이터시스템 로그인 (`KRX_ID`·`KRX_PW`) | 한국거래소 데이터 |
-| BOK ECOS | ✅ | 거시경제 지표 |
-| DART | ✅ | 기업 공시/재무 |
-| Naver News | 발급 보류 (약관 — [docs/API_KEYS.md](./docs/API_KEYS.md) 4.4) | 한국 뉴스 |
-| Paxnet (Selenium) | ❌ | 커뮤니티 토론 |
-
----
-
-## ✨ 새로운 기능 (Phase 3 - 2025-11-16)
-
-### 🛡️ Graceful Degradation (우아한 성능 저하)
-API 키가 부족할 때 명확한 안내를 제공합니다.
-
-- ✅ **한글 에러 메시지**: 어떤 API가 필요한지 명확히 안내
-- ✅ **API 상태 표시**: 사이드바에서 현재 설정 상태 확인
-- ✅ **단계별 안내**: 문제 해결 방법을 이모지와 함께 제공
-- ✅ **Fallback 메커니즘**: 에러 발생 시 명확한 원인과 해결법 제시
-
-**중요**: 이 시스템은 실제 API 데이터만 사용합니다. API 키가 없으면 분석을 실행할 수 없습니다.
-
-### 🔧 개선된 사용자 경험
-- **API 키 상태 사이드바**: 실시간으로 어떤 API가 설정되었는지 확인
-- **종목 코드 검증**: 잘못된 입력 시 즉시 한글로 피드백
-- **데이터 소스 투명성**: 어떤 데이터를 사용했는지 명시
-- **에러 명확화**: 모든 에러를 한글로 친절하게 안내
-
----
-
-## 💬 대화형 AI 기능
-
-### 🤖 ChatSession - 분석 결과 기반 대화
-
-분석이 완료된 후, **8개 에이전트의 분석 결과를 컨텍스트로** 하여 AI와 자유롭게 대화할 수 있습니다.
-
-#### 주요 기능
-- ✅ **컨텍스트 기반 대화**: 8개 에이전트 분석 결과를 모두 이해하고 답변
-- ✅ **상태 유지**: 대화 히스토리를 기억하고 맥락 있는 답변 제공
-- ✅ **투자자 친화적**: 초보자도 이해하기 쉽게 설명
-- ✅ **추가 질문 가능**: "왜 이렇게 분석했어?", "더 자세히 설명해줘" 등
-
-#### 사용 예시
-```
-사용자: "이 종목의 가장 큰 리스크는 뭐야?"
-AI: 📊 분석 결과를 종합하면...
-    1. 재무 분석: 부채비율 상승 추세
-    2. 기술적 분석: 단기 과매수 구간
-    3. 뉴스 여론: 최근 부정적 뉴스 증가
-    ...
-
-사용자: "그럼 지금 사야 해, 말아야 해?"
-AI: ⚠️ 투자 판단은 본인의 책임이지만, 분석 결과를 바탕으로...
-```
-
-#### 기술 스택
-- **ChatSession 클래스**: 대화 세션 관리
-- **LangChain Messages**: SystemMessage, HumanMessage, AIMessage
-- **Streamlit Chat UI**: 직관적인 채팅 인터페이스
-- **Session State**: 분석 결과 및 대화 히스토리 유지
-
----
-
-## 🚀 빠른 시작
-
-### 1️⃣ **사전 요구사항**
-
-```bash
-Python 3.11+
-Chrome/Chromium (Selenium 크롤링용)
-```
-
-### 2️⃣ **설치**
-
-```bash
-# 1. 저장소 복제
 git clone https://github.com/Danwoo/tusimreport.git
 cd tusimreport
-
-# 2. 의존성 설치
 pip install -r requirements.txt
-
-# 3. 환경 설정
-cp .env.example .env
-# .env 파일을 열어서 API 키 입력
-
-# 4. 환경 검증 (선택)
-python setup_check.py
+cp .env.example .env    # 키 입력
 ```
 
-### 3️⃣ **API 키 발급** (필수)
-
-모든 키는 무료로 발급할 수 있습니다. 발급 절차·무료 한도·환경변수 이름은 **[docs/API_KEYS.md](./docs/API_KEYS.md)** 에 정리했습니다.
-
-최소 요구사항 (3개):
-1. **LLM**: OpenAI 호환 무료 엔드포인트(`LLM_BASE_URL`·`LLM_MODEL`·`LLM_API_KEY`), Google Gemini, OpenAI 중 하나. tool calling을 지원해야 하며 `python setup_check.py --llm-probe`로 확인합니다.
-2. **DART**: https://opendart.fss.or.kr/
-3. **ECOS**: https://ecos.bok.or.kr/
-
-권장 (더 나은 분석):
-4. **KRX 정보데이터시스템 계정** (pykrx 로그인): https://data.krx.co.kr
-5. **Naver News**: 발급 보류. 신규 키는 NAVER API HUB에서만 나오고 2026-09-07 시행 약관이 검색 결과의 AI 입력을 금지한다 (docs/API_KEYS.md 4.4)
-6. **Tavily**: https://tavily.com/ · **Alpha Vantage**: https://www.alphavantage.co/support/#api-key
-
-### 4️⃣ **실행**
+필수 키는 LLM 설정, `DART_API_KEY`, `ECOS_API_KEY`다. 모두 무료로 받을 수 있다. 발급 절차, 무료 한도, 키가 없을 때 빠지는 분석은 [docs/API_KEYS.md](./docs/API_KEYS.md)에 정리했다.
 
 ```bash
-streamlit run main.py
+python setup_check.py                  # 키 설정 상태 (외부 호출 없음)
+python setup_check.py --llm-probe      # LLM tool calling 확인 (요청 1회)
+python scripts/check_sources.py        # 데이터 소스별 연결 상태
+streamlit run main.py                  # http://localhost:8501
 ```
 
-브라우저에서 http://localhost:8501 접속
-
----
-
-## ⚙️ 환경 설정
-
-### .env 파일 설정
-
-```env
-# 필수 — LLM (OpenAI 호환 엔드포인트 예시)
-LLM_BASE_URL=https://api.groq.com/openai/v1
-LLM_MODEL=<엔드포인트가 제공하는 모델 이름>
-LLM_API_KEY=<발급받은 키>
-
-# 필수 — 데이터
-DART_API_KEY=your_dart_api_key
-ECOS_API_KEY=your_ecos_api_key
-
-# 권장 (더 나은 분석)
-KRX_ID=your_krx_id
-KRX_PW=your_krx_password
-TAVILY_API_KEY=your_tavily_api_key
-ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key
-```
-
-자세한 설정은 `.env.example`과 [docs/API_KEYS.md](./docs/API_KEYS.md) 참고. Claude Code 클라우드 세션에서는 `.env` 대신 환경 설정의 secret으로 넣습니다.
-
----
-
-## 🧪 테스트
+Docker로도 실행할 수 있다. 이미지에 Chromium과 CJK 폰트가 들어 있다.
 
 ```bash
-# 기본 테스트
-pytest tests/
-
-# 커버리지 포함
-pytest tests/ --cov=agents --cov=core --cov=data
-
-# 환경 검증
-python setup_check.py
+docker compose up --build
 ```
 
----
+## 구조 비교 실험
 
-## 📚 문서
+```bash
+# 실데이터로 한 번 돌려 도구 결과를 스냅샷으로 남긴다
+python scripts/run_experiment.py --stocks 005930:삼성전자 --topologies progressive --snapshot-mode record
 
-- **[CLAUDE.md](./CLAUDE.md)**: AI Assistant 개발 가이드 (상세)
-- **[docs/API_KEYS.md](./docs/API_KEYS.md)**: 무료 API 키 발급 안내
-- **[.env.example](./.env.example)**: 환경 설정 예제
+# 같은 스냅샷으로 세 구조를 비교한다 (데이터 API는 호출하지 않고 LLM만 호출한다)
+python scripts/run_experiment.py --stocks 005930:삼성전자 --snapshot-mode replay --repeats 3
+```
 
----
+실행마다 성공 여부, 경과 시간, LLM 호출 수와 토큰, 도구 호출 수, 근거 데이터가 있는 영역 수, 보고서 숫자의 근거 일치율을 기록한다. 스냅샷과 실행 결과에는 외부 소스의 원자료가 들어 있어 `.gitignore` 대상이다.
 
-## 🔧 알려진 문제
+## 테스트와 품질 기준
 
-### 현재 제한사항
-- ⚠️ **Selenium 의존성**: Chrome/Chromium 필요 (서버 환경에서 추가 설정)
-- ⚠️ **API 호출 제한**: 무료 API는 일일 호출 제한 있음
-- ⚠️ **Docker 미지원**: 현재 로컬 환경만 지원
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
 
-### 해결 완료 (Phase 3 - 2025-11-16)
-- [x] ✅ **에러 메시지 한글화** - 모든 에이전트에 한글 에러 메시지 적용
-- [x] ✅ **Graceful Degradation** - API 부족 시 명확한 에러 안내
-- [x] ✅ **API 상태 표시** - 사이드바에서 실시간 확인
-- [x] ✅ **Fallback 메커니즘** - 에러 발생 시 해결 방법 제시
+테스트는 외부 API를 호출하지 않는다. HTTP는 `responses`로 대체하고, 에이전트 그래프 통합 테스트는 정해진 순서로 도구를 부르는 가짜 LLM을 쓴다. CI(GitHub Actions)는 Python 3.11과 3.12에서 다음을 확인한다.
 
-### 해결 예정
-- [ ] Docker/Docker Compose 지원
-- [ ] 설치 자동화 스크립트 (`install.sh`)
-- [ ] 통합 테스트 확대
+- ruff lint와 포맷
+- 핵심 8개 모듈의 mypy strict 검사
+- 커버리지 45% 이상의 pytest
+- gitleaks 시크릿 검사
+- pip-audit 의존성 감사(실패해도 빌드를 막지 않는다)
 
----
+## 한계
 
-## 🤝 기여
+- 실데이터와 실제 LLM으로 측정한 결과가 아직 없다.
+- 투자 의견의 신뢰도, 목표가, 손절가는 LLM이 쓴 값이다. 과거 수익률로 검증한 예측이 아니다.
+- 지수·수급·밸류에이션 데이터는 pykrx를 통해 KRX에 로그인해서 받는다. KRX가 공식으로 허용한 경로는 KRX OPEN API이며, 이 경로로 옮기는 작업이 남아 있다.
+- 데이터 소스별 남은 과제는 [docs/API_KEYS.md 6절](./docs/API_KEYS.md#6-남은-과제)에 있다.
 
-프로젝트는 현재 활발히 개발 중입니다. 이슈 및 PR 환영합니다!
+## 문서
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- [docs/API_KEYS.md](./docs/API_KEYS.md): API 키 발급과 무료 한도
+- [docs/EXPERIMENTS.md](./docs/EXPERIMENTS.md): 구조 비교 실험의 방법과 지표
+- [docs/PROJECT_PLAN.md](./docs/PROJECT_PLAN.md): 개발 계획과 진행 상황
+- [SECURITY.md](./SECURITY.md): 보안 관련 안내
+- [CLAUDE.md](./CLAUDE.md): 코딩 에이전트용 저장소 안내
 
----
+## 라이선스
 
-## 📄 라이선스
+[MIT](./LICENSE)
 
-이 프로젝트는 개인 학습 및 연구 목적으로 제작되었습니다.
-
----
-
-## ⚠️ 면책 조항
-
-**이 시스템은 투자 참고 자료일 뿐, 투자 권유가 아닙니다.**
-
-- 📊 AI 분석 결과는 절대적이지 않습니다
-- 💰 실제 투자 결정은 본인의 판단과 책임입니다
-- 🔍 추가적인 조사와 전문가 상담을 권장합니다
-- ⚠️ 과거 데이터는 미래 수익을 보장하지 않습니다
-
----
-
-**Python**: 3.11 / 3.12 (CI matrix)
-**테스트**: 230개 (커버리지 ~46%)
-**보안 정책**: [SECURITY.md](SECURITY.md)
+이 소프트웨어가 내놓는 분석과 의견은 참고 자료이며 투자 권유가 아니다. 투자 판단과 그 결과는 사용자에게 있다.
