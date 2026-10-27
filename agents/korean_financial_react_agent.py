@@ -25,7 +25,11 @@ from config.llm_factory import build_llm  # noqa: E402
 from core.signals import AgentSignal  # noqa: E402
 from data.bok_api_client import get_macro_economic_indicators  # noqa: E402
 from data.dart_api_client import get_comprehensive_company_data  # noqa: E402
-from data.external_schemas import validate_pykrx_fundamental  # noqa: E402
+from data.external_schemas import (  # noqa: E402
+    PYKRX_MARKET_CAP_COLUMNS,
+    assert_pykrx_columns,
+    validate_pykrx_fundamental,
+)
 from data.sector_analysis_client import analyze_sector_relative_performance  # noqa: E402
 from utils.agent_helpers import create_fallback_message, format_error_message_korean  # noqa: E402
 from utils.helpers import convert_numpy_types  # noqa: E402
@@ -114,6 +118,29 @@ def _lookup_listing(stock_code: str) -> dict[str, str]:
     return {}
 
 
+def _latest_market_cap(fromdate: str, todate: str, stock_code: str) -> tuple[int | None, str | None]:
+    """기간 중 마지막 거래일 시가총액(원)과, 없으면 그 사유.
+
+    stock.get_market_fundamental()은 BPS/PER/PBR/EPS/DIV/DPS만 주고 시가총액 컬럼이 없어 따로 받는다.
+    """
+    try:
+        cap_df = stock.get_market_cap(fromdate, todate, stock_code)
+        if cap_df is None or cap_df.empty:
+            return None, f"{fromdate}~{todate} PyKRX 시가총액 응답이 비어 있음"
+        assert_pykrx_columns(
+            list(cap_df.columns), expected=PYKRX_MARKET_CAP_COLUMNS, source="pykrx/get_market_cap"
+        )
+        if "시가총액" not in cap_df.columns:
+            return None, f"PyKRX 시가총액 컬럼 없음 (받은 컬럼: {', '.join(map(str, cap_df.columns))})"
+        value = cap_df["시가총액"].iloc[-1]
+    except Exception as e:
+        logger.warning(f"PyKRX market cap failed: {str(e)}")
+        return None, f"PyKRX 시가총액 조회 실패: {redact(str(e))}"
+    if pd.isna(value) or value <= 0:
+        return None, f"{fromdate}~{todate} PyKRX 시가총액이 0 또는 비어 있음"
+    return int(value), None
+
+
 @tool
 def get_pykrx_market_data(stock_code: str) -> dict[str, Any]:
     """PyKRX로 한국 주식 시장 데이터 및 기본 지표 수집"""
@@ -126,6 +153,7 @@ def get_pykrx_market_data(stock_code: str) -> dict[str, Any]:
         yesterday = kst_yesterday_compact()
 
         # 종목 기본 정보
+        ticker_info: dict[str, str] = {}
         try:
             ticker_info = _lookup_listing(stock_code)
 
@@ -133,43 +161,57 @@ def get_pykrx_market_data(stock_code: str) -> dict[str, Any]:
             week_ago = kst_days_ago_compact(7)
             fundamental_data = stock.get_market_fundamental(week_ago, yesterday, stock_code)
 
+            market_cap, market_cap_reason = _latest_market_cap(week_ago, yesterday, stock_code)
+            fundamentals: dict[str, Any] = {
+                "market_cap": market_cap,
+                "per": None,
+                "pbr": None,
+                "eps": None,
+                "bps": None,
+            }
+            notes: list[str] = []
+            if fundamental_data.empty:
+                notes.append(f"{week_ago}~{yesterday} PyKRX PER·PBR·EPS·BPS 응답이 비어 있음")
+            else:
+                # PyKRX 컬럼명이 바뀌면 silent break 대신 DataQualityError를 받도록 schema로 검증.
+                row = fundamental_data.iloc[-1].to_dict()
+                validated = validate_pykrx_fundamental(row)
+                # 0/None은 PyKRX의 'no data' 약속 — 숫자로 채우지 않고 None으로 둔다.
+                fundamentals["per"] = float(validated.per) if validated.per else None
+                fundamentals["pbr"] = float(validated.pbr) if validated.pbr else None
+                fundamentals["eps"] = int(validated.eps) if validated.eps else None
+                fundamentals["bps"] = int(validated.bps) if validated.bps else None
+            if market_cap_reason:
+                notes.append(f"시가총액: {market_cap_reason}")
+            if notes:
+                # "note" is a metadata key in core/agent_status, so a reason alone never counts as data.
+                fundamentals["note"] = " / ".join(notes)
+
             result: dict[str, Any] = {
                 "company_info": ticker_info,
-                "fundamental_data": {},
+                "fundamental_data": fundamentals,
                 "market_data": {
                     "data_source": "PyKRX",
                     "last_updated": kst_isoformat(),
                 },
             }
-
-            if not fundamental_data.empty:
-                # PyKRX는 한국어 컬럼명 DataFrame을 돌려준다. 라이브러리가 컬럼명을
-                # 바꾸면 silent break 대신 DataQualityError를 받도록 schema로 검증.
-                row = fundamental_data.iloc[-1].to_dict()
-                validated = validate_pykrx_fundamental(row)
-                # 0/None은 PyKRX의 'no data' 약속 — UI에서 None으로 표시.
-                result["fundamental_data"] = {
-                    "market_cap": int(validated.market_cap or 0),
-                    "per": float(validated.per) if validated.per else None,
-                    "pbr": float(validated.pbr) if validated.pbr else None,
-                    "eps": int(validated.eps or 0),
-                    "bps": int(validated.bps or 0),
-                }
-
             return convert_numpy_types(result)
 
         except Exception as e:
-            logger.warning(f"PyKRX detailed data failed: {str(e)}")
+            # KRX 로그인이 없거나 장애일 때 pykrx는 빈 응답 끝에 KeyError를 낸다.
+            reason = redact(format_error_message_korean(e, "PyKRX 지표 조회"))
+            logger.warning(f"PyKRX detailed data failed: {reason}")
             return {
-                "company_info": {"name": "Unknown", "market": "Unknown"},
-                "fundamental_data": {},
-                "market_data": {"data_source": "PyKRX", "error": str(e)},
-                "last_updated": kst_isoformat(),
+                "status": "unavailable",
+                "error": reason,
+                "company_info": ticker_info,
+                "fundamental_data": {key: None for key in ("market_cap", "per", "pbr", "eps", "bps")},
+                "market_data": {"data_source": "PyKRX", "last_updated": kst_isoformat()},
             }
 
     except Exception as e:
-        logger.error(f"Error fetching PyKRX data: {str(e)}")
-        return {"error": str(e)}
+        logger.error(f"Error fetching PyKRX data: {redact(str(e))}")
+        return {"error": redact(str(e))}
 
 
 def _chart_dir() -> str:

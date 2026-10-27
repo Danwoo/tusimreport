@@ -18,6 +18,7 @@ from agents.korean_financial_react_agent import (
     get_pykrx_market_data,
     save_stock_chart,
 )
+from core.agent_status import classify_tool_output
 
 
 def _stub_fdr_ohlcv(rows: int = 80) -> pd.DataFrame:
@@ -73,19 +74,37 @@ class TestGetKoreanStockData:
         assert "error" in result
 
 
+def _stub_pykrx_fundamental(**overrides: float) -> pd.DataFrame:
+    """`stock.get_market_fundamental(from, to, ticker)`의 실제 컬럼: BPS/PER/PBR/EPS/DIV/DPS (시가총액 없음)."""
+    row = {"BPS": 58000, "PER": 12.5, "PBR": 1.3, "EPS": 5000, "DIV": 2.1, "DPS": 1444, **overrides}
+    return pd.DataFrame(
+        {column: [value] for column, value in row.items()},
+        index=pd.date_range("2024-09-23", periods=1, freq="B"),
+    )
+
+
+def _stub_pykrx_market_cap(cap: int) -> pd.DataFrame:
+    """`stock.get_market_cap(from, to, ticker)`의 실제 컬럼."""
+    return pd.DataFrame(
+        {
+            "시가총액": [cap - 1_000_000, cap],
+            "거래량": [10_000_000, 12_000_000],
+            "거래대금": [700_000_000_000, 800_000_000_000],
+            "상장주식수": [5_969_782_550, 5_969_782_550],
+        },
+        index=pd.date_range("2024-09-20", periods=2, freq="B"),
+    )
+
+
 class TestGetPykrxMarketData:
-    def test_parses_fundamental_dataframe(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # PyKRX는 한국어 컬럼명. 회귀 검증을 위해 의도적으로 한국어 사용.
-        fundamental = pd.DataFrame(
-            {
-                "시가총액": [400_000_000_000_000],
-                "PER": [12.5],
-                "PBR": [1.3],
-                "EPS": [5000],
-                "BPS": [58000],
-            },
-            index=pd.date_range("2024-09-23", periods=1, freq="B"),
-        )
+    @pytest.fixture(autouse=True)
+    def pykrx_stubs(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+        """PyKRX 호출을 모두 막는다 — 테스트가 필요한 것만 덮어쓴다."""
+        calls: dict[str, Any] = {}
+
+        def market_cap(*args: Any, **kwargs: Any) -> pd.DataFrame:
+            calls["market_cap"] = (args, kwargs)
+            return pd.DataFrame()
 
         monkeypatch.setattr(
             "agents.korean_financial_react_agent.stock.get_market_ticker_list",
@@ -97,7 +116,15 @@ class TestGetPykrxMarketData:
         )
         monkeypatch.setattr(
             "agents.korean_financial_react_agent.stock.get_market_fundamental",
-            lambda *a, **kw: fundamental,
+            lambda *a, **kw: _stub_pykrx_fundamental(),
+        )
+        monkeypatch.setattr("agents.korean_financial_react_agent.stock.get_market_cap", market_cap)
+        return calls
+
+    def test_parses_real_fundamental_columns(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "agents.korean_financial_react_agent.stock.get_market_cap",
+            lambda *a, **kw: _stub_pykrx_market_cap(400_000_000_000_000),
         )
 
         result = get_pykrx_market_data.invoke({"stock_code": "005930"})
@@ -106,37 +133,97 @@ class TestGetPykrxMarketData:
         fd = result["fundamental_data"]
         assert fd["per"] == 12.5
         assert fd["pbr"] == 1.3
+        assert fd["eps"] == 5000
+        assert fd["bps"] == 58000
+        # 시가총액은 get_market_cap의 마지막 거래일 값
         assert fd["market_cap"] == 400_000_000_000_000
+        assert "note" not in fd
 
-    def test_zero_per_pbr_normalized_to_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """PyKRX는 데이터 없을 때 0을 돌려준다. 우리는 None으로 정규화."""
-        fundamental = pd.DataFrame(
-            {
-                "시가총액": [1_000_000_000_000],
-                "PER": [0],  # 0은 None으로 변환돼야
-                "PBR": [0],
-                "EPS": [100],
-                "BPS": [1000],
-            },
-            index=pd.date_range("2024-09-23", periods=1, freq="B"),
-        )
+    def test_market_cap_requested_for_same_window(
+        self, monkeypatch: pytest.MonkeyPatch, pykrx_stubs: dict[str, Any]
+    ) -> None:
+        captured: dict[str, Any] = {}
 
-        monkeypatch.setattr(
-            "agents.korean_financial_react_agent.stock.get_market_ticker_list",
-            lambda *a, **kw: ["005930"],
-        )
-        monkeypatch.setattr(
-            "agents.korean_financial_react_agent.stock.get_market_ticker_name",
-            lambda code: "삼성전자",
-        )
-        monkeypatch.setattr(
-            "agents.korean_financial_react_agent.stock.get_market_fundamental",
-            lambda *a, **kw: fundamental,
-        )
+        def fundamental(*args: Any, **kwargs: Any) -> pd.DataFrame:
+            captured["fundamental"] = args
+            return _stub_pykrx_fundamental()
+
+        monkeypatch.setattr("agents.korean_financial_react_agent.stock.get_market_fundamental", fundamental)
+        get_pykrx_market_data.invoke({"stock_code": "005930"})
+
+        assert pykrx_stubs["market_cap"][0] == captured["fundamental"]
+
+    def test_pykrx_failure_is_an_error_without_placeholders(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """KRX 로그인 없이 pykrx가 KeyError를 내면 'Unknown' 같은 자리표시값 없이 오류로 집계된다."""
+
+        def no_login(*_a: Any, **_kw: Any) -> pd.DataFrame:
+            raise KeyError("PER")
+
+        monkeypatch.setattr("agents.korean_financial_react_agent.stock.get_market_fundamental", no_login)
 
         result = get_pykrx_market_data.invoke({"stock_code": "005930"})
-        assert result["fundamental_data"]["per"] is None
-        assert result["fundamental_data"]["pbr"] is None
+
+        assert classify_tool_output(result) == (True, False)
+        assert "Unknown" not in str(result)
+        assert result["company_info"] == {"name": "삼성전자", "market": "KOSPI"}
+        assert set(result["fundamental_data"].values()) == {None}
+
+    def test_missing_market_cap_is_none_not_zero(self) -> None:
+        """get_market_fundamental에는 시가총액 컬럼이 없다 — 시가총액을 못 받으면 0이 아니라 None."""
+        result = get_pykrx_market_data.invoke({"stock_code": "005930"})
+
+        fd = result["fundamental_data"]
+        assert fd["market_cap"] is None
+        assert "시가총액" in fd["note"]
+        assert fd["per"] == 12.5
+
+    def test_market_cap_failure_is_none_with_reason(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def boom(*_a: Any, **_kw: Any) -> pd.DataFrame:
+            raise ConnectionError("KRX down")
+
+        monkeypatch.setattr("agents.korean_financial_react_agent.stock.get_market_cap", boom)
+
+        result = get_pykrx_market_data.invoke({"stock_code": "005930"})
+
+        fd = result["fundamental_data"]
+        assert fd["market_cap"] is None
+        assert "KRX down" in fd["note"]
+        # 시가총액 실패가 다른 지표까지 지우지 않는다.
+        assert fd["pbr"] == 1.3
+
+    def test_zero_values_normalized_to_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """PyKRX는 데이터 없을 때 0을 돌려준다. 우리는 None으로 정규화."""
+        monkeypatch.setattr(
+            "agents.korean_financial_react_agent.stock.get_market_fundamental",
+            lambda *a, **kw: _stub_pykrx_fundamental(PER=0, PBR=0, EPS=0, BPS=0),
+        )
+        monkeypatch.setattr(
+            "agents.korean_financial_react_agent.stock.get_market_cap",
+            lambda *a, **kw: _stub_pykrx_market_cap(0),
+        )
+
+        fd = get_pykrx_market_data.invoke({"stock_code": "005930"})["fundamental_data"]
+
+        assert fd == {
+            "market_cap": None,
+            "per": None,
+            "pbr": None,
+            "eps": None,
+            "bps": None,
+            "note": fd["note"],
+        }
+
+    def test_negative_eps_is_kept(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """적자 기업의 음수 EPS는 실제 값이다 — 0만 'no data'다."""
+        monkeypatch.setattr(
+            "agents.korean_financial_react_agent.stock.get_market_fundamental",
+            lambda *a, **kw: _stub_pykrx_fundamental(PER=0, EPS=-1234),
+        )
+
+        fd = get_pykrx_market_data.invoke({"stock_code": "005930"})["fundamental_data"]
+
+        assert fd["eps"] == -1234
+        assert fd["per"] is None
 
     def test_kosdaq_code_is_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """get_market_ticker_list()의 기본값은 KOSPI뿐 — KOSDAQ 종목도 이름·시장을 찾아야 한다."""
@@ -156,6 +243,9 @@ class TestGetPykrxMarketData:
 
         result = get_pykrx_market_data.invoke({"stock_code": "247540"})
         assert result["company_info"] == {"name": "에코프로비엠", "market": "KOSDAQ"}
+        fd = result["fundamental_data"]
+        assert all(fd[key] is None for key in ("market_cap", "per", "pbr", "eps", "bps"))
+        assert "비어 있음" in fd["note"]
 
 
 @pytest.mark.filterwarnings("ignore:Glyph .* missing from font")

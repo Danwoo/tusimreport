@@ -4,9 +4,10 @@ Korean ESG Analysis Agent - DART API 기반
 기업의 ESG(환경, 사회, 지배구조) 요소를 분석하여 지속가능성을 평가합니다.
 
 주요 기능:
-- DART 기업개황(대표자·업종코드)과 최근 90일 공시 제목 수집
+- DART 기업개황(대표자·업종코드)과 최근 90일 공시 제목(최대 20건) 수집
 - 공시 제목으로 지배구조·사회·환경 관련 공시 분류
-- 근거가 없는 축은 available=False로 표시 (ESG 점수·등급은 만들지 않음)
+- 관련 공시가 없는 축은 available=False로 표시 (ESG 점수·등급은 만들지 않음)
+- 기업개황은 basic_info에만 두고 어느 축의 근거로도 쓰지 않음
 """
 
 import logging
@@ -38,10 +39,24 @@ GOVERNANCE_KEYWORDS = (
     "자기주식",
     "소유상황",
 )
-SOCIAL_KEYWORDS = ("지속가능", "사회", "안전", "재해", "인권", "고용", "노사", "공정거래")
+# 맨 "사회"는 넣지 않는다: "이사회" 결의 공시(대규모내부거래에대한이사회의결 등)에 걸린다.
+SOCIAL_KEYWORDS = (
+    "지속가능",
+    "사회공헌",
+    "사회적",
+    "사회책임",
+    "안전",
+    "재해",
+    "인권",
+    "고용",
+    "노사",
+    "공정거래",
+)
 # "에너지"는 넣지 않는다: 자회사명(…에너지솔루션)이 든 공시 제목에 걸린다.
 ENVIRONMENTAL_KEYWORDS = ("환경", "탄소", "온실가스", "배출", "기후", "지속가능")
 MAX_DISCLOSURES_PER_PILLAR = 10
+# get_comprehensive_company_data()가 받는 최근 공시 건수 상한 (get_recent_disclosures(corp_code, 20)).
+RECENT_DISCLOSURE_LIMIT = 20
 
 
 def _matching_disclosures(
@@ -57,15 +72,10 @@ def _matching_disclosures(
     return matched[:MAX_DISCLOSURES_PER_PILLAR]
 
 
-def _pillar(related: list[dict[str, Any]], missing_reason: str, **facts: Any) -> dict[str, Any]:
-    """한 축의 결과. 근거가 하나도 없으면 available=False와 사유만 둔다 (점수·등급을 만들지 않는다)."""
-    present = {key: value for key, value in facts.items() if value}
-    pillar: dict[str, Any] = {
-        "available": bool(related or present),
-        **present,
-        "related_disclosures": related,
-    }
-    if not pillar["available"]:
+def _pillar(related: list[dict[str, Any]], missing_reason: str) -> dict[str, Any]:
+    """한 축의 결과. 관련 공시가 없으면 available=False와 사유만 둔다 (점수·등급을 만들지 않는다)."""
+    pillar: dict[str, Any] = {"available": bool(related), "related_disclosures": related}
+    if not related:
         pillar["reason"] = missing_reason
     return pillar
 
@@ -74,8 +84,9 @@ def get_esg_analysis_logic(stock_code: str, company_name: str) -> dict[str, Any]
     """ESG 분석 로직.
 
     입력은 get_comprehensive_company_data()가 실제로 돌려주는 것만 쓴다:
-    company_info(대표자·업종코드 등)와 최근 90일 recent_disclosures 제목.
-    DART에 근거가 없는 축은 available=False로 표시한다.
+    company_info(대표자·업종코드 등)와 최근 90일 recent_disclosures 제목(최대 20건).
+    각 축은 관련 공시가 있을 때만 available이다. 상장사는 DART 기업개황(대표자명 등)이
+    늘 오므로 그것을 축의 근거로 세면 no_data가 나올 수 없다 — basic_info에만 둔다.
     """
     try:
         logger.info(f"Fetching DART company info for {company_name} ({stock_code})")
@@ -91,7 +102,12 @@ def get_esg_analysis_logic(stock_code: str, company_name: str) -> dict[str, Any]
 
         company_info = dart_info.get("company_info") or {}
         disclosures = [d for d in dart_info.get("recent_disclosures") or [] if isinstance(d, dict)]
-        no_disclosure = f"최근 90일 DART 공시 {len(disclosures)}건 중 관련 공시 없음"
+        if disclosures:
+            no_disclosure = (
+                f"최근 공시 {len(disclosures)}건(최대 {RECENT_DISCLOSURE_LIMIT}건) 중 관련 공시 없음"
+            )
+        else:
+            no_disclosure = "최근 90일 DART 공시 목록을 받지 못함 (공시가 없거나 조회 실패)"
 
         esg_info: dict[str, Any] = {
             "status": "success",
@@ -112,12 +128,11 @@ def get_esg_analysis_logic(stock_code: str, company_name: str) -> dict[str, Any]
             },
             "governance": _pillar(
                 _matching_disclosures(disclosures, GOVERNANCE_KEYWORDS),
-                f"대표자 정보 없음, {no_disclosure}",
-                ceo_name=company_info.get("ceo_nm"),
+                f"{no_disclosure} (이사회 구성·감사 의견은 이 도구가 받지 않음)",
             ),
             "social": _pillar(
                 _matching_disclosures(disclosures, SOCIAL_KEYWORDS),
-                f"{no_disclosure} (직원·안전·사회공헌 항목은 이 도구가 받지 않음)",
+                f"{no_disclosure} (직원 수·산업재해 같은 사회 지표 수치는 이 도구가 받지 않음)",
             ),
             "environmental": _pillar(
                 _matching_disclosures(disclosures, ENVIRONMENTAL_KEYWORDS),
@@ -133,6 +148,7 @@ def get_esg_analysis_logic(stock_code: str, company_name: str) -> dict[str, Any]
         # 세 축 모두 근거가 없으면 기업개황만으로 ESG를 논할 수 없다.
         if not any(esg_info[pillar]["available"] for pillar in ("governance", "social", "environmental")):
             esg_info["status"] = "no_data"
+            esg_info["reason"] = f"지배구조·사회·환경 모두 {no_disclosure}"
 
         return convert_numpy_types(esg_info)
 
@@ -163,38 +179,34 @@ def create_esg_agent():
     llm = build_llm(temperature=0.1)
 
     prompt = (
-        "당신은 ESG(환경·사회·지배구조) 분석 전문가입니다. "
-        "투자자들이 쉽게 이해할 수 있도록 이 회사의 ESG 경영 상태와 지속가능성을 분석해주세요.\n\n"
-        "먼저 `get_dart_company_info_wrapper` 도구를 사용해서 기업 공시 정보를 수집한 후, "
-        "다음과 같이 친근하고 이해하기 쉽게 설명해주세요:\n\n"
-        "1. 이 회사의 지배구조(경영 투명성)는 어떤지 알려주세요\n"
-        "   - 경영진의 전문성과 안정성은 어떤지\n"
-        "   - 이사회가 제대로 견제 역할을 하고 있는지\n"
-        "   - 주주들의 권익은 잘 보호받고 있는지\n\n"
-        "2. 사회적 책임은 어떻게 수행하고 있는지 설명해주세요\n"
-        "   - 직원들을 어떻게 대우하고 있는지\n"
-        "   - 지역사회나 사회 전체에 어떤 기여를 하고 있는지\n"
-        "   - 고객이나 협력업체와의 관계는 어떤지\n\n"
-        "3. 환경 경영은 어떤 수준인지 평가해주세요\n"
-        "   - 환경 오염이나 기후변화에 대한 대응은 어떤지\n"
-        "   - 친환경 제품이나 기술 개발 노력은 있는지\n"
-        "   - 에너지 효율화나 탄소 배출 감소 노력은 어떤지\n\n"
-        "4. 장기적인 지속가능성은 어떻게 보이는지 분석해주세요\n"
-        "   - ESG 리스크가 사업에 어떤 영향을 줄 수 있는지\n"
-        "   - 미래 규제나 사회적 변화에 잘 대응할 수 있을지\n"
-        "   - ESG 경영이 기업 가치에 도움이 될지\n\n"
-        "5. 투자자 관점에서 ESG 투자 매력도를 알려주세요\n"
-        "   - 다른 회사들과 비교해서 ESG 수준이 어떤지\n"
-        "   - ESG 투자 펀드들이 관심을 가질 만한지\n"
-        "   - 앞으로 ESG 개선 여지는 어느 정도인지\n\n"
+        "당신은 ESG(환경·사회·지배구조) 공시 분석 전문가입니다. "
+        "투자자들이 쉽게 이해할 수 있도록 이 회사가 최근 DART에 낸 ESG 관련 공시를 정리해주세요.\n\n"
+        "먼저 `get_dart_company_info_wrapper` 도구로 기업개황과 최근 공시 제목을 받은 뒤, "
+        "다음 순서로 친근하고 이해하기 쉽게 설명해주세요:\n\n"
+        "1. 회사 개요\n"
+        "   - basic_info(회사명·대표자·업종코드·설립일)로 한두 줄 소개만 하세요\n"
+        "   - 대표자 이름이나 기업개황만으로 경영진의 역량·안정성, 이사회의 견제 기능, "
+        "주주 권익 보호 수준을 평가하지 마세요\n\n"
+        "2. 지배구조(governance)\n"
+        "   - related_disclosures의 공시(제목·접수일)를 들어 최근 어떤 지배구조 관련 공시"
+        "(주주총회, 최대주주·임원 지분 변동, 이사회 결의, 배당, 자기주식 등)가 있었는지 설명하세요\n\n"
+        "3. 사회(social)\n"
+        "   - related_disclosures의 공시를 들어 지속가능경영·안전·고용·공정거래 관련 사항을 설명하세요\n\n"
+        "4. 환경(environmental)\n"
+        "   - related_disclosures의 공시를 들어 환경·탄소·온실가스 관련 사항을 설명하세요\n\n"
+        "5. 투자자 관점의 정리\n"
+        "   - 위 공시들에서 드러난 ESG 관련 리스크와 앞으로 지켜볼 공시를 짚어주세요\n"
+        "   - 공시 근거가 없는 축은 결론에 넣지 마세요\n\n"
         "데이터 사용 원칙:\n"
-        "- 도구 결과(DART 기업개황과 최근 90일 공시 제목)에 있는 사실만 근거로 쓰세요\n"
+        "- 도구 결과(DART 기업개황과 최근 공시 제목)에 있는 사실만 근거로 쓰세요. "
+        "공시 제목에 없는 내용(결의 내용·금액·지분율 등)은 추측하지 마세요\n"
+        "- 각 축은 그 축의 related_disclosures만 근거로 평가하세요\n"
         "- governance/social/environmental 중 available이 false인 축은 "
         "'DART 공시 근거 부족으로 평가할 수 없음'이라고 밝히고 사유(reason)를 전하세요\n"
-        "- ESG 점수·등급·배출량·직원 수 같은 수치를 추정하거나 만들어내지 마세요\n\n"
-        "전문 용어를 사용할 때는 쉬운 설명을 함께 해주시고, "
-        "ESG 점수나 등급보다는 실제 경영 활동과 그 의미를 중심으로 설명해주세요. "
-        "ESG 컨설턴트가 투자자에게 친근하게 설명해주는 느낌으로 작성해주세요.\n\n"
+        "- status가 no_data이면 세 축 모두 평가할 수 없다고 밝히세요\n"
+        "- ESG 점수·등급·배출량·직원 수 같은 수치를 추정하거나 만들어내지 마세요\n"
+        "- 다른 회사와 ESG 수준을 비교하지 마세요 (도구가 비교 데이터를 주지 않습니다)\n\n"
+        "전문 용어를 사용할 때는 쉬운 설명을 함께 해주세요.\n\n"
         "참고: 이 분석은 ESG 평가 참고자료이며 투자 추천이 아닙니다. 투자 시에는 신중히 판단하세요.\n\n"
         f"🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 '{AgentSignal.ESG.value}'라고 정확히 적어주세요. "
         "이것은 시스템이 분석 완료를 확인하는 데 필수입니다."

@@ -84,13 +84,27 @@ def _sector_analysis(
 ) -> dict[str, Any]:
     if df_info.empty:
         return {"available": False, "reason": empty_reason or f"{trading_day} PyKRX 전종목 지표가 비어 있음"}
+    missing = [m for m in METRICS if m not in df_info.columns]
+    if missing:
+        return {"available": False, "reason": f"PyKRX 지표 컬럼 없음: {', '.join(missing)}"}
+    # 휴장일 날짜로 조회하면 KRX는 빈 표가 아니라 전 종목이 0인 표를 준다.
+    if all(_metric(value) is None for value in df_info[list(METRICS)].to_numpy().ravel()):
+        return {
+            "available": False,
+            "reason": f"{trading_day} PyKRX 전종목 지표가 모두 0 (휴장일이거나 그날 지표가 집계되지 않음)",
+        }
     if stock_code not in df_info.index:
         return {"available": False, "reason": f"{trading_day} PyKRX 지표에 {stock_code} 없음"}
     if not sector:
         return {"available": False, "reason": "업종 매핑에 없는 종목 (경쟁사 비교 불가)"}
-    missing = [m for m in METRICS if m not in df_info.columns]
-    if missing:
-        return {"available": False, "reason": f"PyKRX 지표 컬럼 없음: {', '.join(missing)}"}
+
+    target_metrics = {m: _metric(df_info.loc[stock_code, m]) for m in METRICS}
+    if all(value is None for value in target_metrics.values()):
+        return {
+            "available": False,
+            "sector_name": sector,
+            "reason": f"{trading_day} PyKRX 지표에서 {stock_code}의 {'·'.join(METRICS)}가 모두 0 또는 비어 있음",
+        }
 
     peer_group = df_info[df_info.index.isin(peer_codes + [stock_code])]
     if len(peer_group) <= 1:
@@ -100,7 +114,7 @@ def _sector_analysis(
         "available": True,
         "sector_name": sector,
         "peer_count": len(peer_group),
-        "target_metrics": {m: _metric(df_info.loc[stock_code, m]) for m in METRICS},
+        "target_metrics": target_metrics,
         "peer_averages": {m: _peer_average(peer_group, m) for m in METRICS},
     }
 
@@ -177,7 +191,7 @@ def _market_position(stock_code: str, trading_day: str) -> dict[str, Any]:
         "total_stocks": total_stocks,
         "market_cap": float(target_cap),
         "category": cap_category,
-        "percentile": round((1 - rank / total_stocks) * 100, 1),
+        "top_percent": round(rank / total_stocks * 100, 2),
     }
 
 
@@ -224,7 +238,7 @@ def get_comparative_analysis_logic(stock_code: str, company_name: str) -> dict[s
         if market_position["available"]:
             insights.append(
                 f"시가총액 순위: {market_position['rank']}위/{market_position['total_stocks']}개 "
-                f"(상위 {market_position['percentile']}%)"
+                f"(상위 {market_position['top_percent']}%)"
             )
             insights.append(f"시가총액 규모: {market_position['category']}")
         else:
@@ -309,95 +323,35 @@ def create_comparative_agent():
 
     prompt = (
         "당신은 동종업계 비교 분석 전문가입니다. "
-        "CRITICAL REQUIREMENTS:\n"
-        "- Minimum 2,500-3,000 characters in Korean\n"
-        "- Provide COMPREHENSIVE comparative analysis with specific numerical data and statistical comparisons\n"
-        "- Include detailed peer group analysis, sector positioning, and relative valuation metrics\n"
-        "- Focus on REFERENCE MATERIALS for institutional investment decisions, NOT investment advice\n\n"
-        "MISSION: Create a detailed comparative analysis reference document that institutional investors can rely on for relative value assessment and portfolio positioning decisions.\n\n"
-        "ANALYSIS FRAMEWORK:\n"
-        "1. Use the `get_comparative_analysis` tool to gather ALL available comparative data\n"
-        "2. Provide comprehensive analysis in the following structure:\n\n"
-        "## 종합 상대가치 분석\n\n"
-        "### A. 업종 분류 및 시장 포지셔닝\n"
-        "- 업종 분류: [정확한 업종명] (KOSPI/KOSDAQ 구분)\n"
-        "- 업종 내 순위: 시가총액 기준 [순위]위/[총 기업수]개 (상위 [%]%)\n"
-        "- 업종 대표성: [업종 대표주/주요 기업/일반 기업] 위치\n"
-        "- 시장 내 전체 순위: [순위]위/[전체 상장기업수]개 (상위 [%]%)\n"
-        "- 시가총액 규모: [조원] ([대형주/중형주/소형주] 분류)\n"
-        "- 유동성 등급: [1등급(매우 높음)/2등급(높음)/3등급(보통)/4등급(낮음)/5등급(매우 낮음)]\n\n"
-        "### B. 핵심 경쟁사 비교 분석\n"
-        "- 1순위 경쟁사: [회사명] - PER [수치], PBR [수치], ROE [수치]%\n"
-        "- 2순위 경쟁사: [회사명] - PER [수치], PBR [수치], ROE [수치]%\n"
-        "- 3순위 경쟁사: [회사명] - PER [수치], PBR [수치], ROE [수치]%\n"
-        "- 대상 기업: [회사명] - PER [수치], PBR [수치], ROE [수치]%\n"
-        "- 경쟁사 대비 순위: PER [순위]/[총수], PBR [순위]/[총수], ROE [순위]/[총수]\n"
-        "- 경쟁 구도 특성: [과점/경쟁심화/신규진입활발/성숙시장] 분류\n\n"
-        "### C. 멀티플 밸류에이션 상세 분석\n"
-        "- PER 분석:\n"
-        "  • 현재 PER: [수치]배 vs 업종 평균 [수치]배 ([프리미엄/디스카운트] [%]%)\n"
-        "  • 과거 3년 PER 레인지: [최저]-[최고]배 (현재 [백분위수]% 수준)\n"
-        "  • Forward PER: [예상 수치]배 (컨센서스 EPS 기준)\n"
-        "- PBR 분석:\n"
-        "  • 현재 PBR: [수치]배 vs 업종 평균 [수치]배 ([프리미엄/디스카운트] [%]%)\n"
-        "  • 과거 3년 PBR 레인지: [최저]-[최고]배 (현재 [백분위수]% 수준)\n"
-        "  • 청산가치 대비: [수치]배 (자산가치 대비 평가)\n"
-        "- EV/EBITDA: [수치]배 vs 업종 평균 [수치]배\n"
-        "- P/S Ratio: [수치]배 vs 업종 평균 [수치]배\n"
-        "- Dividend Yield: [수치]% vs 업종 평균 [수치]%\n\n"
-        "### D. 수익성 지표 동종업계 비교\n"
-        "- ROE (자기자본이익률): [수치]% vs 업종 평균 [수치]% (업종 내 [순위]위)\n"
-        "- ROA (총자산이익률): [수치]% vs 업종 평균 [수치]% (업종 내 [순위]위)\n"
-        "- ROIC (투하자본이익률): [수치]% vs 업종 평균 [수치]%\n"
-        "- 영업이익률: [수치]% vs 업종 평균 [수치]% (업종 내 [순위]위)\n"
-        "- 순이익률: [수치]% vs 업종 평균 [수치]% (업종 내 [순위]위)\n"
-        "- EBITDA 마진: [수치]% vs 업종 평균 [수치]%\n"
-        "- 수익성 종합 평가: [업종 최우수/상위권/평균 수준/하위권] 위치\n\n"
-        "### E. 성장성 지표 상대 비교\n"
-        "- 매출 성장률 (3년 CAGR): [수치]% vs 업종 평균 [수치]%\n"
-        "- 영업이익 성장률 (3년 CAGR): [수치]% vs 업종 평균 [수치]%\n"
-        "- 순이익 성장률 (3년 CAGR): [수치]% vs 업종 평균 [수치]%\n"
-        "- Forward 성장률: 향후 2년 예상 매출 성장 [수치]% vs 업종 [수치]%\n"
-        "- 시장점유율 추이: [확대/유지/축소] vs 경쟁사\n"
-        "- 성장성 업종 순위: [순위]위/[총 기업수]개 ([상위/중위/하위] 그룹)\n\n"
-        "### F. 안정성 지표 동종업계 분석\n"
-        "- 부채비율: [수치]% vs 업종 평균 [수치]% (업종 내 [순위]위)\n"
-        "- 유동비율: [수치]% vs 업종 평균 [수치]%\n"
-        "- 이자보상배율: [수치]배 vs 업종 평균 [수치]배\n"
-        "- 현금보유비율: 총자산 대비 [수치]% vs 업종 평균 [수치]%\n"
-        "- 신용등급: [등급] vs 업종 대표기업 [등급]\n"
-        "- 재무 안정성 순위: 업종 내 [순위]위 ([우수/양호/보통/주의] 수준)\n\n"
-        "### G. 시장 지배력 및 경쟁 우위 분석\n"
-        "- 시장점유율: [수치]% (업종 내 [순위]위)\n"
-        "- 브랜드 파워: [최고/우수/보통/열위] vs 경쟁사\n"
-        "- 기술 경쟁력: [기술 선도/기술 추종/기술 의존] 위치\n"
-        "- 진입 장벽: [매우 높음/높음/보통/낮음] (신규 진입 난이도)\n"
-        "- 고객 집중도: [낮음(분산)/보통/높음(집중)] 위험도\n"
-        "- 공급망 지위: [가격 결정권/협상력 우위/대등/열세] 위치\n"
-        "- 경쟁 우위 지속성: [10년+/5-10년/2-5년/2년 미만] 예상\n\n"
-        "### H. 투자자 선호도 및 프리미엄/디스카운트 분석\n"
-        "- 기관투자자 선호도: [매우 높음/높음/보통/낮음] (보유 비중 기준)\n"
-        "- 외국인 투자자 관심: [높음/보통/낮음] (순매수 패턴 기준)\n"
-        "- 개인투자자 인기: [높음/보통/낮음] (거래 활발도 기준)\n"
-        "- ESG 프리미엄: [높음/보통/낮음/디스카운트] 수준\n"
-        "- 거버넌스 프리미엄: [우수 기업/일반 기업/주의 기업] 분류\n"
-        "- 유동성 프리미엄: [우수/보통/열세] (거래량 기준)\n"
-        "- 배당 매력도: [높음/보통/낮음] vs 업종 평균\n\n"
-        "### I. 상대가치 투자 관점 분석\n"
-        "- 밸류에이션 매력도: [높음/보통/낮음] (업종 대비 할인/프리미엄)\n"
-        "- 펀더멘털 vs 밸류에이션 괴리도: [과소평가/적정평가/과대평가]\n"
-        "- 평균회귀 가능성: [높음/보통/낮음] (역사적 밸류에이션 대비)\n"
-        "- 재평가 촉매: [구체적 재평가 요인들] 식별\n"
-        "- 밸류 트랩 위험: [높음/보통/낮음] (지속적 할인 가능성)\n"
-        "- 상대매매 전략: [Long vs Short 대상] 페어 트레이딩 적합성\n\n"
-        "### J. 투자 포지셔닝 권고사항\n"
-        "- 업종 내 투자 우선순위: [1순위/2순위/3순위/비추천] 등급\n"
-        "- 포트폴리오 비중 참고: [오버웨이트/뉴트럴/언더웨이트] 포지션\n"
-        "- 상대가치 기회: [매수 우위/관망/매도 우위] vs 경쟁사\n"
-        "- 리스크 조정 매력도: 샤프 비율 기준 업종 내 순위\n"
-        "- 장기 투자 적합성: [매우 적합/적합/보통/부적합] 평가\n"
-        "- 단기 트레이딩 적합성: [매우 적합/적합/보통/부적합] 평가\n\n"
-        "IMPORTANT: This is comparative analysis reference material for institutional portfolio management. Present peer comparison data objectively without specific buy/sell recommendations.\n"
+        "`get_comparative_analysis` 도구가 돌려준 데이터만으로 이 회사의 업종 내·시장 내 상대 위치를 정리하세요.\n\n"
+        "먼저 `get_comparative_analysis` 도구를 호출한 뒤, 아래 구조로 작성하세요. "
+        "길이를 채우려고 항목을 늘리지 마세요.\n\n"
+        "## 상대가치 분석\n\n"
+        "- 기준일: analysis_date\n\n"
+        "### A. 업종과 비교 대상\n"
+        "- 업종: sector_analysis.sector_name (없으면 '업종 미분류')\n"
+        "- 주요 경쟁사: key_competitors의 회사명과 각 PER·PBR\n"
+        "- 업종 평균에 들어간 종목 수: sector_analysis.peer_count\n\n"
+        "### B. 업종 평균 대비 지표\n"
+        "- PER: 대상 기업 [target_metrics.PER]배 vs 업종 평균 [peer_averages.PER]배\n"
+        "- PBR: 대상 기업 [target_metrics.PBR]배 vs 업종 평균 [peer_averages.PBR]배\n"
+        "- EPS: 대상 기업 [target_metrics.EPS]원 vs 업종 평균 [peer_averages.EPS]원\n"
+        "- BPS: 대상 기업 [target_metrics.BPS]원 vs 업종 평균 [peer_averages.BPS]원\n"
+        "- 해석: competitive_advantages에 있는 항목을 근거로 업종 대비 위치를 설명하세요\n\n"
+        "### C. 시장 내 규모\n"
+        "- 시가총액: market_position.market_cap (원)\n"
+        "- 시가총액 순위: [market_position.rank]위/[market_position.total_stocks]개 "
+        "(상위 [market_position.top_percent]%)\n"
+        "- 규모 분류: market_position.category\n\n"
+        "### D. 받지 못한 데이터\n"
+        "- available이 false인 항목마다 '데이터 없음'과 reason을 그대로 적으세요\n\n"
+        "### E. 정리\n"
+        "- 위 수치로 말할 수 있는 상대 위치만 2~3문장으로 정리하세요\n\n"
+        "데이터 원칙:\n"
+        "- 도구 결과에 있는 숫자만 쓰세요. ROE·ROA·EV/EBITDA·과거 PER/PBR 범위·Forward PER·성장률·"
+        "부채비율·신용등급·시장점유율 등은 이 도구가 주지 않습니다 — 언급해야 하면 '데이터 없음'으로 적으세요\n"
+        "- 값이 null인 지표도 '데이터 없음'으로 적으세요. 추정하거나 만들어내지 마세요\n"
+        "- 이 자료는 동종업계 비교 참고자료이며 매수·매도 권유가 아닙니다\n"
         "DATA RULE: Use only numbers present in the tool result. Any metric the tool did not return (or whose section has available: false, or whose value is null) must be written as '데이터 없음' — never estimate or invent it.\n\n"
         f"🚨 중요: 분석을 모두 마친 후 반드시 마지막 줄에 '{AgentSignal.COMPARATIVE.value}'라고 정확히 적어주세요. "
         "이것은 시스템이 분석 완료를 확인하는 데 필수입니다."
