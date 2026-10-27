@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     # Tavily Search API 키 (글로벌 뉴스 검색)
     tavily_api_key: str | None = None
 
+    # Paxnet 종목토론 크롤링. 이용약관을 확인하지 못해 기본은 끈다 (docs/API_KEYS.md 4.7).
+    enable_paxnet_crawl: bool = False
+
     # 딥서치 뉴스 API (월 20회 제한으로 현재 비활성화 — env 전용)
     deepsearch_api_key: str | None = None
 

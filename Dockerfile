@@ -47,7 +47,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CHROMEDRIVER=/usr/bin/chromedriver
 
 # 런타임 의존성:
-#   chromium, chromedriver — paxnet/dcinside 셀레늄 크롤러
+#   chromium, chromedriver — Paxnet 셀레늄 크롤러 (ENABLE_PAXNET_CRAWL=true일 때)
 #   fonts-noto-cjk         — matplotlib 한글 차트
 #   tini                   — PID 1 zombie reaper
 #   ca-certificates        — TLS verify=True (RSS 화이트리스트 이외)

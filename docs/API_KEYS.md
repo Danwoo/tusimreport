@@ -15,7 +15,7 @@
 | `ALPHA_VANTAGE_API_KEY` | 선택 | `global_market_expert` | 하루 25건 | [Alpha Vantage](https://www.alphavantage.co/support/#api-key) |
 | `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | 사용하지 않음 | — | 4.4절 | — |
 
-키 없이 동작하는 소스는 FinanceDataReader, CoinGecko, Paxnet(Chrome 필요)이다.
+키 없이 동작하는 소스는 FinanceDataReader, CoinGecko, Paxnet이다. Paxnet 크롤링은 기본으로 꺼져 있다(4.7절).
 
 데이터 키가 없으면 해당 도구가 오류를 돌려주고, 그 에이전트는 "근거 데이터 없음"으로 판정돼 최종 보고서에서 빠진다. 근거 데이터가 있는 에이전트가 9개 중 5개 미만이면 보고서를 만들지 않는다. 어떤 소스가 빠졌는지는 `python scripts/check_sources.py`로 확인한다.
 
@@ -122,7 +122,7 @@ Gemini는 `GOOGLE_API_KEY`와 `USE_GEMINI=true`로도 쓸 수 있다. 다만 `la
 |---|---|
 | FinanceDataReader | 종목 시세. 계정이 필요 없다 |
 | CoinGecko | 공개 API. 같은 IP 기준 분당 수십 회 수준의 제한이 있다 |
-| Paxnet 종목토론 (Selenium) | Chrome 또는 Chromium이 필요하다. 없으면 커뮤니티 분석은 근거 없음으로 빠진다 |
+| Paxnet 종목토론 (Selenium) | 기본으로 꺼져 있다. robots.txt는 게시판 경로를 허용하지만(2026-10-27 확인) 이용약관 원문을 확인하지 못했다. 약관을 직접 확인한 뒤 `ENABLE_PAXNET_CRAWL=true`로 켠다. Chrome 또는 Chromium이 필요하다. 꺼져 있으면 커뮤니티 분석은 근거 없음으로 빠진다 |
 
 CNN Fear & Greed 지수는 쓰지 않는다. 공개 API가 아니며, CNN 이용약관이 자동 수집과 AI 입력용 추출을 금지한다.
 
