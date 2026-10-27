@@ -49,7 +49,7 @@ class BaseAPIClient:
     # 즉시 raise하여 호출자가 인증/입력 문제로 분기하도록 둔다.
     RETRY_STATUS = (429, 500, 502, 503, 504)
     RETRY_TOTAL = 3
-    RETRY_BACKOFF_FACTOR = 0.5  # 0.5, 1.0, 2.0초 대기 후 재시도
+    RETRY_BACKOFF_FACTOR = 0.5  # urllib3: 재시도 전 0초, 1초, 2초 대기 (최대 4회 요청)
 
     # LRU eviction: 캐시 디렉토리에 이 갯수보다 많이 쌓이면 가장 오래된 파일부터 삭제.
     # 같은 cache_subdir을 공유하는 인스턴스 전반에 적용. 너무 작으면 hot key가

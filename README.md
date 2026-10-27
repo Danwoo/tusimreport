@@ -20,7 +20,7 @@
 | `institutional_trading_expert` | 투자자별 매매 동향 | pykrx |
 | `comparative_expert` | 동종업체 비교 | pykrx, FinanceDataReader |
 | `esg_expert` | 공시 기반 ESG 단서 | OpenDART |
-| `community_expert` | 종목토론 게시판 | Paxnet (Selenium) |
+| `community_expert` | 종목토론 게시판 | Paxnet (Selenium, 기본 꺼짐) |
 | `global_market_expert` | 미국 증시, 환율, 암호화폐 | Alpha Vantage, CoinGecko |
 
 ## 설계에서 다룬 문제
@@ -61,7 +61,7 @@ tests/     단위·통합 테스트 (외부 호출 없음)
 
 ## 시작하기
 
-Python 3.11 이상이 필요하다. 커뮤니티 분석에는 Chrome 또는 Chromium이 필요하다.
+Python 3.11 이상이 필요하다. 커뮤니티 분석(Paxnet 크롤링)은 이용약관을 확인하지 못해 기본으로 꺼 두었다. 켜려면 `ENABLE_PAXNET_CRAWL=true`와 Chrome 또는 Chromium이 필요하다.
 
 ```bash
 git clone https://github.com/Danwoo/tusimreport.git
@@ -79,7 +79,7 @@ python scripts/check_sources.py        # 데이터 소스별 연결 상태
 streamlit run main.py                  # http://localhost:8501
 ```
 
-Docker로도 실행할 수 있다. 이미지에 Chromium과 CJK 폰트가 들어 있다.
+Dockerfile과 `docker-compose.yml`도 있다. 이미지에 Chromium과 CJK 폰트를 넣도록 구성했지만, 컨테이너 실행까지 검증하지는 않았다.
 
 ```bash
 docker compose up --build
@@ -107,7 +107,7 @@ pytest
 테스트는 외부 API를 호출하지 않는다. HTTP는 `responses`로 대체하고, 에이전트 그래프 통합 테스트는 정해진 순서로 도구를 부르는 가짜 LLM을 쓴다. CI(GitHub Actions)는 Python 3.11과 3.12에서 다음을 확인한다.
 
 - ruff lint와 포맷
-- 핵심 8개 모듈의 mypy strict 검사
+- 핵심 8개 모듈의 mypy 타입 검사 (타입 표기 없는 함수 금지, `Any` 반환 경고)
 - 커버리지 45% 이상의 pytest
 - gitleaks 시크릿 검사
 - pip-audit 의존성 감사(실패해도 빌드를 막지 않는다)
