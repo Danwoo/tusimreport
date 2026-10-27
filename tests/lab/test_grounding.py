@@ -39,3 +39,22 @@ def test_source_numbers_parse_strings_with_units() -> None:
     assert 1234e8 in values
     assert 12.5 in values
     assert 70000.0 in values
+
+
+def test_generated_summary_and_reasons_are_not_source_data() -> None:
+    """요약 문구의 라벨("24시간", "S&P 500")이 지어낸 숫자와 우연히 맞으면 안 된다."""
+    outputs = [
+        {
+            "bitcoin": {"price_change_24h": 2.5},
+            "summary": "Bitcoin (24시간 +2.50%), S&P 500 추종 ETF, NASDAQ-100 추종 ETF",
+            "unavailable_data": ["USD/KRW 환율: 하루 25건 한도 초과"],
+            "forex": {"available": False, "reason": "한도 25건 초과"},
+        }
+    ]
+
+    result = numeric_grounding(
+        "비트코인이 하루 새 24% 급등했고 나스닥은 100포인트 올랐다. 변동률 2.5%.", outputs
+    )
+
+    assert result.grounded == 1
+    assert {item["number"] for item in result.ungrounded} == {"24%", "100"}
