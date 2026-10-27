@@ -38,5 +38,7 @@ def isolated_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     tempfile.gettempdir()를 monkeypatch해서 /tmp가 아닌 pytest tmp_path를
     쓰게 한다. 테스트 간 캐시 오염을 막고, 종료 시 자동 정리된다.
     """
+    # TUSIM_CACHE_DIR takes precedence over the temp dir, so an operator setting must not leak in.
+    monkeypatch.delenv("TUSIM_CACHE_DIR", raising=False)
     monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
     return tmp_path
