@@ -1,7 +1,6 @@
 """모든 외부 API 클라이언트의 공통 베이스.
 
-기존엔 Alpha Vantage / CoinGecko / Fear&Greed가 같은 캐싱 로직을 복붙해 썼다.
-이 베이스는 다음을 한 곳에 모은다:
+외부 API 클라이언트(Alpha Vantage, CoinGecko 등)가 함께 쓰는 다음을 한 곳에 모은다:
   - requests.Session (커넥션 풀)
   - 파일 기반 TTL 캐시
   - User-Agent 헤더
@@ -41,7 +40,7 @@ class BaseAPIClient:
     """HTTP 외부 API 호출용 공통 베이스.
 
     하위 클래스는 보통 base_url을 오버라이드하고 도메인 메서드를 추가한다.
-    캐시 TTL은 호출 사이트에서 결정한다 (시장 심리는 6h, 시세는 5분 등).
+    캐시 TTL은 호출 사이트에서 결정한다 (data/cache_ttl.py — 공시는 12h, 시세는 5분 등).
     """
 
     DEFAULT_USER_AGENT = "TuSimReport/1.0"
