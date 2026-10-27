@@ -20,12 +20,15 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from lab.runner import RunRecord, run_once, save_record  # noqa: E402
-from lab.topologies import TOPOLOGY_RUNNERS  # noqa: E402
+from utils.redaction import install_record_redaction  # noqa: E402
 from utils.time import kst_isoformat  # noqa: E402
+
+if TYPE_CHECKING:
+    from lab.runner import RunRecord
 
 DEFAULT_STOCKS = "005930:삼성전자"
 
@@ -59,6 +62,12 @@ def summary_table(records: list[RunRecord]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # lab imports every tool and data client, some of which log at import time. Nothing configures
+    # logging here, so WARNING records reach stderr through logging.lastResort: mask them first.
+    install_record_redaction()
+    from lab.runner import run_once, save_record
+    from lab.topologies import TOPOLOGY_RUNNERS
+
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
