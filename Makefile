@@ -38,7 +38,7 @@ format:  ## ruff format + ruff check --fix
 # ---- tests -------------------------------------------------------------------
 
 test:  ## pytest with coverage gate from CI
-	pytest -q --cov=core --cov=ui --cov=utils --cov=data --cov=agents --cov-fail-under=30
+	pytest -q --cov=core --cov=ui --cov=utils --cov=data --cov=agents --cov-fail-under=45
 
 cov:  ## coverage with line-level missing report
 	pytest -q --cov=core --cov=ui --cov=utils --cov=data --cov=agents --cov-report=term-missing
