@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """
-Enhanced Korean Sentiment Analysis Agent
-Naver News API + Tavily Search API 듀얼 소스 기반
+Korean Sentiment Analysis Agent
 
-감정 분석:
-- Naver News API: 한국 로컬 뉴스 (50개)
-- Tavily Search API: 글로벌 뉴스 + AI 필터링 (10개)
-- 듀얼 소스 통합으로 편향성 감소 및 커버리지 확장
-- LLM 기반 종합 감성 분석 및 토픽 추출
+Tavily 검색으로 받은 기사 제목과 본문 일부를 도구가 그대로 돌려주고, 여론 판단은
+에이전트 LLM이 한다. Naver 검색 API는 2026-09-07 시행 약관이 검색 결과의 AI 입력을
+금지하므로 이 분석 경로에서 쓰지 않는다 (docs/API_KEYS.md 4.4).
 """
 
 import logging
 from typing import Any
 
-import requests
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
@@ -22,215 +18,81 @@ from config.settings import settings
 from core.signals import AgentSignal
 from data.tavily_api_client import TavilyNewsClient
 from utils.agent_helpers import create_fallback_message, format_error_message_korean
+from utils.redaction import redact
 from utils.time import kst_isoformat
 
 logger = logging.getLogger(__name__)
 
+MAX_ARTICLES = 10
+MAX_CONTENT_CHARS = 300
+
 
 def get_enhanced_news_sentiment_logic(company_name: str, stock_code: str) -> dict[str, Any]:
-    """
-    향상된 듀얼 소스 뉴스 감정 분석 로직
-    Naver News API + Tavily Search API 통합
-    """
+    """종목 관련 최근 기사를 모아 돌려준다. 감성 판단은 하지 않는다."""
     try:
-        logger.info(f"Enhanced dual-source news sentiment analysis for {company_name} ({stock_code})")
-
-        # 1. Naver News API 데이터 수집
-        naver_data = _fetch_naver_news(company_name)
-
-        # 2. Tavily Search API 데이터 수집
-        tavily_data = _fetch_tavily_news(company_name)
-
-        # 3. 듀얼 소스 통합 및 LLM 분석
-        return _analyze_dual_source_sentiment(company_name, stock_code, naver_data, tavily_data)
+        logger.info(f"News collection for {company_name} ({stock_code})")
+        return _summarize_articles(company_name, stock_code, _fetch_tavily_news(company_name))
 
     except Exception as e:
-        error_msg = format_error_message_korean(e, "뉴스 여론 분석")
+        error_msg = format_error_message_korean(e, "뉴스 수집")
         logger.error(error_msg)
         return create_fallback_message(
             agent_name="Korean Sentiment Agent",
             company_name=company_name,
             stock_code=stock_code,
             reason=error_msg,
-            data_source="Naver News API, Tavily Search",
+            data_source="Tavily Search",
         )
 
 
 @tool
 def get_enhanced_news_sentiment(company_name: str, stock_code: str) -> dict[str, Any]:
-    """
-    향상된 듀얼 소스 뉴스 감정 분석
-    Naver News API + Tavily Search API 통합
-    """
+    """종목 관련 최근 기사(제목, 본문 일부, 출처, URL)를 Tavily 검색으로 수집합니다."""
     return get_enhanced_news_sentiment_logic(company_name, stock_code)
 
 
-def _fetch_naver_news(company_name: str) -> dict[str, Any]:
-    """네이버 뉴스 API 데이터 수집"""
-    try:
-        client_id = settings.naver_client_id
-        client_secret = settings.naver_client_secret
-
-        if not client_id or not client_secret:
-            return {"error": "Naver API 자격 증명이 설정되지 않았습니다.", "items": []}
-
-        # 종목명을 그대로 사용
-        search_query = company_name
-
-        url = "https://openapi.naver.com/v1/search/news.json"
-        headers = {
-            "X-Naver-Client-Id": client_id,
-            "X-Naver-Client-Secret": client_secret,
-        }
-        params = {
-            "query": search_query,
-            "display": 10,  # 3자 전문가 추천: 10개로 통일
-            "sort": "sim",
-        }
-
-        response = requests.get(url, headers=headers, params=params, timeout=10)
-        response.raise_for_status()
-        return response.json()
-
-    except Exception as e:
-        logger.error(f"Naver News API 오류: {str(e)}")
-        return {"error": str(e), "items": []}
-
-
 def _fetch_tavily_news(company_name: str) -> dict[str, Any]:
-    """Tavily Search API 데이터 수집 (투자 전문가 최적화)"""
     try:
         tavily_client = TavilyNewsClient(settings.tavily_api_key)
-        return tavily_client.search_company_news(
-            company_name=company_name,
-            max_results=10,  # 3자 전문가 추천: 10개로 통일
-        )
+        return tavily_client.search_company_news(company_name=company_name, max_results=MAX_ARTICLES)
     except Exception as e:
-        logger.error(f"Tavily Search API 오류: {str(e)}")
-        return {"error": str(e), "news_items": []}
+        reason = redact(str(e))
+        logger.error(f"Tavily Search API 오류: {reason}")
+        return {"error": reason, "news_items": []}
 
 
-def _analyze_dual_source_sentiment(
-    company_name: str, stock_code: str, naver_data: dict, tavily_data: dict
-) -> dict[str, Any]:
-    """듀얼 소스 통합 감정 분석"""
-    try:
-        sentiment_llm = build_llm(temperature=0.0)
+def _summarize_articles(company_name: str, stock_code: str, tavily_data: dict) -> dict[str, Any]:
+    """기사를 잘라 그대로 돌려준다.
 
-        # 3자 전문가 추천: 균형잡힌 분석 데이터 (각 10개씩)
-        naver_texts = []
-        if naver_data.get("items"):
-            naver_texts = [
-                f"[Naver] {item['title']} - {item['description']}"
-                for item in naver_data["items"]  # 10개 전체
-            ]
+    Tavily의 `ai_summary`는 검색 서비스가 생성한 문장이라 원천 데이터로 넘기지 않는다.
+    """
+    items = tavily_data.get("news_items") or []
+    if not items:
+        return {"error": tavily_data.get("error") or "수집된 뉴스 데이터가 없습니다."}
 
-        # Tavily 뉴스 텍스트 준비
-        tavily_texts = []
-        if tavily_data.get("news_items"):
-            tavily_texts = [
-                f"[Tavily] {item['title']} - {item['content'][:200]}"
-                for item in tavily_data["news_items"]  # 10개 전체
-            ]
-
-        # 통합 뉴스 텍스트
-        all_news_texts = naver_texts + tavily_texts
-
-        if not all_news_texts:
-            return {"error": "수집된 뉴스 데이터가 없습니다."}
-
-        # 
-        analysis_prompt = f"""
-다음은 {company_name} 관련 뉴스를 네이버(한국) + Tavily(글로벌) 듀얼 소스에서 수집한 데이터입니다.
-각 뉴스 앞의 [Naver] 또는 [Tavily] 태그로 출처를 구분할 수 있습니다.
-
-[뉴스 데이터]
-{chr(10).join(all_news_texts)}
-
-[분석 요구사항]
-1. 전체적인 감성을 '매우 긍정', '긍정', '중립', '부정', '매우 부정' 중 하나로 평가
-2. 감성 점수를 -1.0 (매우 부정) ~ 1.0 (매우 긍정) 사이 수치로 계산
-3. 핵심 토픽 3가지를 키워드로 요약
-4. 가장 긍정적/부정적 헤드라인 각 1개씩 선정
-5. 데이터 소스별 편향성 고려 (한국 vs 글로벌 시각)
-
-[출력 형식]
-- Overall Sentiment: [평가 결과]
-- Sentiment Score: [점수]
-- Key Topics: [토픽1, 토픽2, 토픽3]
-- Most Positive Headline: [헤드라인]
-- Most Negative Headline: [헤드라인]
-- Source Balance: [네이버와 Tavily 데이터 균형성 평가]
-"""
-
-        # LLM 분석 실행
-        llm_response = sentiment_llm.invoke(analysis_prompt)
-
-        # 응답 파싱
-        lines = llm_response.content.strip().split("\n")
-        parsed_result = {}
-        for line in lines:
-            if ":" in line:
-                key, value = line.split(":", 1)
-                parsed_result[key.strip()] = value.strip()
-
-        # 3자 전문가 추천: 완전한 뉴스 소스 투명성 (총 20개)
-        news_sources = []
-
-        # 네이버 뉴스 소스 (10개 - 완전 공개)
-        if naver_data.get("items"):
-            for item in naver_data["items"]:
-                news_sources.append(
-                    {
-                        "title": item.get("title", "").replace("<b>", "").replace("</b>", ""),
-                        "url": item.get("link", ""),
-                        "source": "[Naver] 네이버 뉴스 API",
-                        "pub_date": item.get("pubDate", ""),
-                        "type": "naver",
-                    }
-                )
-
-        # Tavily 뉴스 소스 (10개 - 완전 공개)
-        if tavily_data.get("news_items"):
-            for item in tavily_data["news_items"]:
-                # 
-                source_domain = item.get("source", "Unknown")
-                news_sources.append(
-                    {
-                        "title": item.get("title", ""),
-                        "url": item.get("url", ""),
-                        "source": f"[Tavily] {source_domain}",
-                        "score": item.get("score", 0),
-                        "type": "tavily",
-                    }
-                )
-
-        return {
-            "status": "success",
-            "company_name": company_name,
-            "stock_code": stock_code,
-            "data_sources": {
-                "naver_news_count": len(naver_data.get("items", [])),
-                "tavily_news_count": len(tavily_data.get("news_items", [])),
-                "total_analyzed": len(all_news_texts),
-            },
-            "sentiment_analysis": parsed_result,
-            "news_sources": news_sources,
-            "tavily_ai_summary": tavily_data.get("ai_summary", ""),
-            "data_source": "Enhanced Dual-Source: Naver News API + Tavily Search API",
-            "last_updated": kst_isoformat(),
+    articles = [
+        {
+            "article_number": i + 1,
+            "title": item.get("title", ""),
+            "content": (item.get("content") or "")[:MAX_CONTENT_CHARS],
+            "source": item.get("source", ""),
+            "url": item.get("url", ""),
         }
+        for i, item in enumerate(items[:MAX_ARTICLES])
+    ]
+    return {
+        "status": "success",
+        "company_name": company_name,
+        "stock_code": stock_code,
+        "data_source": "Tavily Search API",
+        "search_query": tavily_data.get("search_query", ""),
+        "total_articles": len(articles),
+        "articles": articles,
+        "last_updated": kst_isoformat(),
+    }
 
-    except Exception as e:
-        logger.error(f"듀얼 소스 감정 분석 오류: {str(e)}")
-        return {"error": str(e)}
 
-
-# 도구 목록 - 향상된 듀얼 소스 버전
 sentiment_tools = [get_enhanced_news_sentiment]
-
-# 기존 함수명과의 호환성을 위한 별칭
-get_naver_news_sentiment = get_enhanced_news_sentiment
 
 
 def create_sentiment_agent():
@@ -240,11 +102,11 @@ def create_sentiment_agent():
     prompt = (
         "당신은 뉴스와 시장 심리를 분석하는 감정 분석 전문가입니다. "
         "일반 투자자들이 쉽게 이해할 수 있도록 현재 시장의 분위기와 여론을 분석해주세요.\n\n"
-        "먼저 `get_enhanced_news_sentiment` 도구를 사용해서 최신 뉴스 감정 분석 데이터를 수집한 후, "
-        "다음과 같이 친근하고 이해하기 쉽게 설명해주세요:\n\n"
+        "먼저 `get_enhanced_news_sentiment` 도구로 최근 기사(제목, 본문 일부, 출처)를 받은 뒤, "
+        "기사 내용만 근거로 다음과 같이 친근하고 이해하기 쉽게 설명해주세요:\n\n"
         "1. 현재 이 종목에 대한 뉴스 분위기가 어떤지 간단히 요약해주세요\n"
         "   - 전체적으로 긍정적인지, 부정적인지, 중립적인지\n"
-        "   - 감정 점수를 쉬운 말로 설명해주세요\n\n"
+        "   - 그렇게 판단한 근거가 된 기사 번호를 함께 적어주세요\n\n"
         "2. 어떤 종류의 뉴스가 많은지 알려주세요\n"
         "   - 가장 긍정적인 뉴스는 어떤 내용인지\n"
         "   - 가장 우려되는 뉴스는 어떤 내용인지\n"
@@ -257,7 +119,7 @@ def create_sentiment_agent():
         "   - 뉴스의 신뢰성은 어떤지\n"
         "   - 감정적으로 과도하게 반응하지 않으려면 어떻게 해야 하는지\n\n"
         "5. 📰 분석에 사용된 뉴스 출처를 투명하게 공개해주세요\n"
-        "   - 상위 5-10개 뉴스의 제목과 발행일을 간단히 나열해주세요\n"
+        "   - 상위 5-10개 뉴스의 제목과 출처를 간단히 나열해주세요\n"
         "   - 어떤 언론사의 뉴스가 주로 사용되었는지 알려주세요\n\n"
         "전문 용어보다는 쉬운 말로 설명해주시고, 숫자나 점수를 제시할 때는 "
         "그것이 실제로 어떤 의미인지 구체적인 예시와 함께 설명해주세요. "
@@ -279,8 +141,8 @@ if __name__ == "__main__":
     company_name = "삼성전자"
     stock_code = "005930"
 
-    print(f"--- Testing Sentiment Analysis for {company_name} ---")
-    result = get_naver_news_sentiment(company_name, stock_code)
+    print(f"--- Testing news collection for {company_name} ---")
+    result = get_enhanced_news_sentiment_logic(company_name, stock_code)
 
     import json
 
