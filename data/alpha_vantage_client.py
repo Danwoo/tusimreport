@@ -93,6 +93,10 @@ class AlphaVantageClient(BaseAPIClient):
         """
         글로벌 주요 지수 추종 ETF 현황 조회 (SPY, QQQ, DIA)
 
+        시세는 종목별 키로 캐시한다. 한 종목이 실패해도 받은 종목은 다음 실행에서
+        캐시로 재사용하고 실패한 종목만 다시 요청한다(무료 한도 25회/일). 실패는
+        캐시하지 않는다. 한도 초과 응답을 받으면 남은 종목은 요청하지 않는다.
+
         Returns:
             {
                 "sp500": {"symbol": "SPY", "price": 450.12, "change_percent": 0.5, "available": True, ...},
@@ -100,27 +104,31 @@ class AlphaVantageClient(BaseAPIClient):
                            "available": False, "reason": "..."},
                 "dow": {...},
                 "available": True,  # 하나라도 받았으면 True
-                "timestamp": "2025-11-17T10:30:00+09:00"
+                "timestamp": "2025-11-17T10:30:00+09:00"  # 받은 시세 중 가장 오래된 조회 시각
             }
         """
-        cache_key = "global_market_overview"
-        cached = self.get_cached(cache_key, max_age_hours=GLOBAL_QUOTE_HOURS)
-        if isinstance(cached, dict) and self._is_complete_overview(cached):
-            return cached
+        result: dict[str, Any] = {}
+        skip_reason = None if self.api_key else NO_KEY_REASON
+        for key, symbol, _label in INDEX_ETFS:
+            cached = self._cached_quote(symbol)
+            if cached is not None:
+                result[key] = cached
+            elif skip_reason is not None:
+                result[key] = self._unavailable_quote(symbol, skip_reason)
+            else:
+                result[key], error = self._request_quote(symbol)
+                if isinstance(error, RateLimitError):
+                    skip_reason = (
+                        f"{_unavailable_reason(error)} (앞선 요청이 한도 초과 응답을 받아 요청하지 않음)"
+                    )
 
-        if not self.api_key:
-            return self._unavailable_overview(NO_KEY_REASON)
-
-        result: dict[str, Any] = {key: self._get_quote(symbol) for key, symbol, _label in INDEX_ETFS}
         result["available"] = any(result[key]["available"] for key, _s, _l in INDEX_ETFS)
-        result["timestamp"] = kst_isoformat()
+        # Quotes may come from cache; report when the oldest one was actually fetched.
+        fetched = [result[key].get("fetched_at") for key, _s, _l in INDEX_ETFS if result[key]["available"]]
+        result["timestamp"] = min((f for f in fetched if f), default=kst_isoformat())
         if not result["available"]:
             result["reason"] = result[INDEX_ETFS[0][0]].get("reason", "")
             result["note"] = f"⚠️ {result['reason']}"
-
-        # 부분 실패(예: 두 번째 호출에서 한도 초과)를 캐시하면 실패가 TTL 동안 데이터로 남는다.
-        if self._is_complete_overview(result):
-            self.save_cache(cache_key, result)
         return result
 
     def _get_quote(self, symbol: str) -> dict[str, Any]:
@@ -131,11 +139,26 @@ class AlphaVantageClient(BaseAPIClient):
             {"symbol": "SPY", "price": 450.12, "change_percent": 0.5, "available": True, ...}
             또는 {"symbol": "SPY", "price": None, "change_percent": None, "available": False, "reason": str}
         """
+        quote, _error = self._request_quote(symbol)
+        return quote
+
+    def _request_quote(self, symbol: str) -> tuple[dict[str, Any], Exception | None]:
+        """GLOBAL_QUOTE 한 건을 요청해 성공하면 종목별 캐시에 쓴다. 실패는 (unavailable 항목, 예외)."""
         try:
-            return self._fetch_quote(symbol)
+            quote = self._fetch_quote(symbol)
         except Exception as e:
             logger.warning(f"Quote 조회 실패 ({symbol}): {redact(str(e))}")
-            return self._unavailable_quote(symbol, _unavailable_reason(e))
+            return self._unavailable_quote(symbol, _unavailable_reason(e)), e
+        self.save_cache(self._quote_cache_key(symbol), quote)
+        return quote, None
+
+    def _cached_quote(self, symbol: str) -> dict[str, Any] | None:
+        cached = self.get_cached(self._quote_cache_key(symbol), max_age_hours=GLOBAL_QUOTE_HOURS)
+        return cached if self._is_usable_quote(cached) else None
+
+    @staticmethod
+    def _quote_cache_key(symbol: str) -> str:
+        return f"global_quote_{symbol}"
 
     def _fetch_quote(self, symbol: str) -> dict[str, Any]:
         """GLOBAL_QUOTE 한 건. 한도 초과·스키마 불일치·HTTP 실패는 TusimError로 raise."""
@@ -160,6 +183,7 @@ class AlphaVantageClient(BaseAPIClient):
             "volume": _to_int(quote.get("06. volume")),
             "latest_trading_day": quote.get("07. latest trading day") or None,
             "available": True,
+            "fetched_at": kst_isoformat(),
         }
 
     def get_exchange_rate(self, from_currency: str = "USD", to_currency: str = "KRW") -> dict[str, Any]:
@@ -222,28 +246,16 @@ class AlphaVantageClient(BaseAPIClient):
         }
 
     @staticmethod
-    def _is_complete_overview(data: Any) -> bool:
-        """세 ETF 모두 실제 가격을 가진 새 형식 결과인지. 구버전 캐시(0.0 가격)는 거른다."""
+    def _is_usable_quote(data: Any) -> bool:
+        """실제 가격을 가진 성공 시세인지. 형식이 다르거나 가격이 0인 캐시는 거른다."""
         if not isinstance(data, dict) or data.get("available") is not True:
             return False
-        for key, _symbol, _label in INDEX_ETFS:
-            entry = data.get(key)
-            if not isinstance(entry, dict) or entry.get("available") is not True or not entry.get("price"):
-                return False
-        return True
+        price = data.get("price")
+        return isinstance(price, int | float) and not isinstance(price, bool) and price > 0
 
     @staticmethod
     def _unavailable_quote(symbol: str, reason: str) -> dict[str, Any]:
         return {"symbol": symbol, "price": None, "change_percent": None, "available": False, "reason": reason}
-
-    def _unavailable_overview(self, reason: str) -> dict[str, Any]:
-        result: dict[str, Any] = {
-            key: self._unavailable_quote(symbol, reason) for key, symbol, _label in INDEX_ETFS
-        }
-        result.update(
-            {"available": False, "reason": reason, "note": f"⚠️ {reason}", "timestamp": kst_isoformat()}
-        )
-        return result
 
     @staticmethod
     def _unavailable_exchange_rate(from_currency: str, to_currency: str, reason: str) -> dict[str, Any]:

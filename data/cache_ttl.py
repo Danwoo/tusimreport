@@ -6,7 +6,7 @@
 기준:
 - 시세성 데이터(실시간 호가/체결가): 분 단위 — 너무 오래 캐시하면 stale
 - 일별 지표(PER/PBR/시가총액): 거래일 1회면 충분 — 장 마감 후엔 거의 안 변함
-- 시장 심리/지수(Fear&Greed/지수 전체): 수 시간 — CNN이 그 빈도로 업데이트
+- 시장 전체 요약(암호화폐 시총/도미넌스): 시간 단위
 - 거시 경제(BOK/DART): 일/주 단위 — 통계 게시 주기에 맞춤
 - 정적 메타(기업 코드/섹터 매핑): 거의 안 바뀜 → 일 단위
 """
@@ -26,10 +26,7 @@ GLOBAL_QUOTE_HOURS: Final[float] = 1.0
 # Alpha Vantage 환율: 1시간 단위 변동이 의미 있는 수준.
 FX_RATE_HOURS: Final[float] = 1.0
 
-# ---- 시장 심리/지수 ----
-
-# CNN Fear & Greed Index: 하루에 몇 번 업데이트되므로 6시간이면 fresh.
-FEAR_GREED_HOURS: Final[float] = 6.0
+# ---- 시장 전체 요약 ----
 
 # CoinGecko global market summary: 시간 단위로만 의미 있음.
 CRYPTO_GLOBAL_HOURS: Final[float] = 1.0
