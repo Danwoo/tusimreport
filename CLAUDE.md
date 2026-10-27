@@ -57,9 +57,10 @@ main.py    Streamlit entry point
   failures log warning, never raise. TTLs live in `data/cache_ttl.py`.
   LRU eviction at `MAX_CACHE_ENTRIES=256`. Cache root overridable
   with `TUSIM_CACHE_DIR` env var.
-- **mypy strict is incremental.** Only the 8 modules listed in
-  `pyproject.toml`'s overrides are strict. The rest is loose-tier on
-  purpose — do not add untyped code to the strict list.
+- **mypy is incremental.** The 8 modules listed in `pyproject.toml`'s
+  first override get `disallow_untyped_defs`, `warn_return_any` and
+  `strict_equality`; the rest is loose-tier on purpose. Do not add
+  untyped code to that list.
 - **Tools return data, not analysis.** No LLM call inside a `@tool`
   function. A hidden call is invisible to the agent and to run metrics,
   and its output (e.g. a "sentiment score") looks like source data to
