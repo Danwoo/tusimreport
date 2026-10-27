@@ -31,6 +31,9 @@ _META_KEYS = {
     "note",
     "suggestion",
     "reason_ko",
+    "reason",
+    "summary",
+    "unavailable_data",
     "missing_apis",
 }
 
@@ -55,15 +58,16 @@ def _parse(content: Any) -> Any:
 
 
 def _has_payload(value: Any) -> bool:
-    if value is None:
+    # Flags such as available=False describe the data; they are not data.
+    if value is None or isinstance(value, bool):
         return False
-    if isinstance(value, bool):
-        return True
     if isinstance(value, int | float):
         return True
     if isinstance(value, str):
         return bool(value.strip())
     if isinstance(value, dict):
+        if value.get("available") is False:
+            return False
         return any(_has_payload(v) for k, v in value.items() if k not in _META_KEYS)
     if isinstance(value, list | tuple):
         return any(_has_payload(v) for v in value)

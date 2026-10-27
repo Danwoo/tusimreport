@@ -15,7 +15,15 @@ from core.agent_status import classify_tool_output, data_status, summarize_tool_
         ('{"error": "ECOS API 키 미설정"}', (True, False)),
         ('{"status": "all_failed", "indicators": {}}', (True, False)),
         ('{"status": "success", "items": [], "stock_code": "005930"}', (False, False)),
-        ('{"usd_krw": null, "available": false, "note": "unavailable"}', (False, True)),
+        ('{"usd_krw": null, "available": false, "note": "unavailable"}', (False, False)),
+        (
+            '{"sector": {"available": false, "reason": "휴장일 지표 없음"}, "summary": "업종 비교 데이터 없음"}',
+            (False, False),
+        ),
+        (
+            '{"sector": {"available": false, "reason": "x"}, "market_cap": {"available": true, "rank": 1}}',
+            (False, True),
+        ),
         ("오류: 데이터를 가져올 수 없습니다", (True, False)),
         ("삼성전자 최근 뉴스 3건", (False, True)),
     ],

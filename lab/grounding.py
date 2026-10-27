@@ -31,6 +31,11 @@ _NUMBER = re.compile(
 )
 _SOURCE_NUMBER = re.compile(r"^\s*(-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*(%|조|억|만)?\s*(?:원)?\s*$")
 
+# Text our own code writes into tool outputs (formatted summaries, failure reasons). Its numbers
+# are either copies of structured fields or labels ("24시간", "S&P 500"), not source data, and
+# counting them would let an invented report number match by accident.
+_GENERATED_TEXT_KEYS = frozenset({"summary", "reason", "note", "error", "message", "unavailable_data"})
+
 
 @dataclass
 class NumberMention:
@@ -79,7 +84,7 @@ def extract_report_numbers(text: str, stock_code: str | None = None) -> list[Num
 
 
 def collect_source_numbers(outputs: Iterable[Any]) -> list[float]:
-    """도구 결과(dict/list/문자열)에 들어 있는 모든 숫자를 모은다."""
+    """도구 결과(dict/list/문자열)에 들어 있는 숫자를 모은다. 코드가 만든 요약·사유 문구는 뺀다."""
     values: list[float] = []
 
     def visit(node: Any) -> None:
@@ -99,8 +104,9 @@ def collect_source_numbers(outputs: Iterable[Any]) -> list[float]:
                     scale = _UNIT_SCALE.get(inner.group("unit") or "", 1.0)
                     values.append(float(inner.group("num").replace(",", "")) * scale)
         elif isinstance(node, dict):
-            for value in node.values():
-                visit(value)
+            for key, value in node.items():
+                if key not in _GENERATED_TEXT_KEYS:
+                    visit(value)
         elif isinstance(node, list | tuple):
             for value in node:
                 visit(value)
