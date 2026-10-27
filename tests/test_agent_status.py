@@ -57,3 +57,11 @@ def test_data_status_levels() -> None:
         data_status(summarize_tool_messages([ToolMessage(content='{"v": 2}', tool_call_id="a")]))
         == "sufficient"
     )
+
+
+def test_hit_step_limit_reads_only_the_last_ai_message() -> None:
+    from core.agent_status import STEP_LIMIT_TEXT, hit_step_limit
+
+    assert hit_step_limit([AIMessage(content="분석"), AIMessage(content=STEP_LIMIT_TEXT)])
+    assert not hit_step_limit([AIMessage(content=STEP_LIMIT_TEXT), AIMessage(content="최종 분석")])
+    assert not hit_step_limit([ToolMessage(content="x", tool_call_id="1")])
