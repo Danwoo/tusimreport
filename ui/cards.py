@@ -12,6 +12,7 @@ XSS 방어:
 from __future__ import annotations
 
 import html
+import math
 from collections.abc import Iterable
 from typing import Any
 
@@ -151,6 +152,26 @@ def _confidence_class(confidence: int) -> str:
     return "confidence-very-low"
 
 
+NO_DATA = "데이터 없음"
+
+
+def _as_number(value: Any) -> float | None:
+    """숫자로 읽을 수 있는 유한한 값만. None·문자열·NaN은 데이터 없음으로 본다."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
+def _won(value: float | None) -> str:
+    return f"{value:,.0f}원" if value is not None else NO_DATA
+
+
+def _change_text(price: float | None, current: float | None, label: str) -> str:
+    if price is None or not current:
+        return ""
+    return f"{(price - current) / current * 100:+.1f}% {label}"
+
+
 def _rr_label(ratio: float) -> str:
     if ratio >= 2.0:
         return "Very Good"
@@ -168,21 +189,18 @@ def create_investment_opinion_card(opinion_data: dict[str, Any]) -> str:
     if opinion not in ("BUY", "HOLD", "SELL"):
         opinion = "HOLD"
 
-    try:
-        confidence = int(opinion_data.get("confidence", 50))
-    except (TypeError, ValueError):
-        confidence = 50
-    confidence = max(0, min(100, confidence))
+    confidence = _as_number(opinion_data.get("confidence"))
+    confidence_pct = int(max(0.0, min(100.0, confidence))) if confidence is not None else None
 
     reasoning = opinion_data.get("reasoning", "")
     key_positives = opinion_data.get("key_positives", []) or []
     key_risks = opinion_data.get("key_risks", []) or []
     timeframe = opinion_data.get("timeframe", "중기(3-6개월)")
 
-    current_price = opinion_data.get("current_price", 0) or 0
-    target_price = opinion_data.get("target_price", 0) or 0
-    stop_loss = opinion_data.get("stop_loss", 0) or 0
-    risk_reward_ratio = opinion_data.get("risk_reward_ratio", 0) or 0
+    current_price = _as_number(opinion_data.get("current_price"))
+    target_price = _as_number(opinion_data.get("target_price"))
+    stop_loss = _as_number(opinion_data.get("stop_loss"))
+    risk_reward_ratio = _as_number(opinion_data.get("risk_reward_ratio"))
     split_buy_strategy = opinion_data.get("split_buy_strategy", []) or []
 
     opinion_config = {
@@ -191,7 +209,10 @@ def create_investment_opinion_card(opinion_data: dict[str, Any]) -> str:
         "SELL": {"text": "SELL", "class": "opinion-sell"},
     }
     cfg = opinion_config[opinion]
-    confidence_class = _confidence_class(confidence)
+    confidence_class = (
+        _confidence_class(confidence_pct) if confidence_pct is not None else "confidence-very-low"
+    )
+    confidence_text = f"{confidence_pct}%" if confidence_pct is not None else NO_DATA
 
     positives_html = "".join(
         f'<div class="factor-item factor-positive"><span class="factor-text">{_esc(p)}</span></div>'
@@ -202,11 +223,12 @@ def create_investment_opinion_card(opinion_data: dict[str, Any]) -> str:
         for r in key_risks[:3]
     )
 
-    upside_pct = ((target_price - current_price) / current_price * 100) if current_price else 0
-    downside_pct = ((stop_loss - current_price) / current_price * 100) if current_price else 0
+    upside_text = _change_text(target_price, current_price, "upside")
+    downside_text = _change_text(stop_loss, current_price, "downside")
 
-    split_rows = "".join(
-        f"""
+    split_rows = (
+        "".join(
+            f"""
             <tr>
                 <td style="font-weight: 600;">{_esc(item.get("order", ""))}</td>
                 <td>{_esc(item.get("price_range", ""))}원</td>
@@ -214,7 +236,9 @@ def create_investment_opinion_card(opinion_data: dict[str, Any]) -> str:
                 <td>{_esc(item.get("timing", ""))}</td>
             </tr>
         """
-        for item in split_buy_strategy
+            for item in split_buy_strategy
+        )
+        or f'<tr><td colspan="4" style="color: #9ca3af;">{NO_DATA}</td></tr>'
     )
 
     safe_reasoning = _esc(reasoning).replace("\n", "<br>")
@@ -230,11 +254,11 @@ def create_investment_opinion_card(opinion_data: dict[str, Any]) -> str:
             <div class="confidence-section">
                 <div class="confidence-label">
                     <span>Confidence Score</span>
-                    <span style="font-weight: 700; color: #334155;">{confidence}%</span>
+                    <span style="font-weight: 700; color: #334155;">{confidence_text}</span>
                 </div>
                 <div class="confidence-bar">
-                    <div class="confidence-fill {confidence_class}" style="width: {confidence}%;">
-                        {confidence}%
+                    <div class="confidence-fill {confidence_class}" style="width: {confidence_pct or 0}%;">
+                        {confidence_text}
                     </div>
                 </div>
             </div>
@@ -265,27 +289,27 @@ def create_investment_opinion_card(opinion_data: dict[str, Any]) -> str:
             <div class="price-grid">
                 <div class="price-item">
                     <div class="price-label">Current Price</div>
-                    <div class="price-value">{current_price:,.0f}원</div>
+                    <div class="price-value">{_won(current_price)}</div>
                 </div>
                 <div class="price-item">
                     <div class="price-label">Target Price</div>
-                    <div class="price-value target">{target_price:,.0f}원</div>
+                    <div class="price-value target">{_won(target_price)}</div>
                     <div style="font-size: 0.75rem; color: #6b7280; margin-top: 0.3rem;">
-                        +{upside_pct:.1f}% upside
+                        {upside_text}
                     </div>
                 </div>
                 <div class="price-item">
                     <div class="price-label">Stop Loss</div>
-                    <div class="price-value stop">{stop_loss:,.0f}원</div>
+                    <div class="price-value stop">{_won(stop_loss)}</div>
                     <div style="font-size: 0.75rem; color: #6b7280; margin-top: 0.3rem;">
-                        {downside_pct:.1f}% downside
+                        {downside_text}
                     </div>
                 </div>
                 <div class="price-item">
                     <div class="price-label">Risk/Reward Ratio</div>
-                    <div class="price-value ratio">{risk_reward_ratio:.1f}</div>
+                    <div class="price-value ratio">{f"{risk_reward_ratio:.1f}" if risk_reward_ratio is not None else NO_DATA}</div>
                     <div style="font-size: 0.75rem; color: #6b7280; margin-top: 0.3rem;">
-                        {_rr_label(risk_reward_ratio)}
+                        {_rr_label(risk_reward_ratio) if risk_reward_ratio is not None else ""}
                     </div>
                 </div>
             </div>
@@ -308,7 +332,7 @@ def create_investment_opinion_card(opinion_data: dict[str, Any]) -> str:
 
         <div style="margin-top: 1.5rem; padding: 1rem; background: #fef3c7; border-radius: 8px; border-left: 4px solid #f59e0b;">
             <p style="margin: 0; color: #92400e; font-size: 0.85rem; line-height: 1.5;">
-                <strong>Disclaimer:</strong> This opinion is generated by AI based on 8 expert agent analyses and is for reference only,
+                <strong>Disclaimer:</strong> This opinion is generated by AI from the expert analyses that had data and is for reference only,
                 not investment advice. Final investment decisions should be made at your own discretion and responsibility.
             </p>
         </div>
