@@ -105,8 +105,9 @@ main.py    Streamlit entry point
   ships pre-releases (mplfinance) names one in its `requirements.in`
   specifier. CI installs `requirements*.lock`; `tests/test_smoke.py`
   fails on unexpected pre-release pins.
-- ruff ≥ 0.17 also formats Python code blocks inside Markdown, so a doc
-  edit can fail `ruff format --check`.
+- ruff ≥ 0.17 also formats Python code blocks inside Markdown. The dev
+  lock pins 0.15.x; moving it forward can fail `ruff format --check` on
+  docs.
 - OpenDART `reprt_code`: 11011 is the annual report (사업보고서), 11014
   is Q3. Use `data.dart_api_client.ANNUAL_REPORT`. `fnlttSinglAcnt`
   mixes consolidated (CFS) and separate (OFS) rows with the same
@@ -139,10 +140,10 @@ with one request. Key issuance: `docs/API_KEYS.md`.
 
 ## Claude Code cloud sessions
 
-`.claude/hooks/session-start.sh` installs `.venv` from `requirements.txt`
-+ `requirements-dev.txt` and puts it on `PATH`. Project skills:
-`env-check` (key / LLM status) and `ci-check` (local CI gate — CI only
-runs for `main` and PRs to `main`).
+`.claude/hooks/session-start.sh` installs `.venv` from `requirements.lock`
++ `requirements-dev.lock` (the CI pins) and puts it on `PATH`. Project
+skills: `env-check` (key / LLM status) and `ci-check` (local CI gate — CI
+only runs for `main` and PRs to `main`).
 
 ## Common commands
 
