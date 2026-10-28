@@ -111,9 +111,8 @@ jobs:
         run: pip install pip-audit
 
       - name: Audit installed dependencies for known CVEs
-        # requirements.txt를 그대로 감사. lockfile이 없어 transitive까지는
-        # 못 잡지만 직접 의존성의 알려진 취약점은 잡힌다.
-        run: pip-audit -r requirements.txt --strict || true
+        # requirements.lock을 감사한다. transitive 의존성까지 고정 버전 그대로 본다.
+        run: pip-audit -r requirements.lock --strict || true
 
   secret-scan:
     name: Secret scan

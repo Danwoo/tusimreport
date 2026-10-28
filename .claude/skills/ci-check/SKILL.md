@@ -5,7 +5,7 @@ description: Run the same lint, format, type-check and test gates as .github/wor
 
 # Local CI gate
 
-Run from the repo root. The SessionStart hook installs `.venv` from `requirements.txt` + `requirements-dev.txt`, the same files CI uses (not `requirements.lock`).
+Run from the repo root. The SessionStart hook installs `.venv` from `requirements.lock` + `requirements-dev.lock`, the same pins as CI's lock jobs. CI also runs one py3.11 job with `requirements.txt` (the Dockerfile's install); reproduce it in a separate venv only when `requirements.txt` changes.
 
 ```bash
 .venv/bin/ruff check .
@@ -21,5 +21,5 @@ LLM_BASE_URL= LLM_MODEL= LLM_API_KEY= LLM_MAX_REQUESTS_PER_MINUTE= OPENAI_API_KE
 
 - Tests run with keys blanked because CI has none; a key in the session environment or in `.env` must not change test outcomes. Assign empty values rather than `env -u`: `load_dotenv()` and pydantic-settings refill unset variables from `.env`, but never override a variable that exists. Blank `KRX_ID`/`KRX_PW` also stop pykrx from logging in to data.krx.co.kr at import.
 - If the mypy module list or the coverage threshold changes in `ci.yml`, follow `ci.yml`.
-- `ruff format --check` also formats Python code blocks inside Markdown files (ruff ≥ 0.17), so a doc edit can fail the gate — fix with `.venv/bin/ruff format <file>`.
+- The dev lock pins ruff 0.15.x. ruff ≥ 0.17 also formats Python code blocks inside Markdown files, so moving the pin forward can fail the format gate on docs — fix with `.venv/bin/ruff format <file>`.
 - Report the exact command output when a gate fails; do not summarise a failure as a pass.

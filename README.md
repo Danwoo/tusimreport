@@ -100,11 +100,11 @@ python scripts/run_experiment.py --stocks 005930:삼성전자 --snapshot-mode re
 ## 테스트와 품질 기준
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements.lock -r requirements-dev.lock   # CI와 같은 고정 버전 (= make install)
 pytest
 ```
 
-테스트는 외부 API를 호출하지 않는다. HTTP는 `responses`로 대체하고, 에이전트 그래프 통합 테스트는 정해진 순서로 도구를 부르는 가짜 LLM을 쓴다. CI(GitHub Actions)는 Python 3.11과 3.12에서 다음을 확인한다.
+테스트는 외부 API를 호출하지 않는다. HTTP는 `responses`로 대체하고, 에이전트 그래프 통합 테스트는 정해진 순서로 도구를 부르는 가짜 LLM을 쓴다. CI(GitHub Actions)는 Python 3.11과 3.12에서 lock 파일로 설치한 뒤 다음을 확인한다. Docker 이미지와 같은 `requirements.txt` 설치도 3.11에서 한 번 더 돌린다.
 
 - ruff lint와 포맷
 - 핵심 8개 모듈의 mypy 타입 검사 (타입 표기 없는 함수 금지, `Any` 반환 경고)

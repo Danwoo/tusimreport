@@ -1,9 +1,8 @@
 # Developer / CI tooling.
 #
 # Separate from requirements.in so the production image does not need them.
-# Install with:
-#   pip install -r requirements-dev.txt
-# (or pip install -r requirements.txt -r requirements-dev.txt)
+# Install with the CI pins (= make install):
+#   pip install -r requirements.lock -r requirements-dev.lock
 #
 # Regenerate the pinned dev lockfile (requirements-dev.lock) with:
 #   make lock-dev
